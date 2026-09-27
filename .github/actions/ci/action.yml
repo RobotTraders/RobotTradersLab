@@ -1,0 +1,61 @@
+name: Engine Checks
+description: The checks every change to the engine passes, run from the directory holding its pyproject.toml.
+
+inputs:
+  directory:
+    description: The directory holding the engine's pyproject.toml and uv.lock.
+    required: false
+    default: "."
+  python-version:
+    description: The Python version the checks run under.
+    required: false
+    default: "3.13"
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.0.1
+      with:
+        enable-cache: true
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install Dependencies
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv sync --locked
+
+    - name: Run Formatter Check
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run ruff format --check
+
+    - name: Run Linter
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run ruff check
+
+    - name: Run Static Type Checking
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run mypy
+
+    - name: Run Tests (with coverage)
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run pytest --cov=robottraderslab --cov-report=xml:cov_framework.xml --cov-report=term
+
+    - name: Bandit Security Analysis
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run bandit -c pyproject.toml --recursive src --exclude tests
+
+    - name: CI Smoke Test - Backtest
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run rtlab backtest tests/ma_strategy/ci_smoke_test.toml --no-chart
+
+    - name: CI Smoke Test - LiveBot
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv run rtlab live tests/ma_strategy/ci_smoke_test.toml

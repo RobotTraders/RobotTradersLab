@@ -1,0 +1,38 @@
+//@version=6
+strategy("Test Lab simple btc", overlay=true, initial_capital=10000, commission_type=strategy.commission.percent, commission_value=0.1, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+// Input parameters
+fastLength = input.int(10, "Fast MA Length", minval=1)
+slowLength = input.int(30, "Slow MA Length", minval=1)
+
+// Separate date inputs
+startYear  = input.int(2024, "Start Year")
+startMonth = input.int(1, "Start Month", minval=1, maxval=12)
+startDay   = input.int(1, "Start Day", minval=1, maxval=31)
+
+endYear    = input.int(2024, "End Year")
+endMonth   = input.int(12, "End Month", minval=1, maxval=12)
+endDay     = input.int(31, "End Day", minval=1, maxval=31)
+
+// Construct timestamp
+startDate = timestamp(startYear, startMonth, startDay, 0, 0)
+endDate   = timestamp(endYear, endMonth, endDay, 23, 59)
+
+inDateRange = (time >= startDate and time <= endDate)
+
+// Moving Averages
+fastMA = ta.sma(close, fastLength)
+slowMA = ta.sma(close, slowLength)
+
+plot(fastMA, "Fast MA", color=color.blue)
+plot(slowMA, "Slow MA", color=color.red)
+
+// Strategy logic
+buySignal = ta.crossover(fastMA, slowMA)
+sellSignal = ta.crossunder(fastMA, slowMA)
+
+if (inDateRange)
+    if (buySignal)
+        strategy.entry("Buy", strategy.long)
+    if (sellSignal)
+        strategy.close("Buy")

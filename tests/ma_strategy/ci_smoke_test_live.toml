@@ -1,0 +1,27 @@
+[live.ohlcv_provider]
+ohlcv_provider = "mock"
+lookback = 100
+
+[live.trading_account]
+exchange = "simulator"
+account_name = "account"
+initial_balance = { USDT = 10000.0 }
+maker_fee_rate = 0.001
+taker_fee_rate = 0.002
+
+[strategy]
+strategy_class = "futures_ma"
+
+[[strategy.profiles]]
+symbol = "BTC/USDT:USDT"
+timeframe = "1m"
+available_balance_ratio = 0.25
+fast_ma_length = 7
+slow_ma_length = 20
+
+[[strategy.profiles]]
+symbol = "SOL/USDT:USDT"
+timeframe = "4h"
+available_balance_ratio = 0.25
+fast_ma_length = 3
+slow_ma_length = 7
