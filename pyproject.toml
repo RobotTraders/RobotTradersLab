@@ -1,0 +1,111 @@
+[project]
+name = "robottraderslab"
+version = "0.1.0"
+description = "Backtesting and live trading engine for algorithmic trading strategies"
+requires-python = ">=3.13,<3.14"
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["trading", "backtesting", "algorithmic-trading", "cryptocurrency"]
+dependencies = [
+  "aiohttp>=3.13.2",
+  "ccxt>=4.5.38",
+  "ipykernel>=7.2.0",
+  "matplotlib>=3.10.8",
+  "httpx>=0.27.0",
+  "numpy>=2.4.2",
+  "pandas>=3.0.0",
+  "pyarrow>=23.0.1",
+  "pydantic>=2.12.5",
+  "pytz>=2025.2",
+  "scipy>=1.17.0",
+  "tqdm>=4.67.3",
+  "pydantic-settings>=2.15.0",
+  "typer>=0.27.1",
+  "lazy-loader>=0.5",
+]
+
+[project.urls]
+Homepage = "https://robottraders.io/lab"
+"Getting started" = "https://robottraders.io/lab/getting-started"
+Documentation = "https://robottraders.io/lab/docs"
+Repository = "https://github.com/RobotTraders/RobotTradersLab"
+
+[project.scripts]
+rtlab = "robottraderslab.cli:main"
+robottraderslab = "robottraderslab.cli:main"
+
+[project.entry-points."robot_traders_lab.exchanges"]
+simulator = "robottraderslab.backtester.simulator:create_simulator"
+
+[project.entry-points."robot_traders_lab.ohlcv_adapters"]
+ccxt = "robottraderslab.ohlcv_provider.ccxt_ohlcv_adapter:CcxtOhlcvAdapter"
+
+[project.entry-points."robot_traders_lab.market_types"]
+futures = "robottraderslab.backtester.market_types:create_futures_market"
+
+[project.entry-points."robot_traders_lab.strategies"]
+futures_ma = "robottraderslab.ma_strategy.futures_ma_strategy:FuturesMAStrategy"
+
+[project.entry-points."robot_traders_lab.indicators"]
+futures_ma = "robottraderslab.ma_strategy.futures_ma_strategy:get_lightweight_chart_indicators"
+
+[build-system]
+requires = ["uv_build>=0.10.4,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+  "bandit[toml]==1.9.4",
+  "mypy==1.20.0",
+  "pandas-stubs==3.0.0.260204",
+  "pytest==9.0.3",
+  "pytest-asyncio==1.3.0",
+  "pytest-cov==7.1.0",
+  "respx==0.23.1",
+  "ruff==0.15.10",
+  "types-pytz==2026.1.1.20260408",
+  "types-requests==2.33.0.20260408",
+]
+
+[tool.coverage.run]
+omit = ["*/tests/*", "*/test_*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires testnet access"]
+addopts = "-m 'not integration'"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+  "ignore:enable_cleanup_closed ignored because.*:DeprecationWarning:aiohttp.connector",
+]
+
+[tool.mypy]
+packages = ["robottraderslab"]
+follow_imports = "normal"
+python_version = "3.13"
+color_output = true
+show_error_codes = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_ignores = true
+ignore_missing_imports = true
+namespace_packages = true
+incremental = true
+cache_dir = ".mypy_cache"
+exclude = '^(build/|dist/|\.venv/|.*tests/)'
+
+[tool.bandit]
+skips = ["B101"]
+
+[tool.ruff]
+target-version = "py313"
+
+[tool.ruff.lint]
+extend-select = ["I", "PT"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["robottraderslab"]

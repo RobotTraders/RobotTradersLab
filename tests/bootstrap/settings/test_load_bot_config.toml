@@ -1,0 +1,3 @@
+[strategy]
+strategy_class = "dummy"
+lookback = 5432

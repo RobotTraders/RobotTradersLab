@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{TITLE}}</title>
+    <style>
+{{CSS}}
+    </style>
+  </head>
+  <body>
+    <div class="panel" id="price-panel">
+      <div class="panel-title">
+        <div class="panel-controls" id="profiles"></div>
+        <div class="panel-controls" id="price-toggles"></div>
+      </div>
+      <div class="chart" id="price"></div>
+    </div>
+    <div class="panel" id="performance-panel">
+      <div class="panel-title">
+        <div class="panel-controls" id="toggles"></div>
+        <div class="key-stats" id="key-stats"></div>
+      </div>
+      <div class="chart" id="performance"></div>
+    </div>
+    <div id="views"></div>
+    <script>
+{{LIBRARY}}
+    </script>
+    <script>
+      window.__CHART__ = {{PAYLOAD}};
+    </script>
+    <script>
+{{CHART_JS}}
+    </script>
+  </body>
+</html>

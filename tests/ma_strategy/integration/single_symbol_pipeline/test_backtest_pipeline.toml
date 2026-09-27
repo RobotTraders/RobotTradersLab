@@ -1,0 +1,24 @@
+[backtest]
+initial_balance = { USDT = 10000 }
+maker_fee_rate = 0.001
+taker_fee_rate = 0.001
+fee_mode = "cost"
+start_date = "2024-01-01"
+end_date = "2024-12-31"
+verbose = false
+
+[backtest.ohlcv_provider]
+ohlcv_provider = "csv"
+file = "data/btc_usdt_binance_2024.csv"
+symbol = "BTC/USDT:USDT"
+timeframe = "1d"
+
+[strategy]
+strategy_class = "futures_ma"
+
+[[strategy.profiles]]
+symbol = "BTC/USDT:USDT"
+timeframe = "1d"
+available_balance_ratio = 1.0
+fast_ma_length = 10
+slow_ma_length = 30
