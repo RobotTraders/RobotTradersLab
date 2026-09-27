@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import cast
 
-from robottraderslab._core import FillDescriber, OHLCVsBySymbol, Symbol
+from robottraderslab._core import FillDescriber, OHLCVRow, OHLCVsBySymbol, Symbol
 from robottraderslab.exceptions import ExchangeRecoverableError, StrategyCriticalError
 from robottraderslab.exchanges import (
     Balance,
@@ -88,61 +88,12 @@ class BaseSimulationEngine(ABC):
     def equity_currency(self) -> Currency: ...
 
     @property
-    @abstractmethod
-    def open_positions(self) -> dict[Symbol, PositionSnapshot]: ...
-
-    @property
     def open_orders(self) -> list[Order]:
         return list(self._order_book)
 
-    def get_balances(self) -> dict[Currency, Balance]:
-        return self._balances.copy()
-
-    def get_equity(self, currency: Currency) -> float:
-        if self._last_tick_snapshot is not None:
-            return self._last_tick_snapshot.get_equity(currency)
-        return self._initial_equity(currency)
-
-    def get_daily_equity_snapshots(self) -> list[EquitySnapshot]:
-        return self._daily_equity_recorder.snapshots
-
-    def get_trade_equity_snapshots(self) -> list[EquitySnapshot]:
-        return self._trade_equity_recorder.snapshots
-
-    def get_last_fills(self) -> dict[str, VenueFill]:
-        return self._last_fills
-
-    def record_prices(self, prices: Prices) -> None:
-        """Seed the last-seen prices used for valuation and currency conversion."""
-        self._last_seen_prices.update(prices)
-
-    def record_opening_equity(self, moment: datetime) -> None:
-        """Record the equity the run starts with at its start, a moment no
-        candle of the run closes on.
-        """
-        self._update_equity_snapshot(moment)
-        self._daily_equity_recorder.record_bound(self._last_tick_snapshot)  # type: ignore[arg-type]
-
-    def record_closing_equity(self) -> None:
-        """Keep the last candle's equity in the daily curve, whatever moment
-        that candle closed on, once the orders placed at its close have filled.
-        """
-        self._record_trade_equity()
-        self._daily_equity_recorder.record_bound(self._last_tick_snapshot)  # type: ignore[arg-type]
-
-    def enable_execution_recording(self) -> None:
-        """Hook called once, before the first candle, for a run that needs
-        executions read back. Override to act on it; building an Execution
-        on every fill is wasted work for a run that never asks.
-        """
-        pass
-
-    def describe_fills_with(self, describer: FillDescriber) -> None:
-        """Hook called once, before the first candle, with the strategy's
-        describer. Override to consult it for every fill whose order states no
-        reason.
-        """
-        pass
+    @property
+    @abstractmethod
+    def open_positions(self) -> dict[Symbol, PositionSnapshot]: ...
 
     def add_order(self, order: LimitOrder | MarketOrder | TriggerOrder) -> None:
         """A resting order meets only the candles that follow the one it was
@@ -192,6 +143,55 @@ class BaseSimulationEngine(ABC):
             if _is_limit_entry(cancelled):
                 self._on_release_limit_entry(cast(LimitOrder, cancelled))
 
+    def describe_fills_with(self, describer: FillDescriber) -> None:
+        """Hook called once, before the first candle, with the strategy's
+        describer. Override to consult it for every fill whose order states no
+        reason.
+        """
+        pass
+
+    def enable_execution_recording(self) -> None:
+        """Hook called once, before the first candle, for a run that needs
+        executions read back. Override to act on it; building an Execution
+        on every fill is wasted work for a run that never asks.
+        """
+        pass
+
+    def get_balances(self) -> dict[Currency, Balance]:
+        return self._balances.copy()
+
+    def get_daily_equity_snapshots(self) -> list[EquitySnapshot]:
+        return self._daily_equity_recorder.snapshots
+
+    def get_equity(self, currency: Currency) -> float:
+        if self._last_tick_snapshot is not None:
+            return self._last_tick_snapshot.get_equity(currency)
+        return self._initial_equity(currency)
+
+    def get_last_fills(self) -> dict[str, VenueFill]:
+        return self._last_fills
+
+    def get_trade_equity_snapshots(self) -> list[EquitySnapshot]:
+        return self._trade_equity_recorder.snapshots
+
+    def record_closing_equity(self) -> None:
+        """Keep the last candle's equity in the daily curve, whatever moment
+        that candle closed on, once the orders placed at its close have filled.
+        """
+        self._record_trade_equity()
+        self._daily_equity_recorder.record_bound(self._last_tick_snapshot)  # type: ignore[arg-type]
+
+    def record_opening_equity(self, moment: datetime) -> None:
+        """Record the equity the run starts with at its start, a moment no
+        candle of the run closes on.
+        """
+        self._update_equity_snapshot(moment)
+        self._daily_equity_recorder.record_bound(self._last_tick_snapshot)  # type: ignore[arg-type]
+
+    def record_prices(self, prices: Prices) -> None:
+        """Seed the last-seen prices used for valuation and currency conversion."""
+        self._last_seen_prices.update(prices)
+
     def simulate_on_current_ohlcvs(
         self, timestamp_arg: datetime, ohlcvs: OHLCVsBySymbol
     ) -> None:
@@ -207,7 +207,6 @@ class BaseSimulationEngine(ABC):
         self._last_fills = {}
         self._record_current_prices(ohlcvs)
 
-        taker_fee_rate = self._fee_rates.taker
         logger.debug("Pending orders:")
         for symbol in ohlcvs:
             ohlcv = ohlcvs[symbol]
@@ -227,25 +226,7 @@ class BaseSimulationEngine(ABC):
                             )
                         ):
                             continue
-                        low, high = ohlcv.low, ohlcv.high
-                        fee_rate = self._fee_rates.maker
-                        if low <= limit_order.limit_price <= high:
-                            if limit_order.reduce_only:
-                                self._exit_position(
-                                    timestamp,
-                                    limit_order,
-                                    limit_order.limit_price,
-                                    fee_rate,
-                                )
-                            else:
-                                self._on_release_limit_entry(limit_order)
-                                self._enter_position(
-                                    timestamp,
-                                    limit_order,
-                                    limit_order.limit_price,
-                                    fee_rate,
-                                    taker_fee_rate,
-                                )
+                        self._match_limit_order(timestamp, limit_order, ohlcv)
 
                     elif order.kind == _MARKET and not math.isnan(ohlcv.close):
                         price = ohlcv.close
@@ -310,6 +291,12 @@ class BaseSimulationEngine(ABC):
                                     trigger_order.trigger_price,
                                 )
                             self._order_book.remove_order(trigger_order)
+                            if trigger_order.order.kind == _LIMIT:
+                                self._match_limit_order(
+                                    timestamp,
+                                    cast(LimitOrder, trigger_order.order),
+                                    ohlcv,
+                                )
 
                 except ExchangeRecoverableError as e:
                     logger.warning(e)
@@ -318,56 +305,26 @@ class BaseSimulationEngine(ABC):
         self._update_equity_snapshot(timestamp_arg)
         self._daily_equity_recorder.record_snapshot(self._last_tick_snapshot)  # type: ignore[arg-type]
 
-    def _settled_at_placement(
-        self, timestamp: datetime, limit_order: LimitOrder, close: float
-    ) -> bool:
-        """An `IOC` order fills or is cancelled at the close it is settled
-        against, and never rests. A `POST_ONLY` order rests like a GTC order,
-        except one placed with no close to judge it by, which is cancelled at
-        WARNING when the first close it meets shows it would have taken
-        liquidity.
-
-        Returns:
-            Whether the order is done with, filled or cancelled.
+    def _after_tick(self, timestamp: datetime, ohlcvs: OHLCVsBySymbol) -> None:
+        """Hook called after the order matching loop. Override for post-tick
+        logic (e.g. liquidations).
         """
-        limit_order.settled = True
-        if limit_order.time_in_force is TimeInForce.POST_ONLY:
-            if _takes_liquidity(limit_order, close):
-                logger.warning(
-                    "%s would take liquidity at %s and is cancelled", limit_order, close
-                )
-                self._cancel_at_placement(limit_order)
-                return True
-            return False
-        if _takes_liquidity(limit_order, close):
-            self._order_book.remove_order(limit_order)
-            self._fill_taking_liquidity(timestamp, limit_order, close)
-            return True
-        logger.info("%s is not filled at %s and is cancelled", limit_order, close)
-        self._cancel_at_placement(limit_order)
-        return True
-
-    def _rest_order(self, order: LimitOrder | MarketOrder | TriggerOrder) -> None:
-        if _is_limit_entry(order):
-            self._on_add_limit_entry(cast(LimitOrder, order))
-        self._order_book.add_order(order)
+        pass
 
     def _cancel_at_placement(self, limit_order: LimitOrder) -> None:
         self._order_book.remove_order(limit_order)
         if _is_limit_entry(limit_order):
             self._on_release_limit_entry(limit_order)
 
-    def _fill_taking_liquidity(
-        self, timestamp: datetime, limit_order: LimitOrder, price: float
-    ) -> None:
-        taker_fee_rate = self._fee_rates.taker
-        if limit_order.reduce_only:
-            self._exit_position(timestamp, limit_order, price, taker_fee_rate)
-            return
-        self._on_release_limit_entry(limit_order)
-        self._enter_position(
-            timestamp, limit_order, price, taker_fee_rate, taker_fee_rate
-        )
+    @abstractmethod
+    def _enter_position(
+        self,
+        timestamp: datetime,
+        order: LimitOrder | MarketOrder,
+        price: float,
+        fee_rate: float,
+        taker_fee_rate: float,
+    ) -> None: ...
 
     def _execute_market_order(
         self,
@@ -383,9 +340,34 @@ class BaseSimulationEngine(ABC):
         else:
             self._exit_position(timestamp, market_order, price, taker_fee_rate)
 
+    @abstractmethod
+    def _exit_position(
+        self,
+        timestamp: datetime,
+        order: LimitOrder | MarketOrder | StopLossOrder | TakeProfitOrder,
+        price: float,
+        fee_rate: float,
+    ) -> None: ...
+
+    def _fill_taking_liquidity(
+        self, timestamp: datetime, limit_order: LimitOrder, price: float
+    ) -> None:
+        taker_fee_rate = self._fee_rates.taker
+        if limit_order.reduce_only:
+            self._exit_position(timestamp, limit_order, price, taker_fee_rate)
+            return
+        self._on_release_limit_entry(limit_order)
+        self._enter_position(
+            timestamp, limit_order, price, taker_fee_rate, taker_fee_rate
+        )
+
     def _get_position_side(self, _symbol: Symbol) -> PositionSide:
         """Defaults to LONG here, since spot trading has no short side."""
         return PositionSide.LONG
+
+    def _get_positions_for_snapshot(self) -> dict[Symbol, SimulatedPosition]:
+        """Return positions dict for equity snapshot. Override in subclasses."""
+        return {}
 
     def _initial_equity(self, currency: Currency) -> float:
         """Assumes a single initial balance per currency, since equity has no
@@ -396,35 +378,36 @@ class BaseSimulationEngine(ABC):
             return 0.0
         return balance.total
 
-    def _record_current_prices(self, ohlcvs_by_symbol: OHLCVsBySymbol) -> None:
-        for symbol, ohlcv in ohlcvs_by_symbol.items():
-            if not math.isnan(ohlcv.close):
-                self._last_seen_prices[symbol] = ohlcv.close
-
-    def _record_trade_equity(self) -> None:
-        """Value the account at the last simulated moment once every trade of
-        that moment has settled, the candle's own fills and the orders placed
-        at its close alike, so the moment holds one trade snapshot.
-        """
-        if not self._trades_occurred_this_tick:
+    def _match_limit_order(
+        self, timestamp: datetime, limit_order: LimitOrder, ohlcv: OHLCVRow
+    ) -> None:
+        limit_price = limit_order.limit_price
+        if not ohlcv.low <= limit_price <= ohlcv.high:
             return
-        self._update_equity_snapshot(self._last_tick_snapshot.timestamp)  # type: ignore[union-attr]
-        self._trade_equity_recorder.record_snapshot(self._last_tick_snapshot)  # type: ignore[arg-type]
-        self._trades_occurred_this_tick = False
-
-    def _update_equity_snapshot(self, timestamp: datetime) -> None:
-        self._last_tick_snapshot = EquitySnapshot(
-            timestamp=timestamp,
-            market_type=self._market_type,
-            balances=self.get_balances(),
-            positions=self._get_positions_for_snapshot(),
-            prices=self._last_seen_prices,
-            converter=self.converter,
+        maker_fee_rate = self._fee_rates.maker
+        if limit_order.reduce_only:
+            self._exit_position(timestamp, limit_order, limit_price, maker_fee_rate)
+            return
+        self._on_release_limit_entry(limit_order)
+        self._enter_position(
+            timestamp,
+            limit_order,
+            limit_price,
+            maker_fee_rate,
+            self._fee_rates.taker,
         )
 
-    def _get_positions_for_snapshot(self) -> dict[Symbol, SimulatedPosition]:
-        """Return positions dict for equity snapshot. Override in subclasses."""
-        return {}
+    def _on_add_limit_entry(self, limit_order: LimitOrder) -> None:
+        """Hook called when a limit entry is added, whatever its side. Override
+        to lock the funds it would fill against.
+        """
+        pass
+
+    def _on_release_limit_entry(self, limit_order: LimitOrder) -> None:
+        """Hook called when a limit entry leaves the book, matched or cancelled.
+        Override to release what `_on_add_limit_entry` locked.
+        """
+        pass
 
     def _open_tp_sl(self, order: LimitOrder | MarketOrder) -> str | None:
         """Open the resting guards `order` requests, if any.
@@ -475,6 +458,66 @@ class BaseSimulationEngine(ABC):
 
         return group_id
 
+    def _record_current_prices(self, ohlcvs_by_symbol: OHLCVsBySymbol) -> None:
+        for symbol, ohlcv in ohlcvs_by_symbol.items():
+            if not math.isnan(ohlcv.close):
+                self._last_seen_prices[symbol] = ohlcv.close
+
+    def _record_trade_equity(self) -> None:
+        """Value the account at the last simulated moment once every trade of
+        that moment has settled, the candle's own fills and the orders placed
+        at its close alike, so the moment holds one trade snapshot.
+        """
+        if not self._trades_occurred_this_tick:
+            return
+        self._update_equity_snapshot(self._last_tick_snapshot.timestamp)  # type: ignore[union-attr]
+        self._trade_equity_recorder.record_snapshot(self._last_tick_snapshot)  # type: ignore[arg-type]
+        self._trades_occurred_this_tick = False
+
+    def _rest_order(self, order: LimitOrder | MarketOrder | TriggerOrder) -> None:
+        if _is_limit_entry(order):
+            self._on_add_limit_entry(cast(LimitOrder, order))
+        self._order_book.add_order(order)
+
+    def _settled_at_placement(
+        self, timestamp: datetime, limit_order: LimitOrder, close: float
+    ) -> bool:
+        """An `IOC` order fills or is cancelled at the close it is settled
+        against, and never rests. A `POST_ONLY` order rests like a GTC order,
+        except one placed with no close to judge it by, which is cancelled at
+        WARNING when the first close it meets shows it would have taken
+        liquidity.
+
+        Returns:
+            Whether the order is done with, filled or cancelled.
+        """
+        limit_order.settled = True
+        if limit_order.time_in_force is TimeInForce.POST_ONLY:
+            if _takes_liquidity(limit_order, close):
+                logger.warning(
+                    "%s would take liquidity at %s and is cancelled", limit_order, close
+                )
+                self._cancel_at_placement(limit_order)
+                return True
+            return False
+        if _takes_liquidity(limit_order, close):
+            self._order_book.remove_order(limit_order)
+            self._fill_taking_liquidity(timestamp, limit_order, close)
+            return True
+        logger.info("%s is not filled at %s and is cancelled", limit_order, close)
+        self._cancel_at_placement(limit_order)
+        return True
+
+    def _update_equity_snapshot(self, timestamp: datetime) -> None:
+        self._last_tick_snapshot = EquitySnapshot(
+            timestamp=timestamp,
+            market_type=self._market_type,
+            balances=self.get_balances(),
+            positions=self._get_positions_for_snapshot(),
+            prices=self._last_seen_prices,
+            converter=self.converter,
+        )
+
     def _validate_tp_sl_prices(
         self, order: LimitOrder | MarketOrder, entry_price: float
     ) -> None:
@@ -511,43 +554,6 @@ class BaseSimulationEngine(ABC):
                 raise StrategyCriticalError(
                     f"Invalid TP {tp.trigger_price} for {entry}: TP must be below entry price"
                 )
-
-    def _on_add_limit_entry(self, limit_order: LimitOrder) -> None:
-        """Hook called when a limit entry is added, whatever its side. Override
-        to lock the funds it would fill against.
-        """
-        pass
-
-    def _on_release_limit_entry(self, limit_order: LimitOrder) -> None:
-        """Hook called when a limit entry leaves the book, matched or cancelled.
-        Override to release what `_on_add_limit_entry` locked.
-        """
-        pass
-
-    def _after_tick(self, timestamp: datetime, ohlcvs: OHLCVsBySymbol) -> None:
-        """Hook called after the order matching loop. Override for post-tick
-        logic (e.g. liquidations).
-        """
-        pass
-
-    @abstractmethod
-    def _enter_position(
-        self,
-        timestamp: datetime,
-        order: LimitOrder | MarketOrder,
-        price: float,
-        fee_rate: float,
-        taker_fee_rate: float,
-    ) -> None: ...
-
-    @abstractmethod
-    def _exit_position(
-        self,
-        timestamp: datetime,
-        order: LimitOrder | MarketOrder | StopLossOrder | TakeProfitOrder,
-        price: float,
-        fee_rate: float,
-    ) -> None: ...
 
 
 def _is_limit_entry(order: Order) -> bool:

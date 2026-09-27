@@ -18,8 +18,8 @@ _EXCHANGE_KEY = "exchange"
 def load_secrets(secrets_file: str | Path | None) -> SecretsByName:
     """Read the credentials a bot keeps out of its config file.
 
-    A bot may name no secrets file at all, or name one it has not written yet,
-    and in both cases it starts with no credentials.
+    A copy of the example `rtlab init live` laid out, with no entry in it yet,
+    starts a bot with no credentials, the same as a file never written.
     """
     if secrets_file is None:
         return {}
@@ -35,7 +35,7 @@ def load_secrets(secrets_file: str | Path | None) -> SecretsByName:
         raw_secrets = tomllib.load(f)
 
     if not raw_secrets.get("secrets"):
-        logger.warning("No secrets found in the file.")
+        logger.debug("No secrets declared in `%s`", secrets_file)
         return {}
 
     secrets_by_name: dict[str, dict] = {}

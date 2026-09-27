@@ -162,6 +162,7 @@ reports/
 # Don't commit your secrets :)
 secret*
 !load_secrets.py
+!src/robottraderslab/scaffold/templates/secrets.example.toml
 !tests/**/secret*
 
 # macOS

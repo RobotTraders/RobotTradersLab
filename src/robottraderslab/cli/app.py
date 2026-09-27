@@ -29,6 +29,7 @@ _SUBPACKAGES = {
     "backtest": "robottraderslab.backtester",
     "flatten": "robottraderslab.live.flatten",
     "grid-search": "robottraderslab.grid_search",
+    "init": "robottraderslab.scaffold.workspace",
     "live": "robottraderslab.live",
     "report": "robottraderslab.live.report",
     "scaffold": "robottraderslab.scaffold",
@@ -89,6 +90,11 @@ _ListExamplesFlag = Annotated[
     bool,
     typer.Option("--list", help="List the examples the installed plugins ship"),
 ]
+_RunKind = Annotated[
+    str,
+    typer.Argument(metavar="KIND", help="`live`, the one kind of run laid out"),
+]
+_LIVE_RUN = "live"
 
 app = typer.Typer(
     rich_markup_mode=None,
@@ -200,6 +206,16 @@ def grid_search(
     `[optimisation]` section declares, and score each.
     """
     _run("grid-search", config=config, output_csv=output_csv)
+
+
+@app.command()
+def init(ctx: typer.Context, kind: _RunKind) -> None:
+    """Lay out what a live bot needs in the workspace: the example secrets file
+    and the example registry of bots, to copy and fill.
+    """
+    if kind != _LIVE_RUN:
+        ctx.fail(f"The one kind of run laid out is `{_LIVE_RUN}`")
+    _run("init")
 
 
 @app.command()

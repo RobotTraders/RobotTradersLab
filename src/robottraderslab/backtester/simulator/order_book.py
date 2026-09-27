@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Iterator
+from itertools import islice
 
 from robottraderslab._core import Symbol
 
@@ -29,30 +30,10 @@ class OrderBook:
                 if id(order) not in self._dead_order_ids:
                     yield order
 
-    def orders_for(self, symbol: Symbol) -> Iterator[Order]:
-        """Iterate over pending orders for one symbol, skipping any removed
-        during iteration.
-        """
-        try:
-            for order in self._orders_by_symbol.get(symbol, ()):
-                if id(order) not in self._dead_order_ids:
-                    yield order
-        finally:
-            self._compact_symbol(symbol)
-
     def add_order(self, order: Order) -> None:
         """Add an order to the book."""
         self._orders_by_symbol.setdefault(order.symbol, []).append(order)
         logger.debug("Order added: %s", order)
-
-    def remove_order(self, order: Order) -> None:
-        """Remove an order from the book and resolve the rest of its
-        contingency group.
-        """
-        logger.debug("Order removed: %s", order)
-        self._dead_order_ids.add(id(order))
-        group_id: str | None = getattr(order, "group_id", None)
-        self.resolve_group(order.symbol, group_id)
 
     def cancel_order_by_id(self, symbol: Symbol, order_id: str) -> Order | None:
         """Remove the order with this id from the symbol's bucket.
@@ -93,6 +74,28 @@ class OrderBook:
             if isinstance(order, order_type):
                 return order
         return None
+
+    def orders_for(self, symbol: Symbol) -> Iterator[Order]:
+        """An order added during iteration, such as a guard a fill opens, is left
+        to the next iteration, so a guard is first matched against prices after
+        its entry fills.
+        """
+        bucket = self._orders_by_symbol.get(symbol, [])
+        try:
+            for order in islice(bucket, len(bucket)):
+                if id(order) not in self._dead_order_ids:
+                    yield order
+        finally:
+            self._compact_symbol(symbol)
+
+    def remove_order(self, order: Order) -> None:
+        """Remove an order from the book and resolve the rest of its
+        contingency group.
+        """
+        logger.debug("Order removed: %s", order)
+        self._dead_order_ids.add(id(order))
+        group_id: str | None = getattr(order, "group_id", None)
+        self.resolve_group(order.symbol, group_id)
 
     def resolve_group(self, symbol: Symbol, group_id: str | None) -> None:
         """Cancel every order on the symbol that belongs to the given group.

@@ -51,12 +51,12 @@ class TestStopLossOrderExecution:
         ohlcv = (
             {
                 "low": self.stop_loss - 20,
-                "high": self.take_profit_long + 20,
+                "high": self.stop_loss + 20,
                 "close": self.stop_loss + 10,
             }
             if side == PositionSide.LONG
             else {
-                "low": self.take_profit_short - 20,
+                "low": self.stop_loss - 20,
                 "high": self.stop_loss + 20,
                 "close": self.stop_loss - 10,
             }
@@ -70,12 +70,12 @@ class TestStopLossOrderExecution:
         ohlcv = (
             {
                 "low": self.stop_loss - 20,
-                "high": self.stop_loss + 20,
+                "high": self.take_profit_long + 20,
                 "close": self.stop_loss + 10,
             }
             if side == PositionSide.LONG
             else {
-                "low": self.stop_loss - 20,
+                "low": self.take_profit_short - 20,
                 "high": self.stop_loss + 20,
                 "close": self.stop_loss - 10,
             }
@@ -102,7 +102,7 @@ class TestStopLossOrderExecution:
 
         sim.simulate_on_current_ohlcvs(btc_usdt_perp, **ohlcv)
 
-    async def test_long_stop_loss_not_yet_executed(self, sim, btc_usdt_perp: Symbol):
+    async def test_long_stop_loss_not_yet_executed(self, sim, btc_usdt_perp):
         await self.place_enter_long_with_stop_loss(sim, btc_usdt_perp)
 
         self.simulate_unfilled_tpsl_orders(sim, btc_usdt_perp, PositionSide.LONG)
@@ -112,7 +112,7 @@ class TestStopLossOrderExecution:
         assert sim.open_orders[0].kind == "stop-loss"
         assert sim.simulation_engine.get_equity("USDT") == sim.initial_usdt
 
-    async def test_short_stop_loss_not_yet_executed(self, sim, btc_usdt_perp: Symbol):
+    async def test_short_stop_loss_not_yet_executed(self, sim, btc_usdt_perp):
         await self.place_enter_short_with_stop_loss(sim, btc_usdt_perp)
 
         self.simulate_unfilled_tpsl_orders(sim, btc_usdt_perp, PositionSide.SHORT)
@@ -122,25 +122,27 @@ class TestStopLossOrderExecution:
         assert sim.open_orders[0].kind == "stop-loss"
         assert sim.simulation_engine.get_equity("USDT") == sim.initial_usdt
 
-    async def test_long_stop_loss_executed(self, sim, btc_usdt_perp: Symbol):
+    async def test_long_stop_loss_executed(self, sim, btc_usdt_perp):
         await self.place_enter_long_with_stop_loss(sim, btc_usdt_perp)
 
+        self.simulate_unfilled_tpsl_orders(sim, btc_usdt_perp, PositionSide.LONG)
         self.simulate_filled_stop_loss_order(sim, btc_usdt_perp, PositionSide.LONG)
 
         assert len(sim.open_orders) == 0
         assert len(sim.open_positions) == 0
         assert sim.simulation_engine.get_equity("USDT") < sim.initial_usdt
 
-    async def test_short_stop_loss_executed(self, sim, btc_usdt_perp: Symbol):
+    async def test_short_stop_loss_executed(self, sim, btc_usdt_perp):
         await self.place_enter_short_with_stop_loss(sim, btc_usdt_perp)
 
+        self.simulate_unfilled_tpsl_orders(sim, btc_usdt_perp, PositionSide.SHORT)
         self.simulate_filled_stop_loss_order(sim, btc_usdt_perp, PositionSide.SHORT)
 
         assert len(sim.open_orders) == 0
         assert len(sim.open_positions) == 0
         assert sim.simulation_engine.get_equity("USDT") < sim.initial_usdt
 
-    async def test_long_tpsl_stop_loss_executed(self, sim, btc_usdt_perp: Symbol):
+    async def test_long_tpsl_stop_loss_executed(self, sim, btc_usdt_perp):
         await self.place_enter_long_with_stop_loss(
             sim, btc_usdt_perp, with_take_profit=True
         )
@@ -156,7 +158,7 @@ class TestStopLossOrderExecution:
         assert len(sim.open_positions) == 0
         assert sim.simulation_engine.get_equity("USDT") < sim.initial_usdt
 
-    async def test_short_tpsl_stop_loss_executed(self, sim, btc_usdt_perp: Symbol):
+    async def test_short_tpsl_stop_loss_executed(self, sim, btc_usdt_perp):
         await self.place_enter_short_with_stop_loss(
             sim, btc_usdt_perp, with_take_profit=True
         )
@@ -172,26 +174,24 @@ class TestStopLossOrderExecution:
         assert len(sim.open_positions) == 0
         assert sim.simulation_engine.get_equity("USDT") < sim.initial_usdt
 
-    async def test_long_stop_loss_wins_over_take_profit(
-        self, sim, btc_usdt_perp: Symbol
-    ):
+    async def test_long_stop_loss_wins_over_take_profit(self, sim, btc_usdt_perp):
         await self.place_enter_long_with_stop_loss(
             sim, btc_usdt_perp, with_take_profit=True
         )
 
+        self.simulate_unfilled_tpsl_orders(sim, btc_usdt_perp, PositionSide.LONG)
         self.simulate_filled_tpsl_orders(sim, btc_usdt_perp, PositionSide.LONG)
 
         assert len(sim.open_orders) == 0
         assert len(sim.open_positions) == 0
         assert sim.simulation_engine.get_equity("USDT") < sim.initial_usdt
 
-    async def test_short_stop_loss_wins_over_take_profit(
-        self, sim, btc_usdt_perp: Symbol
-    ):
+    async def test_short_stop_loss_wins_over_take_profit(self, sim, btc_usdt_perp):
         await self.place_enter_short_with_stop_loss(
             sim, btc_usdt_perp, with_take_profit=True
         )
 
+        self.simulate_unfilled_tpsl_orders(sim, btc_usdt_perp, PositionSide.SHORT)
         self.simulate_filled_tpsl_orders(sim, btc_usdt_perp, PositionSide.SHORT)
 
         assert len(sim.open_orders) == 0
