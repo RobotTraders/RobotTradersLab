@@ -6,6 +6,7 @@ import pytest
 
 from robottraderslab.bootstrap import load_secrets
 from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.scaffold.workspace import lay_out_workspace
 
 _TEST_DIR = Path(__file__).parent
 
@@ -63,3 +64,15 @@ def test_a_named_but_missing_secrets_file_warns_and_yields_nothing(tmp_path, cap
 
     assert secrets == {}
     assert "not found" in caplog.text
+
+
+def test_a_laid_out_secrets_example_yields_nothing_without_a_warning(tmp_path, caplog):
+    laid_out = lay_out_workspace(tmp_path)
+
+    with caplog.at_level(logging.DEBUG):
+        secrets = load_secrets(laid_out[0])
+
+    assert secrets == {}
+    assert [
+        record.levelno for record in caplog.records if "declared" in record.message
+    ] == [logging.DEBUG]

@@ -1,0 +1,6 @@
+# The bots the scheduler launches, one [[bot]] entry each: the bot's
+# configuration file, relative to this file, and the timeframes it trades on.
+#
+# [[bot]]
+# config = "first-bot/impulse-bot-example.toml"
+# timeframes = ["1h", "2h", "4h"]

@@ -28,6 +28,7 @@ COMMAND_SUBPACKAGES = {
     "backtest": "robottraderslab.backtester",
     "flatten": "robottraderslab.live.flatten",
     "grid-search": "robottraderslab.grid_search",
+    "init": "robottraderslab.scaffold.workspace",
     "live": "robottraderslab.live",
     "report": "robottraderslab.live.report",
     "scaffold": "robottraderslab.scaffold",
@@ -167,6 +168,32 @@ def test_command_requires_a_config(name, cli, replace_command):
     replace_command(name, lambda **kwargs: received.append(kwargs))
 
     invoked = cli.invoke(app, [name])
+
+    assert invoked.exit_code == 2
+    assert received == []
+
+
+def test_init_live_takes_no_argument(cli, replace_command):
+    received: list[bool] = []
+    replace_command("init", lambda: received.append(True))
+
+    invoked = cli.invoke(app, ["init", "live"])
+
+    assert invoked.exit_code == 0
+    assert received == [True]
+
+
+def test_init_requires_a_kind_of_run(cli):
+    invoked = cli.invoke(app, ["init"])
+
+    assert invoked.exit_code == 2
+
+
+def test_init_refuses_a_kind_of_run_it_does_not_lay_out(cli, replace_command):
+    received: list[bool] = []
+    replace_command("init", lambda: received.append(True))
+
+    invoked = cli.invoke(app, ["init", "backtest"])
 
     assert invoked.exit_code == 2
     assert received == []
