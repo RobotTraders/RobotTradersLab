@@ -119,10 +119,16 @@ class TakeProfitOrder:
 
 @dataclass(kw_only=True, slots=True)
 class TriggerOrder:
+    """`rises_to_level` names the side of the level the order waits on, set
+    from the close it is placed at, and `None` until a close of its symbol is
+    known.
+    """
+
     order_id: str = _get_order_id_field()
     kind: OrderType = OrderType.TRIGGER
     order: LimitOrder | MarketOrder
     trigger_price: float
+    rises_to_level: bool | None = None
 
     def __str__(self) -> str:
         return f"trigger order at {self.trigger_price} for order `{self.order}`"

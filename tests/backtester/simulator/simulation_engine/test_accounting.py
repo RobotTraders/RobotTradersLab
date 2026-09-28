@@ -177,7 +177,9 @@ class TestAccounting:
             reduce_only=True,
         )
 
-        sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=50.0, high=150.0, close=140.0)
+        sim.simulate_on_current_ohlcvs(
+            btc_usdt_perp, open=limit_price, low=50.0, high=150.0, close=140.0
+        )
 
         fee = quantity * limit_price * self.maker
         realised_PnL = quantity * (limit_price - avg_price)

@@ -47,12 +47,13 @@ class TestLimitOrderExecution:
     def simulate_filled_limit_order(self, sim, btc_usdt_perp: Symbol):
         sim.simulate_on_current_ohlcvs(
             btc_usdt_perp,
+            open=self.limit_price,
             low=self.limit_price - 10,
             high=self.limit_price + 20,
             close=self.limit_price + 15,
         )
 
-    def simulate_unfilled_limit_order(self, sim, btc_usdt_perp: Symbol):
+    def simulate_unfilled_buy_limit_order(self, sim, btc_usdt_perp: Symbol):
         sim.simulate_on_current_ohlcvs(
             btc_usdt_perp,
             low=self.limit_price + 10,
@@ -60,10 +61,18 @@ class TestLimitOrderExecution:
             close=self.limit_price + 15,
         )
 
+    def simulate_unfilled_sell_limit_order(self, sim, btc_usdt_perp: Symbol):
+        sim.simulate_on_current_ohlcvs(
+            btc_usdt_perp,
+            low=self.limit_price - 20,
+            high=self.limit_price - 10,
+            close=self.limit_price - 15,
+        )
+
     async def test_enter_long_not_yet_executed(self, sim, btc_usdt_perp: Symbol):
         await self.place_enter_long(sim, btc_usdt_perp)
 
-        self.simulate_unfilled_limit_order(sim, btc_usdt_perp)
+        self.simulate_unfilled_buy_limit_order(sim, btc_usdt_perp)
 
         assert len(sim.open_orders) == 1
         assert len(sim.open_positions) == 0
@@ -71,7 +80,7 @@ class TestLimitOrderExecution:
     async def test_enter_short_not_yet_executed(self, sim, btc_usdt_perp: Symbol):
         await self.place_enter_short(sim, btc_usdt_perp)
 
-        self.simulate_unfilled_limit_order(sim, btc_usdt_perp)
+        self.simulate_unfilled_sell_limit_order(sim, btc_usdt_perp)
 
         assert len(sim.open_orders) == 1
         assert len(sim.open_positions) == 0
@@ -121,7 +130,7 @@ class TestLimitOrderExecution:
         self.simulate_filled_limit_order(sim, btc_usdt_perp)
         await self.place_exit_long(sim, btc_usdt_perp)
 
-        self.simulate_unfilled_limit_order(sim, btc_usdt_perp)
+        self.simulate_unfilled_sell_limit_order(sim, btc_usdt_perp)
 
         assert len(sim.open_orders) == 1
         assert len(sim.open_positions) == 1
@@ -131,7 +140,7 @@ class TestLimitOrderExecution:
         self.simulate_filled_limit_order(sim, btc_usdt_perp)
         await self.place_exit_short(sim, btc_usdt_perp)
 
-        self.simulate_unfilled_limit_order(sim, btc_usdt_perp)
+        self.simulate_unfilled_buy_limit_order(sim, btc_usdt_perp)
 
         assert len(sim.open_orders) == 1
         assert len(sim.open_positions) == 1
@@ -339,7 +348,9 @@ class TestTimeInForce:
         await self.place_long_entry(sim, btc_usdt_perp, TimeInForce.POST_ONLY, 90.0)
 
         sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=95.0, high=110.0, close=100.0)
-        sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=80.0, high=95.0, close=85.0)
+        sim.simulate_on_current_ohlcvs(
+            btc_usdt_perp, open=95.0, low=80.0, high=95.0, close=85.0
+        )
 
         assert sim.open_orders == []
         assert sim.open_positions[btc_usdt_perp].average_entry_price == 90.0

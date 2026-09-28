@@ -170,7 +170,8 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         """
         Args:
             trigger_price: Turns the order into a conditional one that fires
-                once the market trades through it.
+                once the market reaches it from the side of the close it is
+                placed at.
             extra_fields: Custom fields to store with fill.
 
         Raises:
@@ -222,7 +223,8 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         """
         Args:
             trigger_price: Turns the order into a conditional one that fires
-                once the market trades through it.
+                once the market reaches it from the side of the close it is
+                placed at.
             time_in_force: Judged against the close the order is placed at,
                 or against the first close its symbol reaches when none is
                 known then: an `IOC` order fills there when its price reaches

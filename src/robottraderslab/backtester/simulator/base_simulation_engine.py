@@ -115,6 +115,9 @@ class BaseSimulationEngine(ABC):
                 f"{order} would take liquidity at {ohlcv.close}: a post-only "
                 "order is refused rather than filled as a taker"
             )
+        if order.kind == _TRIGGER:
+            trigger_order = cast(TriggerOrder, order)
+            trigger_order.rises_to_level = trigger_order.trigger_price > ohlcv.close
         self._rest_order(order)
         if order.kind == _MARKET:
             self._execute_market_order(
@@ -226,7 +229,9 @@ class BaseSimulationEngine(ABC):
                             )
                         ):
                             continue
-                        self._match_limit_order(timestamp, limit_order, ohlcv)
+                        self._match_limit_order(
+                            timestamp, limit_order, ohlcv, ohlcv.open
+                        )
 
                     elif order.kind == _MARKET and not math.isnan(ohlcv.close):
                         price = ohlcv.close
@@ -236,67 +241,70 @@ class BaseSimulationEngine(ABC):
 
                     elif order.kind == _STOP_LOSS:
                         stop_loss_order = cast(StopLossOrder, order)
-                        trigger_price = stop_loss_order.trigger_price
-                        fee_rate = self._fee_rates.taker
+                        level = stop_loss_order.trigger_price
                         position_side = self._get_position_side(order.symbol)
-                        exit_long = (
-                            position_side == PositionSide.LONG
-                            and ohlcv.low <= trigger_price
-                        )
-                        exit_short = (
-                            position_side == PositionSide.SHORT
-                            and ohlcv.high >= trigger_price
-                        )
-
-                        if exit_long or exit_short:
+                        if position_side == PositionSide.LONG:
+                            if ohlcv.low <= level:
+                                self._exit_position(
+                                    timestamp,
+                                    stop_loss_order,
+                                    ohlcv.open if ohlcv.open < level else level,
+                                    self._fee_rates.taker,
+                                )
+                        elif ohlcv.high >= level:
                             self._exit_position(
                                 timestamp,
                                 stop_loss_order,
-                                trigger_price,
-                                fee_rate,
+                                ohlcv.open if ohlcv.open > level else level,
+                                self._fee_rates.taker,
                             )
 
                     elif order.kind == _TAKE_PROFIT:
                         take_profit_order = cast(TakeProfitOrder, order)
-                        trigger_price = take_profit_order.trigger_price
-                        fee_rate = self._fee_rates.taker
+                        level = take_profit_order.trigger_price
                         position_side = self._get_position_side(order.symbol)
-                        exit_long = (
-                            position_side == PositionSide.LONG
-                            and ohlcv.high >= trigger_price
-                        )
-                        exit_short = (
-                            position_side == PositionSide.SHORT
-                            and ohlcv.low <= trigger_price
-                        )
-
-                        if exit_long or exit_short:
+                        if position_side == PositionSide.LONG:
+                            if ohlcv.high >= level:
+                                self._exit_position(
+                                    timestamp,
+                                    take_profit_order,
+                                    ohlcv.open if ohlcv.open > level else level,
+                                    self._fee_rates.taker,
+                                )
+                        elif ohlcv.low <= level:
                             self._exit_position(
                                 timestamp,
                                 take_profit_order,
-                                trigger_price,
-                                fee_rate,
+                                ohlcv.open if ohlcv.open < level else level,
+                                self._fee_rates.taker,
                             )
 
                     elif order.kind == _TRIGGER:
                         trigger_order = cast(TriggerOrder, order)
-                        low, high = ohlcv.low, ohlcv.high
-                        if low <= trigger_order.trigger_price <= high:
-                            trigger_order.order.triggered = True
-                            self._rest_order(trigger_order.order)
-                            if trigger_order.order.kind == _MARKET:
-                                self._execute_market_order(
+                        level = trigger_order.trigger_price
+                        rises = trigger_order.rises_to_level
+                        if rises:
+                            if ohlcv.high >= level:
+                                self._fire_trigger_order(
                                     timestamp,
-                                    cast(MarketOrder, trigger_order.order),
-                                    trigger_order.trigger_price,
-                                )
-                            self._order_book.remove_order(trigger_order)
-                            if trigger_order.order.kind == _LIMIT:
-                                self._match_limit_order(
-                                    timestamp,
-                                    cast(LimitOrder, trigger_order.order),
+                                    trigger_order,
                                     ohlcv,
+                                    ohlcv.open if ohlcv.open > level else level,
                                 )
+                        elif rises is False:
+                            if ohlcv.low <= level:
+                                self._fire_trigger_order(
+                                    timestamp,
+                                    trigger_order,
+                                    ohlcv,
+                                    ohlcv.open if ohlcv.open < level else level,
+                                )
+                        elif ohlcv.low <= level <= ohlcv.high:
+                            self._fire_trigger_order(
+                                timestamp, trigger_order, ohlcv, level
+                            )
+                        elif not math.isnan(ohlcv.close):
+                            trigger_order.rises_to_level = level > ohlcv.close
 
                 except ExchangeRecoverableError as e:
                     logger.warning(e)
@@ -361,6 +369,24 @@ class BaseSimulationEngine(ABC):
             timestamp, limit_order, price, taker_fee_rate, taker_fee_rate
         )
 
+    def _fire_trigger_order(
+        self,
+        timestamp: datetime,
+        trigger_order: TriggerOrder,
+        ohlcv: OHLCVRow,
+        fire_price: float,
+    ) -> None:
+        order = trigger_order.order
+        order.triggered = True
+        self._rest_order(order)
+        if order.kind == _MARKET:
+            self._execute_market_order(timestamp, cast(MarketOrder, order), fire_price)
+        self._order_book.remove_order(trigger_order)
+        if order.kind == _LIMIT:
+            self._match_limit_order(
+                timestamp, cast(LimitOrder, order), ohlcv, fire_price
+            )
+
     def _get_position_side(self, _symbol: Symbol) -> PositionSide:
         """Defaults to LONG here, since spot trading has no short side."""
         return PositionSide.LONG
@@ -379,10 +405,27 @@ class BaseSimulationEngine(ABC):
         return balance.total
 
     def _match_limit_order(
-        self, timestamp: datetime, limit_order: LimitOrder, ohlcv: OHLCVRow
+        self,
+        timestamp: datetime,
+        limit_order: LimitOrder,
+        ohlcv: OHLCVRow,
+        first_price: float,
     ) -> None:
+        """An order meeting the candle past its price takes liquidity at the
+        first price it meets, `first_price`: the candle's open, or the price a
+        trigger fired it at.
+        """
         limit_price = limit_order.limit_price
-        if not ohlcv.low <= limit_price <= ohlcv.high:
+        if limit_order.side == OrderSide.BUY:
+            if not ohlcv.low <= limit_price:
+                return
+            gapped = first_price < limit_price
+        else:
+            if not ohlcv.high >= limit_price:
+                return
+            gapped = first_price > limit_price
+        if gapped:
+            self._fill_taking_liquidity(timestamp, limit_order, first_price)
             return
         maker_fee_rate = self._fee_rates.maker
         if limit_order.reduce_only:
