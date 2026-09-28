@@ -1,6 +1,6 @@
 [project]
 name = "robottraderslab"
-version = "0.2.0"
+version = "0.2.1"
 description = "Backtesting and live trading engine for algorithmic trading strategies"
 requires-python = ">=3.13,<3.14"
 license = "Apache-2.0"

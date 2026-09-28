@@ -62,7 +62,7 @@ def _create_ohlcvs_by_symbol(symbol: Symbol, **ohlcv: float) -> OHLCVsBySymbol:
     return {
         symbol: OHLCVRow(
             timestamp=datetime.now(),
-            open=ohlcv.get("open", 0.0),
+            open=ohlcv.get("open", ohlcv.get("close", 0.0)),
             high=ohlcv.get("high", 0.0),
             low=ohlcv.get("low", 0.0),
             close=ohlcv.get("close", 0.0),

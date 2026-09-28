@@ -196,7 +196,10 @@ class TestRecordsEveryFillKind:
             price=self.entry_price,
         )
         sim.simulate_on_current_ohlcvs(
-            btc_usdt_perp, low=self.entry_price - 5, high=self.entry_price + 5
+            btc_usdt_perp,
+            open=self.entry_price,
+            low=self.entry_price - 5,
+            high=self.entry_price + 5,
         )
 
         executions = await sim.exchange.get_executions_since(datetime.min, [])
@@ -260,9 +263,9 @@ class TestRecordsEveryFillKind:
             price=limit_price,
             trigger_price=trigger_price,
         )
-        sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=145.0, high=155.0)
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, open=155.0, low=145.0, high=155.0)
 
-        sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=135.0, high=145.0)
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, open=145.0, low=135.0, high=145.0)
 
         executions = await sim.exchange.get_executions_since(datetime.min, [])
 
