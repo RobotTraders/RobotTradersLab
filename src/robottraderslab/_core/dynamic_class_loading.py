@@ -92,6 +92,28 @@ def load_class(name: str, entry_point_group: str) -> Any:
     return _load_entry_point_value(ep_value)
 
 
+def find_class(name: str, entry_point_group: str) -> Any | None:
+    """A plugin registers a contribution of a kind only when it has one to
+    make, so a name absent from the group means it has none.
+
+    Args:
+        name: Entry point name (e.g., ``"bitget"``), case-insensitive.
+
+    Returns:
+        What the entry point resolves to, or None when no installed
+        distribution registers the name in the group.
+
+    Raises:
+        ClassLoadingError: If the name is registered but its entry point
+            cannot be loaded.
+    """
+    name_lower = name.lower()
+    registered = any(
+        ep.name.lower() == name_lower for ep in entry_points(group=entry_point_group)
+    )
+    return load_class(name, entry_point_group) if registered else None
+
+
 def _load_entry_point_value(ep_value: str) -> Any:
     """Load a callable from an entry point value.
 

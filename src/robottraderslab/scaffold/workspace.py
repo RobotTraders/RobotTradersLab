@@ -3,7 +3,6 @@ from pathlib import Path
 
 from robottraderslab._core import mark_root
 
-_WORKSPACE = Path("workspace")
 _TEMPLATES_DIR_NAME = "templates"
 _EXAMPLE_FILES = ("secrets.example.toml", "registry.example.toml")
 
@@ -25,9 +24,8 @@ def lay_out_workspace(root: Path) -> list[Path]:
     return written
 
 
-def main() -> None:
-    """Lay out the workspace and print one line per example written."""
-    for path in lay_out_workspace(_WORKSPACE):
+def main(workspace: Path) -> None:
+    for path in lay_out_workspace(workspace):
         print(f"Wrote {path}")
 
 

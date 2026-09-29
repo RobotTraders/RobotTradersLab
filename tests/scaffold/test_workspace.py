@@ -62,11 +62,9 @@ def test_a_filled_file_beside_the_examples_is_untouched(workspace):
     assert filled.read_text(encoding="utf-8") == '[[secrets]]\nname = "mine"\n'
 
 
-def test_main_names_each_example_it_wrote(tmp_path, monkeypatch, capsys):
-    monkeypatch.chdir(tmp_path)
-
-    main()
+def test_main_names_each_example_it_wrote(workspace, capsys):
+    main(workspace)
 
     assert capsys.readouterr().out == "".join(
-        f"Wrote {Path('workspace') / name}\n" for name in _EXAMPLES
+        f"Wrote {workspace / name}\n" for name in _EXAMPLES
     )

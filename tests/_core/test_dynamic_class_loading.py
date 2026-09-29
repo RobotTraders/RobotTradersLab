@@ -1,3 +1,4 @@
+from collections import Counter
 from collections.abc import Iterator
 from importlib.metadata import EntryPoint
 from unittest.mock import Mock, patch
@@ -7,6 +8,7 @@ import pytest
 from robottraderslab._core.dynamic_class_loading import (
     ClassLoadingError,
     _resolve_entry_point,
+    find_class,
     load_class,
 )
 
@@ -27,13 +29,9 @@ def installed_entry_points() -> Iterator[Mock]:
 
 class TestLoadClassByEntryPointName:
     def test_resolves_the_installed_entry_point(self, installed_entry_points):
-        from collections import Counter
-
         assert load_class("counter", _GROUP) is Counter
 
     def test_name_matching_ignores_case(self, installed_entry_points):
-        from collections import Counter
-
         assert load_class("COUNTER", _GROUP) is Counter
 
     def test_unknown_name(self, installed_entry_points):
@@ -55,3 +53,11 @@ class TestLoadClassByEntryPointName:
             load_class("missing", _GROUP)
 
         assert installed_entry_points.call_count == 2
+
+
+class TestFindClass:
+    def test_a_registered_name(self, installed_entry_points):
+        assert find_class("Counter", _GROUP) is Counter
+
+    def test_a_name_no_distribution_registers(self, installed_entry_points):
+        assert find_class("missing", _GROUP) is None

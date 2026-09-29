@@ -2,11 +2,12 @@ from pathlib import Path
 
 from .examples import copy_example, list_examples
 
-_DESTINATION = Path("workspace")
 
-
-def main(name: str | None) -> None:
+def main(name: str | None, workspace: Path) -> None:
     """Copy a packaged example into the workspace, or list what is installed.
+
+    Args:
+        name: The example to copy, None to list the installed ones.
 
     Raises:
         ExampleError: If the example cannot be copied.
@@ -15,4 +16,4 @@ def main(name: str | None) -> None:
         installed = list_examples()
         print("\n".join(installed) if installed else "No examples installed.")
         return
-    print(f"Example copied to {copy_example(name, _DESTINATION)}")
+    print(f"Example copied to {copy_example(name, workspace)}")
