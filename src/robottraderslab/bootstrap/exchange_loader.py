@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from robottraderslab._core import (
     ClassLoadingError,
+    find_class,
     load_class,
     settings_the_factory_does_not_take,
 )
@@ -16,6 +17,7 @@ from .settings import reveal_secrets
 logger = logging.getLogger(__name__)
 
 _ENTRY_POINT_GROUP = "robot_traders_lab.exchanges"
+_SECRET_CHECK_GROUP = "robot_traders_lab.secret_checks"  # nosec B105
 _DEMO_SETTING = "demo_trading"
 
 
@@ -46,6 +48,37 @@ async def load_exchange(
     exchange = await _create_exchange(factory, reveal_secrets(exchange_config))
     logger.debug(f"Exchange `{exchange_name}` loaded")
     return exchange
+
+
+async def check_secret(
+    key: str, settings: Mapping[str, Any], **arguments: Any
+) -> list[str] | None:
+    """A plugin registers the check of a secrets entry under the key that
+    marks the entry's kind, a connector only when its venue keeps an account
+    setting it trades under one value of.
+
+    Args:
+        key: The connector's name, or the field marking the entry's kind for a
+            plugin reading another kind of entry.
+        settings: The entry's fields, the secrets among them revealed to the
+            check.
+        **arguments: What the check is run with: the entry's name, and for a
+            venue key the market read.
+
+    Returns:
+        One line per fact read; None when no installed plugin registers a
+        check under the key.
+
+    Raises:
+        ExchangeCriticalError: If a setting is not one the connector trades
+            under.
+        Exception: If the plugin's check refuses the entry.
+    """
+    plugin_check = find_class(key, _SECRET_CHECK_GROUP)
+    if plugin_check is None:
+        return None
+    lines: list[str] = await plugin_check(**arguments, **reveal_secrets(dict(settings)))
+    return lines
 
 
 def _extract_exchange_name(config: dict[str, Any]) -> str:

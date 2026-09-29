@@ -28,7 +28,7 @@ from .candle_grid import (
 )
 from .chart import Candles, ChartLine, DrawdownUnit
 from .currency import Currency
-from .dynamic_class_loading import ClassLoadingError, load_class
+from .dynamic_class_loading import ClassLoadingError, find_class, load_class
 from .exceptions import (
     DataError,
     DownloadError,
@@ -192,6 +192,7 @@ __all__ = [
     "Execution",
     "FeeMode",
     "fetch_account_snapshots",
+    "find_class",
     "finished",
     "FillDescriber",
     "FillEffect",

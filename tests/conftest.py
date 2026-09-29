@@ -10,6 +10,7 @@ from typing import Any
 import matplotlib
 import pandas as pd
 import pytest
+from typer.testing import CliRunner
 
 from robottraderslab._core.dynamic_class_loading import _resolve_entry_point
 
@@ -51,30 +52,49 @@ def make_registered_adapter(
 ) -> Iterator[_AdapterRegistration]:
     plugin_module = types.ModuleType(_PLUGIN_MODULE)
     monkeypatch.setitem(sys.modules, _PLUGIN_MODULE, plugin_module)
-    served: dict[str, type[Any]] = {}
+    served: dict[str, list[str]] = {}
 
     def entry_points(group: str) -> list[EntryPoint]:
-        if group != _ADAPTER_GROUP:
-            return []
         return [
             EntryPoint(
-                name=name, value=f"{_PLUGIN_MODULE}:{name}", group=_ADAPTER_GROUP
+                name=name,
+                value=f"{_PLUGIN_MODULE}:{_attribute(group, name)}",
+                group=group,
             )
-            for name in served
+            for name in served.get(group, [])
         ]
 
     monkeypatch.setattr(
         "robottraderslab._core.dynamic_class_loading.entry_points", entry_points
     )
 
-    def register(adapter_class: type[Any], *names: str) -> None:
+    def register(contribution: Any, *names: str, group: str = _ADAPTER_GROUP) -> None:
         for name in names:
-            served[name] = adapter_class
-            setattr(plugin_module, name, adapter_class)
+            served.setdefault(group, []).append(name)
+            setattr(plugin_module, _attribute(group, name), contribution)
         _resolve_entry_point.cache_clear()
 
     yield register
     _resolve_entry_point.cache_clear()
+
+
+def _attribute(group: str, name: str) -> str:
+    return f"{group.rpartition('.')[2]}_{name}"
+
+
+@pytest.fixture
+def cli() -> CliRunner:
+    return CliRunner()
+
+
+@pytest.fixture
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The project folder a command runs from, holding an empty workspace."""
+    folder = tmp_path / "RobotTradersLab"
+    (folder / "workspace").mkdir(parents=True)
+    (folder / "pyproject.toml").write_text("[project]\nname = 'lab'\n")
+    monkeypatch.chdir(folder)
+    return folder
 
 
 @pytest.fixture
@@ -106,7 +126,9 @@ def embedded_payload() -> Callable[[str], dict[str, Any]]:
 
 
 @pytest.fixture
-def read_payload(embedded_payload) -> Callable[[Path], dict[str, Any]]:
+def read_payload(
+    embedded_payload: Callable[[str], dict[str, Any]],
+) -> Callable[[Path], dict[str, Any]]:
     def read(document: Path) -> dict[str, Any]:
         return embedded_payload(document.read_text(encoding="utf-8"))
 

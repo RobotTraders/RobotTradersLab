@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from typer.testing import CliRunner
 
 from robottraderslab._core import (
     EX_CONFIG,
@@ -26,6 +25,7 @@ from robottraderslab.scaffold import ExampleError
 
 COMMAND_SUBPACKAGES = {
     "backtest": "robottraderslab.backtester",
+    "check": "robottraderslab.live.check",
     "flatten": "robottraderslab.live.flatten",
     "grid-search": "robottraderslab.grid_search",
     "init": "robottraderslab.scaffold.workspace",
@@ -122,12 +122,13 @@ BOUNDARY_REPORTS = [
     (RuntimeError("unexpected failure"), "Fatal error", 1),
 ]
 
+WORKSPACE_COMMANDS = [
+    ("init", ["init", "live"]),
+    ("scaffold", ["scaffold", "impulse"]),
+    ("check", ["check", "impulse-example"]),
+]
+
 type ReplaceCommand = Callable[[str, Callable[..., Any]], None]
-
-
-@pytest.fixture
-def cli() -> CliRunner:
-    return CliRunner()
 
 
 @pytest.fixture
@@ -173,14 +174,27 @@ def test_command_requires_a_config(name, cli, replace_command):
     assert received == []
 
 
-def test_init_live_takes_no_argument(cli, replace_command):
+def test_init_live_from_a_folder_inside_the_project_fills_its_workspace(
+    cli, project, monkeypatch
+):
+    inside = project / "notes"
+    inside.mkdir()
+    monkeypatch.chdir(inside)
+
+    cli.invoke(app, ["init", "live"])
+
+    assert (project / "workspace" / "registry.example.toml").is_file()
+    assert not (inside / "workspace").exists()
+
+
+def test_init_live_refuses_a_registry(cli, replace_command):
     received: list[bool] = []
-    replace_command("init", lambda: received.append(True))
+    replace_command("init", lambda workspace: received.append(True))
 
-    invoked = cli.invoke(app, ["init", "live"])
+    invoked = cli.invoke(app, ["init", "live", "--registry", "pilot.toml"])
 
-    assert invoked.exit_code == 0
-    assert received == [True]
+    assert invoked.exit_code == 2
+    assert received == []
 
 
 def test_init_requires_a_kind_of_run(cli):
@@ -191,7 +205,7 @@ def test_init_requires_a_kind_of_run(cli):
 
 def test_init_refuses_a_kind_of_run_it_does_not_lay_out(cli, replace_command):
     received: list[bool] = []
-    replace_command("init", lambda: received.append(True))
+    replace_command("init", lambda workspace: received.append(True))
 
     invoked = cli.invoke(app, ["init", "backtest"])
 
@@ -199,23 +213,81 @@ def test_init_refuses_a_kind_of_run_it_does_not_lay_out(cli, replace_command):
     assert received == []
 
 
+@pytest.mark.usefixtures("project")
 def test_scaffold_receives_the_example_name(cli, replace_command):
     received: list[str | None] = []
-    replace_command("scaffold", lambda name: received.append(name))
+    replace_command("scaffold", lambda name, workspace: received.append(name))
 
     cli.invoke(app, ["scaffold", "impulse"])
 
     assert received == ["impulse"]
 
 
+@pytest.mark.usefixtures("project")
 def test_scaffold_lists_the_installed_examples(cli, replace_command):
     received: list[str | None] = []
-    replace_command("scaffold", lambda name: received.append(name))
+    replace_command("scaffold", lambda name, workspace: received.append(name))
 
     listed = cli.invoke(app, ["scaffold", "--list"])
 
     assert listed.exit_code == 0
     assert received == [None]
+
+
+@pytest.mark.parametrize(
+    ("name", "argv"), WORKSPACE_COMMANDS, ids=[name for name, _ in WORKSPACE_COMMANDS]
+)
+def test_a_command_resolves_the_workspace_of_the_project_it_runs_inside(
+    name, argv, cli, replace_command, project, monkeypatch
+):
+    received: list[Path] = []
+    replace_command(name, lambda **kwargs: received.append(kwargs["workspace"]))
+    inside = project / "notes"
+    inside.mkdir()
+    monkeypatch.chdir(inside)
+
+    cli.invoke(app, argv)
+
+    assert received == [project / "workspace"]
+
+
+@pytest.mark.parametrize(
+    ("name", "argv"), WORKSPACE_COMMANDS, ids=[name for name, _ in WORKSPACE_COMMANDS]
+)
+def test_a_command_takes_the_workspace_it_is_given(
+    name, argv, cli, replace_command, tmp_path, monkeypatch
+):
+    received: list[Path] = []
+    replace_command(name, lambda **kwargs: received.append(kwargs["workspace"]))
+    monkeypatch.chdir(tmp_path)
+
+    given = cli.invoke(app, [*argv, "--workspace", "elsewhere"])
+
+    assert given.exit_code == 0
+    assert received == [Path("elsewhere")]
+
+
+def test_init_cron_refuses_a_workspace(cli, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    invoked = cli.invoke(app, ["init", "cron", "--workspace", "elsewhere"])
+
+    assert invoked.exit_code == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [argv for _, argv in WORKSPACE_COMMANDS],
+    ids=[name for name, _ in WORKSPACE_COMMANDS],
+)
+def test_a_command_outside_any_project_is_refused(argv, cli, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    refused = cli.invoke(app, argv)
+
+    assert refused.exit_code == 1
+    assert "no `pyproject.toml` at or above" in refused.stderr
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_scaffold_requires_a_name_or_list_but_not_neither(cli):
@@ -399,6 +471,7 @@ def _raising(failure: Exception) -> Callable[..., None]:
     return _raise
 
 
+@pytest.mark.usefixtures("project")
 def test_an_example_the_workspace_cannot_be_given(cli, replace_command):
     replace_command("scaffold", _raising(ExampleError("No example named 'ghost'")))
 

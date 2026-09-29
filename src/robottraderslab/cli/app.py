@@ -1,9 +1,10 @@
 import logging
 import traceback
+from enum import StrEnum
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, NoReturn
 
 import typer
 
@@ -13,7 +14,12 @@ from robottraderslab.exceptions import (
     ExchangeRecoverableError,
     StrategyCriticalError,
 )
-from robottraderslab.scaffold import ExampleError
+from robottraderslab.scaffold import (
+    CrontabError,
+    ExampleError,
+    OutsideProjectError,
+    project_folder,
+)
 
 from .console import use_utf8_console
 
@@ -27,14 +33,22 @@ _EX_CRASH = 1
 
 _SUBPACKAGES = {
     "backtest": "robottraderslab.backtester",
+    "check": "robottraderslab.live.check",
     "flatten": "robottraderslab.live.flatten",
     "grid-search": "robottraderslab.grid_search",
     "init": "robottraderslab.scaffold.workspace",
+    "init-cron": "robottraderslab.scaffold.cron",
     "live": "robottraderslab.live",
     "report": "robottraderslab.live.report",
     "scaffold": "robottraderslab.scaffold",
     "scheduler": "robottraderslab.scheduler",
 }
+
+
+class _InitKind(StrEnum):
+    CRON = "cron"
+    LIVE = "live"
+
 
 _ConfigFile = Annotated[
     Path,
@@ -90,11 +104,47 @@ _ListExamplesFlag = Annotated[
     bool,
     typer.Option("--list", help="List the examples the installed plugins ship"),
 ]
-_RunKind = Annotated[
-    str,
-    typer.Argument(metavar="KIND", help="`live`, the one kind of run laid out"),
+
+
+_InitKindArgument = Annotated[
+    _InitKind,
+    typer.Argument(metavar="KIND", help="`live` or `cron`"),
 ]
-_LIVE_RUN = "live"
+_Registry = Annotated[
+    Path | None,
+    typer.Option(
+        "--registry",
+        help="The registry the cron line runs the scheduler on, "
+        "`workspace/registry.toml` unless given",
+    ),
+]
+_WORKSPACE = "workspace"
+_DEFAULT_REGISTRY = Path(_WORKSPACE) / "registry.toml"
+_SecretsEntry = Annotated[
+    str, typer.Argument(metavar="ENTRY", help="Name of the `[[secrets]]` entry")
+]
+_SecretsFile = Annotated[
+    Path,
+    typer.Option("--secrets", help="The secrets file, relative to the workspace"),
+]
+_AccountSymbol = Annotated[
+    str,
+    typer.Option(
+        "--symbol",
+        help="The market whose account a venue key is read on, for a venue keeping "
+        "one account per settlement currency: on Bitget, `BTC/USDT:USDT` reads "
+        "the USDT-settled futures account and `ETH/USDC:USDC` the USDC-settled one",
+    ),
+]
+_DEFAULT_SECRETS_FILE = Path("secrets.toml")
+_DEFAULT_ACCOUNT_SYMBOL = "BTC/USDT:USDT"
+_Workspace = Annotated[
+    Path | None,
+    typer.Option(
+        "--workspace",
+        help="The workspace folder, `workspace/` under the project unless given",
+    ),
+]
 
 app = typer.Typer(
     rich_markup_mode=None,
@@ -168,6 +218,32 @@ def backtest(
 
 
 @app.command(
+    epilog="Examples: `rtlab check impulse-example` reads the balances of the "
+    "account the `impulse-example` key opens; `rtlab check discord-trades` posts "
+    "one message to the `discord-trades` webhook. A connector also reports the "
+    "account settings it trades under. The command exits 1 on every failure it "
+    "names: a refused key, a refused or unreachable webhook, a missing file, "
+    "entry, connector or plugin, an entry naming neither `exchange` nor "
+    "`webhook_url`, an account setting the connector does not trade under."
+)
+def check(
+    entry: _SecretsEntry,
+    secrets: _SecretsFile = _DEFAULT_SECRETS_FILE,
+    symbol: _AccountSymbol = _DEFAULT_ACCOUNT_SYMBOL,
+    workspace: _Workspace = None,
+) -> None:
+    """Prove a `[[secrets]]` entry of the workspace's secrets file: a venue key
+    by reading the balances of the account it opens, a webhook by posting one
+    message to it.
+    """
+    folder = _workspace(workspace)
+    try:
+        _run("check", entry=entry, secrets=secrets, symbol=symbol, workspace=folder)
+    except (Exception, ExchangeCriticalError, StrategyCriticalError) as e:
+        _refuse(e)
+
+
+@app.command(
     epilog="Examples: `rtlab flatten workspace/first-bot/impulse-bot-example.toml "
     "BTC/USDT:USDT` flattens one symbol; `rtlab flatten "
     "workspace/first-bot/impulse-bot-example.toml --all` flattens every symbol "
@@ -209,13 +285,29 @@ def grid_search(
 
 
 @app.command()
-def init(ctx: typer.Context, kind: _RunKind) -> None:
-    """Lay out what a live bot needs in the workspace: the example secrets file
-    and the example registry of bots, to copy and fill.
+def init(
+    ctx: typer.Context,
+    kind: _InitKindArgument,
+    registry: _Registry = None,
+    workspace: _Workspace = None,
+) -> None:
+    """Set up what a live bot needs: `live` lays out the example secrets file
+    and the example registry of bots in the workspace, to copy and fill; `cron`
+    makes sure the crontab of the user running it holds the line that runs the
+    project's scheduler every minute.
     """
-    if kind != _LIVE_RUN:
-        ctx.fail(f"The one kind of run laid out is `{_LIVE_RUN}`")
-    _run("init")
+    if kind is _InitKind.CRON:
+        if workspace is not None:
+            ctx.fail("--workspace goes with `init live`")
+        project = _project()
+        try:
+            _run("init-cron", project=project, registry=registry or _DEFAULT_REGISTRY)
+        except CrontabError as e:
+            _refuse(e)
+        return
+    if registry is not None:
+        ctx.fail("--registry goes with `init cron`")
+    _run("init", workspace=_workspace(workspace))
 
 
 @app.command()
@@ -271,12 +363,14 @@ def scaffold(
     ctx: typer.Context,
     name: _ExampleName = None,
     list_examples: _ListExamplesFlag = False,
+    workspace: _Workspace = None,
 ) -> None:
     """Copy a packaged example into the workspace, or list the installed ones."""
     if (name is not None) == list_examples:
         ctx.fail("Give exactly one of NAME or --list")
+    folder = _workspace(workspace)
     try:
-        _run("scaffold", name=name)
+        _run("scaffold", name=name, workspace=folder)
     except ExampleError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
@@ -309,6 +403,27 @@ def _set_traceback(debug: bool) -> None:
 def _run(command: str, **arguments: Any) -> int | None:
     failures: int | None = import_module(_SUBPACKAGES[command]).main(**arguments)
     return failures
+
+
+def _refuse(failure: BaseException) -> NoReturn:
+    """A failure a command reports before any log exists is its whole outcome,
+    so it exits 1 whatever its class.
+    """
+    typer.echo(f"Error: {failure}", err=True)
+    if _show_traceback:
+        traceback.print_exception(failure)
+    raise typer.Exit(_EX_CRASH) from failure
+
+
+def _workspace(given: Path | None) -> Path:
+    return _project() / _WORKSPACE if given is None else given
+
+
+def _project() -> Path:
+    try:
+        return project_folder(Path.cwd())
+    except OutsideProjectError as e:
+        _refuse(e)
 
 
 def _report(
