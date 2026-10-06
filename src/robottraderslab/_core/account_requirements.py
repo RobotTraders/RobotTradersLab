@@ -62,6 +62,30 @@ class AccountProtocol(NamedAccount, Protocol):
         """
         ...
 
+    async def _attributed_executions(
+        self,
+        since: datetime,
+        symbols: Iterable[Symbol],
+        *,
+        max_attempts: int = MAX_ATTEMPTS,
+        base_delay: float = BASE_DELAY_SECONDS,
+    ) -> list[Execution]:
+        """Fetch the executions the venue booked since a timestamp, each
+        carrying what it did to the position.
+
+        Each effect is measured against the position the stream ended on.
+
+        Args:
+            since: Start of the window to read.
+            symbols: Symbols the read is scoped to.
+            max_attempts: Total retry attempts for transient errors, per read.
+            base_delay: Base retry delay in seconds.
+
+        Returns:
+            The executions, in the sequence the venue booked them.
+        """
+        ...
+
     async def _executions_since(
         self,
         since: datetime,

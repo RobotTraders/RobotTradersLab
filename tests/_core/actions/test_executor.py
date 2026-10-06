@@ -30,7 +30,7 @@ from robottraderslab.futures.futures_limit_order import FuturesLimitOrderAction
 from robottraderslab.futures.futures_market_order import FuturesMarketOrderAction
 
 
-def stamped(fill: VenueFill, kind: OrderType) -> OrderFill:
+def stamped(fill: VenueFill, kind: OrderType, client_order_id: str) -> OrderFill:
     return OrderFill(
         order_id=fill.order_id,
         symbol=fill.symbol,
@@ -39,6 +39,7 @@ def stamped(fill: VenueFill, kind: OrderType) -> OrderFill:
         kind=kind,
         timestamp=fill.timestamp,
         filled_value=fill.filled_value,
+        client_order_id=client_order_id,
         source="strategy",
     )
 
@@ -234,7 +235,9 @@ async def test_execution_callbacks_with_executed_market_order():
     for post_callback in post_execution_callbacks:
         await post_callback()
 
-    execution_callback.assert_awaited_once_with(stamped(plugin_fill, "market"))
+    execution_callback.assert_awaited_once_with(
+        stamped(plugin_fill, "market", action.client_order_id)
+    )
 
 
 async def test_execution_callbacks_with_executed_limit_order():
@@ -267,7 +270,9 @@ async def test_execution_callbacks_with_executed_limit_order():
     for post_callback in post_execution_callbacks:
         await post_callback()
 
-    execution_callback.assert_awaited_once_with(stamped(plugin_fill, "limit"))
+    execution_callback.assert_awaited_once_with(
+        stamped(plugin_fill, "limit", action.client_order_id)
+    )
 
 
 async def test_execution_callbacks_with_none_executed_order():
@@ -327,7 +332,7 @@ async def test_execution_callback_with_failing_callback():
     for post_callback in post_execution_callbacks:
         await post_callback()
 
-    stamped_fill = stamped(plugin_fill, "market")
+    stamped_fill = stamped(plugin_fill, "market", action.client_order_id)
     failing_callback.assert_awaited_once_with(stamped_fill)
     passing_callback.assert_awaited_once_with(stamped_fill)
 
@@ -705,7 +710,7 @@ async def test_a_placement_and_its_fill_carry_the_reason_the_strategy_gave():
     assert placement.reason == fill.reason == "impulse long exit"
 
 
-async def test_a_venue_reporting_no_client_order_id_reports_none_on_both_events():
+async def test_a_fill_with_no_venue_client_order_id_carries_the_placed_one():
     mock_exchange = Mock(spec=FuturesExchangeProtocol)
     action = FuturesMarketOrderAction(
         exchange=mock_exchange,
@@ -735,4 +740,35 @@ async def test_a_venue_reporting_no_client_order_id_reports_none_on_both_events(
     ):
         await post_callback()
 
-    assert fill_callback.await_args.args[0].client_order_id is None
+    assert fill_callback.await_args.args[0].client_order_id == action.client_order_id
+
+
+async def test_a_client_order_id_the_venue_reports_on_a_fill_is_kept():
+    mock_exchange = Mock(spec=FuturesExchangeProtocol)
+    action = FuturesMarketOrderAction(
+        exchange=mock_exchange,
+        symbol="BTC/USDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+    )
+    plugin_fill = VenueFill(
+        order_id="venue-1",
+        symbol=Symbol.create("BTC/USDT"),
+        side=OrderSide.BUY,
+        quantity=1.0,
+        client_order_id="reported-by-the-venue",
+    )
+    mock_exchange.place_market_order = AsyncMock(
+        return_value=PlacedOrder(
+            order_id="venue-1",
+            get_fill=AsyncMock(return_value=plugin_fill),
+        )
+    )
+    fill_callback = AsyncMock()
+
+    for post_callback in await execute_trading_actions(
+        [action], on_order_filled=[fill_callback]
+    ):
+        await post_callback()
+
+    assert fill_callback.await_args.args[0].client_order_id == "reported-by-the-venue"

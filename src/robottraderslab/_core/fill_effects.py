@@ -1,8 +1,9 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from decimal import Decimal
+from operator import attrgetter
 
-from .order import Execution, FillEffect, OrderSide
+from .order import Execution, FillEffect, OrderFill, OrderSide
 from .position import PositionSide, PositionSnapshot
 from .symbol import Symbol
 
@@ -34,6 +35,31 @@ def attribute_fill_effects(
         replace(execution, effect=derived.get(execution.execution_id))
         for execution in stream
     ]
+
+
+def settle_booked_fill(
+    order_fill: OrderFill, executions: Iterable[Execution]
+) -> OrderFill:
+    """An order can fill in several executions, and a close among them wins
+    whatever opened on the far side of it, since the close is what ended the
+    position.
+
+    Args:
+        order_fill: A fill the executor reported, naming no effect.
+        executions: The attributed executions of the fill's order.
+    """
+    chronological = sorted(executions, key=attrgetter("timestamp"))
+    if not chronological:
+        return order_fill
+    effects = [e.effect for e in chronological if e.effect is not None]
+    profits = [
+        e.realised_profit for e in chronological if e.realised_profit is not None
+    ]
+    return replace(
+        order_fill,
+        effect=_order_effect(effects),
+        realised_profit=sum(profits) if profits else None,
+    )
 
 
 def _by_symbol(stream: list[Execution]) -> dict[Symbol, list[Execution]]:
@@ -81,3 +107,9 @@ def _effect_between(before: Decimal, after: Decimal) -> FillEffect | None:
 def _exact(quantity: float) -> Decimal:
     """A walk arrives at an exact zero on a position that closed, holding no residue."""
     return Decimal(str(quantity))
+
+
+def _order_effect(effects: list[FillEffect]) -> FillEffect | None:
+    if "close" in effects:
+        return "close"
+    return effects[0] if effects else None

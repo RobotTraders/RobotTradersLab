@@ -424,6 +424,28 @@ class FuturesAccount:
             minimum_order_ratio=minimum_order_ratio,
         )
 
+    async def _attributed_executions(
+        self,
+        since: datetime,
+        symbols: Iterable[Symbol],
+        *,
+        max_attempts: int = MAX_ATTEMPTS,
+        base_delay: float = BASE_DELAY_SECONDS,
+    ) -> list[Execution]:
+        symbol_list = list(symbols)
+        positions, executions = await asyncio.gather(
+            retry_on_transient(
+                self._exchange.get_open_positions,
+                symbol_list,
+                max_attempts=max_attempts,
+                base_delay=base_delay,
+            ),
+            self._executions_since(
+                since, symbol_list, max_attempts=max_attempts, base_delay=base_delay
+            ),
+        )
+        return attribute_fill_effects(executions, positions)
+
     def _create_buy_order(
         self,
         symbol: Symbol,
