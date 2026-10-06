@@ -475,3 +475,46 @@ class TestSnapshot:
 
         assert snapshot.position(BTCUSDT) is None
         assert exchange.get_open_positions.await_count == 2
+
+
+class TestAttributedExecutions:
+    async def test_executions_carry_what_they_did_to_the_position(self, exchange):
+        exchange.get_executions_since.return_value = [
+            _execution("entry", OrderSide.BUY, 2.0, minute=1),
+            _execution("exit", OrderSide.SELL, 1.0, minute=2),
+        ]
+        exchange.get_open_positions.return_value = {BTCUSDT: _long(1.0)}
+        account = FuturesAccount(exchange)
+
+        executions = await account._attributed_executions(WINDOW_START, [BTCUSDT])
+
+        assert [execution.effect for execution in executions] == ["open", "reduce"]
+
+    async def test_both_reads_are_scoped_to_the_symbols_and_the_window(self, exchange):
+        exchange.get_executions_since.return_value = []
+        account = FuturesAccount(exchange)
+
+        await account._attributed_executions(WINDOW_START, iter([BTCUSDT]))
+
+        exchange.get_open_positions.assert_awaited_once_with([BTCUSDT])
+        exchange.get_executions_since.assert_awaited_once_with(WINDOW_START, [BTCUSDT])
+
+    async def test_reads_retry_on_transient_errors(self, exchange):
+        exchange.get_open_positions.side_effect = [ExchangeTransientError("502"), {}]
+        exchange.get_executions_since.return_value = []
+        account = FuturesAccount(exchange)
+
+        await account._attributed_executions(WINDOW_START, [BTCUSDT], base_delay=0.0)
+
+        assert exchange.get_open_positions.await_count == 2
+
+    async def test_a_recoverable_read_failure_is_not_retried(self, exchange):
+        exchange.get_executions_since.side_effect = ExchangeRecoverableError(
+            "rejected read"
+        )
+        account = FuturesAccount(exchange)
+
+        with pytest.raises(ExchangeRecoverableError, match="rejected read"):
+            await account._attributed_executions(WINDOW_START, [BTCUSDT])
+
+        exchange.get_executions_since.assert_awaited_once()

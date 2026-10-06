@@ -273,6 +273,7 @@ def test_calls_on_filled_callbacks(
             kind="market",
             quantity=0.998,
             timestamp=mock.ANY,
+            client_order_id=mock.ANY,
             source="strategy",
         ),
     )

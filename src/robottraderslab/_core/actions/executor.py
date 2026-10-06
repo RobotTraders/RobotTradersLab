@@ -205,7 +205,7 @@ def _as_order_fill(fill: VenueFill, placement: OrderPlacement) -> OrderFill:
         kind=placement.kind,
         timestamp=fill.timestamp,
         filled_value=fill.filled_value,
-        client_order_id=fill.client_order_id,
+        client_order_id=fill.client_order_id or placement.client_order_id,
         reason=placement.reason,
         source="strategy",
     )

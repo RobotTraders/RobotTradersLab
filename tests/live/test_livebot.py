@@ -3,7 +3,7 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import pandas as pd
 import pytest
@@ -30,6 +30,7 @@ from robottraderslab.exchanges import (
     PositionSide,
     PositionSnapshot,
     VenueFill,
+    tag_of,
 )
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.live.livebot import LiveBot
@@ -285,6 +286,7 @@ def test_calls_on_filled_callbacks(
             side=OrderSide.BUY,
             quantity=4.0,
             kind="market",
+            client_order_id=ANY,
             source="strategy",
         ),
     )
@@ -1885,3 +1887,326 @@ def test_a_refused_leverage_is_warned_about_and_the_candle_still_trades(
     assert "SetLeverageAction (DOGE/USDT:USDT)" in caplog.text
     assert events == ["book at 3.0"]
     exchange.place_market_order.assert_awaited_once()
+
+
+@pytest.fixture
+def create_market_exit_strategy(account) -> Callable[..., StrategyProtocol]:
+    def _create_market_exit_strategy(
+        symbol: Symbol, tags: Iterable[str], *, symbols: Iterable[Symbol] | None = None
+    ) -> StrategyProtocol:
+        declared = [symbol] if symbols is None else list(symbols)
+
+        class Strategy(StrategyProtocol):
+            market_type = "futures"
+
+            async def setup(self, requirements):
+                requirements.ohlcv.add(symbol, "1d")
+                requirements.account.add(account, symbols=declared, positions=True)
+
+            def generate_trading_signals(self, ohlcvs):
+                pass
+
+            def book_trading_actions(
+                self, ohlcvs, snapshots, timestamp, bookkeeper, triggered_timeframes
+            ):
+                for tag in tags:
+                    bookkeeper.add(
+                        account.short_exit(symbol, 1.0)
+                        .reason("impulse short exit")
+                        .tag(tag)
+                        .build()
+                    )
+
+        return Strategy()
+
+    return _create_market_exit_strategy
+
+
+def _market_exit_placed_as(symbol: Symbol, *order_ids: str) -> AsyncMock:
+    orders = iter(order_ids)
+
+    async def place_market_order(**_kwargs):
+        order_id = next(orders)
+        fill = VenueFill(
+            order_id=order_id, symbol=symbol, side=OrderSide.BUY, quantity=1.0
+        )
+        return PlacedOrder(order_id=order_id, get_fill=AsyncMock(return_value=fill))
+
+    return AsyncMock(side_effect=place_market_order)
+
+
+def _short_exit_execution(
+    symbol: Symbol, order_id: str, minute: int, realised_profit: float
+) -> Execution:
+    return Execution(
+        execution_id=f"{order_id}-execution",
+        order_id=order_id,
+        symbol=symbol,
+        side=OrderSide.BUY,
+        price=100.0,
+        quantity=1.0,
+        timestamp=datetime(2024, 1, 1, 5, minute, tzinfo=UTC),
+        kind="market",
+        realised_profit=realised_profit,
+    )
+
+
+def _run_one_cycle(strategy: StrategyProtocol, **livebot_arguments) -> None:
+    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+    ohlcv_provider.fetch_ohlcv.return_value = _candles(["2024-01-01"])
+    asyncio.run(LiveBot(strategy, ohlcv_provider, **livebot_arguments).run())
+
+
+def test_a_market_fill_the_strategy_booked_reaches_subscribers_settled(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
+    exchange.get_executions_since = AsyncMock(
+        return_value=[_short_exit_execution(symbol, "order-1", 1, 0.42)]
+    )
+    notifier = AsyncMock()
+
+    _run_one_cycle(
+        create_market_exit_strategy(symbol, ["4h-alpha"]), on_fill=[notifier]
+    )
+
+    notified_fill = notifier.await_args.args[0]
+    assert notified_fill.effect == "close"
+    assert notified_fill.realised_profit == 0.42
+    assert notified_fill.source == "strategy"
+    assert notified_fill.reason == "impulse short exit"
+    assert tag_of(notified_fill.client_order_id) == "4h-alpha"
+
+
+def test_a_booked_fill_is_reported_unsettled_when_the_executions_cannot_be_read(
+    exchange, create_market_exit_strategy, caplog
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
+    exchange.get_executions_since = AsyncMock(
+        side_effect=[[], ExchangeRecoverableError("history unavailable")]
+    )
+    notifier = AsyncMock()
+
+    with caplog.at_level(logging.WARNING):
+        _run_one_cycle(
+            create_market_exit_strategy(symbol, ["4h-alpha"]), on_fill=[notifier]
+        )
+
+    notified_fill = notifier.await_args.args[0]
+    assert notified_fill.effect is None
+    assert notified_fill.realised_profit is None
+    assert "settlement of account" in caplog.text
+    assert "history unavailable" in caplog.text
+
+
+def test_a_booked_fill_on_an_account_declaring_no_symbol_is_reported_unsettled(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
+    exchange.get_executions_since = AsyncMock(return_value=[])
+    notifier = AsyncMock()
+
+    _run_one_cycle(
+        create_market_exit_strategy(symbol, ["4h-alpha"], symbols=[]),
+        on_fill=[notifier],
+    )
+
+    assert notifier.await_args.args[0].effect is None
+    exchange.get_executions_since.assert_not_awaited()
+
+
+def test_orders_of_two_profiles_are_each_settled_by_one_read(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(
+        symbol, "order-1", "order-2", "order-3"
+    )
+    exchange.get_executions_since = AsyncMock(
+        return_value=[
+            _short_exit_execution(symbol, "order-1", 1, 0.42),
+            _short_exit_execution(symbol, "order-2", 2, -0.80),
+            _short_exit_execution(symbol, "order-3", 3, 1.10),
+        ]
+    )
+    notifier = AsyncMock()
+
+    _run_one_cycle(
+        create_market_exit_strategy(symbol, ["4h-alpha", "4h-beta", "4h-gamma"]),
+        on_fill=[notifier],
+    )
+
+    profits = {
+        tag_of(call.args[0].client_order_id): call.args[0].realised_profit
+        for call in notifier.await_args_list
+    }
+    assert profits == {"4h-alpha": 0.42, "4h-beta": -0.80, "4h-gamma": 1.10}
+    assert exchange.get_executions_since.await_count == 2
+
+
+def test_the_settlement_read_starts_at_the_closed_candle(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
+    exchange.get_executions_since = AsyncMock(return_value=[])
+
+    _run_one_cycle(
+        create_market_exit_strategy(symbol, ["4h-alpha"]), on_fill=[AsyncMock()]
+    )
+
+    settlement_read = exchange.get_executions_since.await_args_list[-1]
+    assert settlement_read.args == (pd.Timestamp("2024-01-01", tz="UTC"), [symbol])
+
+
+def test_a_booked_fill_is_reported_unsettled_when_the_settlement_read_breaks(
+    exchange, create_market_exit_strategy, caplog
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
+    exchange.get_executions_since = AsyncMock(side_effect=[[], ValueError("bad row")])
+    notifier = AsyncMock()
+
+    with caplog.at_level(logging.ERROR):
+        _run_one_cycle(
+            create_market_exit_strategy(symbol, ["4h-alpha"]), on_fill=[notifier]
+        )
+
+    assert notifier.await_args.args[0].effect is None
+    assert "bad row" in caplog.text
+
+
+def test_no_settlement_read_is_made_without_a_fill_subscriber(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
+    exchange.get_executions_since = AsyncMock(return_value=[])
+
+    _run_one_cycle(create_market_exit_strategy(symbol, ["4h-alpha"]))
+
+    exchange.get_executions_since.assert_not_awaited()
+
+
+def test_a_cycle_that_booked_no_fill_reads_the_executions_once(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    exchange.get_executions_since = AsyncMock(return_value=[])
+
+    _run_one_cycle(create_market_exit_strategy(symbol, []), on_fill=[AsyncMock()])
+
+    assert exchange.get_executions_since.await_count == 1
+
+
+def test_the_settlement_read_runs_beside_the_read_of_the_fill(
+    exchange, create_market_exit_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    settlement_read_started = asyncio.Event()
+    reads: list[str] = []
+
+    async def read_executions(*_args):
+        reads.append("executions")
+        if len(reads) == 1:
+            return []
+        settlement_read_started.set()
+        return [_short_exit_execution(symbol, "order-1", 1, 0.42)]
+
+    async def read_the_fill_once_the_settlement_read_started():
+        await asyncio.wait_for(settlement_read_started.wait(), timeout=1)
+        return VenueFill(
+            order_id="order-1", symbol=symbol, side=OrderSide.BUY, quantity=1.0
+        )
+
+    exchange.place_market_order = AsyncMock(
+        return_value=PlacedOrder(
+            order_id="order-1", get_fill=read_the_fill_once_the_settlement_read_started
+        )
+    )
+    exchange.get_executions_since = AsyncMock(side_effect=read_executions)
+    notifier = AsyncMock()
+
+    _run_one_cycle(
+        create_market_exit_strategy(symbol, ["4h-alpha"]), on_fill=[notifier]
+    )
+
+    assert notifier.await_args.args[0].effect == "close"
+
+
+@pytest.mark.parametrize(
+    "shape", ["limit", "trigger"], ids=["resting_limit", "trigger_market"]
+)
+def test_an_order_that_rests_starts_no_settlement_read(account, exchange, shape):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+
+    class Strategy(StrategyProtocol):
+        market_type = "futures"
+
+        async def setup(self, requirements):
+            requirements.ohlcv.add(symbol, "1d")
+            requirements.account.add(account, symbols=[symbol], positions=True)
+
+        def generate_trading_signals(self, ohlcvs):
+            pass
+
+        def book_trading_actions(
+            self, ohlcvs, snapshots, timestamp, bookkeeper, triggered_timeframes
+        ):
+            entry = account.long_entry(symbol, 1.0)
+            if shape == "limit":
+                bookkeeper.add(entry.limit(90.0).build())
+            else:
+                bookkeeper.add(entry.trigger(95.0).build())
+
+    exchange.place_limit_order = AsyncMock(return_value=PlacedOrder(order_id="rest-1"))
+    exchange.place_market_order = AsyncMock(return_value=PlacedOrder(order_id="rest-2"))
+    exchange.get_executions_since = AsyncMock(return_value=[])
+
+    _run_one_cycle(Strategy(), on_fill=[AsyncMock()])
+
+    assert exchange.get_executions_since.await_count == 1
+
+
+def test_a_limit_order_that_filled_on_placement_is_settled_when_its_fill_is_reported(
+    account, exchange
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+
+    class Strategy(StrategyProtocol):
+        market_type = "futures"
+
+        async def setup(self, requirements):
+            requirements.ohlcv.add(symbol, "1d")
+            requirements.account.add(account, symbols=[symbol], positions=True)
+
+        def generate_trading_signals(self, ohlcvs):
+            pass
+
+        def book_trading_actions(
+            self, ohlcvs, snapshots, timestamp, bookkeeper, triggered_timeframes
+        ):
+            bookkeeper.add(account.short_exit(symbol, 1.0).limit(100.0).build())
+
+    fill = VenueFill(
+        order_id="order-1", symbol=symbol, side=OrderSide.BUY, quantity=1.0
+    )
+    exchange.place_limit_order = AsyncMock(
+        return_value=PlacedOrder(
+            order_id="order-1", get_fill=AsyncMock(return_value=fill)
+        )
+    )
+    exchange.get_executions_since = AsyncMock(
+        return_value=[_short_exit_execution(symbol, "order-1", 1, 0.42)]
+    )
+    notifier = AsyncMock()
+
+    _run_one_cycle(Strategy(), on_fill=[notifier])
+
+    notified_fill = notifier.await_args.args[0]
+    assert notified_fill.kind == "limit"
+    assert notified_fill.effect == "close"
+    assert notified_fill.realised_profit == 0.42

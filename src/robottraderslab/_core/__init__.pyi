@@ -43,7 +43,7 @@ from .exceptions import (
 )
 from .exit_codes import EX_CONFIG, EX_DATAERR, EX_TEMPFAIL
 from .fees import DEFAULT_FEE_MODE, FeeMode, PlacementReserve
-from .fill_effects import attribute_fill_effects
+from .fill_effects import attribute_fill_effects, settle_booked_fill
 from .formatting import FRACTION_TO_PERCENT, format_money, format_percent, format_ratio
 from .instance_lock import drop_dead_locks, hold_instance_lock
 from .interfaces import OHLCVProviderProtocol
@@ -252,6 +252,7 @@ __all__ = [
     "RESTING_ENTRY_KINDS",
     "retry_on_transient",
     "run_async",
+    "settle_booked_fill",
     "settings_the_factory_does_not_take",
     "setup_notebook_logging",
     "signed_position",

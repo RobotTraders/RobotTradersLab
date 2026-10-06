@@ -47,6 +47,8 @@ from robottraderslab.strategies import (
     StrategyRequirements,
 )
 
+from .booked_fills import BookedFills
+
 logger = logging.getLogger(__name__)
 
 
@@ -172,12 +174,30 @@ class LiveBot:
             return
 
         notifications = Notifications(self._on_fill, self._on_placement)
-        executed = await self._book_timeframes(
-            requirements, ohlcvs, account_snapshots, closing_timeframes, notifications
+        booked_fills = BookedFills(
+            requirements.account,
+            reported_since,
+            settling=self._report_fills,
+            max_attempts=self._max_attempts,
+            base_delay=self._base_delay,
         )
-        await confirm_booked_protections(
-            executed, max_attempts=self._max_attempts, base_delay=self._base_delay
-        )
+        try:
+            executed = await self._book_timeframes(
+                requirements,
+                ohlcvs,
+                account_snapshots,
+                closing_timeframes,
+                notifications,
+                booked_fills,
+            )
+            await confirm_booked_protections(
+                executed, max_attempts=self._max_attempts, base_delay=self._base_delay
+            )
+            settled_fills = await booked_fills.settled()
+        finally:
+            booked_fills.cancel()
+        for order_fill in settled_fills:
+            await notifications.record_fill(order_fill)
         await self._notify_entry_fills(
             requirements, ohlcvs, account_snapshots, closing_timeframes, notifications
         )
@@ -217,6 +237,7 @@ class LiveBot:
         account_snapshots: AccountSnapshots,
         timeframes: set[TimeFrame],
         notifications: Notifications,
+        booked_fills: BookedFills,
     ) -> list[BaseExchangeAction]:
         """Book the closing timeframes once, on the newest moment the candles
         reach.
@@ -246,6 +267,7 @@ class LiveBot:
             snapshot.timestamp,
             triggered,
             notifications,
+            booked_fills,
         )
 
     async def _process_timestamp(
@@ -256,6 +278,7 @@ class LiveBot:
         timestamp: datetime,
         triggered_timeframes: list[TimeFrame],
         notifications: Notifications,
+        booked_fills: BookedFills,
     ) -> list[BaseExchangeAction]:
         """Process a single timestamp across all triggered timeframes."""
         bookkeeper = BookKeeper()
@@ -278,8 +301,11 @@ class LiveBot:
 
         post_execution_callbacks = await execute_trading_actions(
             bookkeeper.list_actions(),
-            on_order_filled=[notifications.record_fill],
-            on_order_placed=[notifications.record_placement],
+            on_order_filled=[booked_fills.record_fill],
+            on_order_placed=[
+                notifications.record_placement,
+                booked_fills.record_placement,
+            ],
             max_attempts=self._max_attempts,
             base_delay=self._base_delay,
             declared_waits=bookkeeper.declared_waits(),
