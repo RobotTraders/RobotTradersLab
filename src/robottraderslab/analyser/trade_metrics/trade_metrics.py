@@ -23,6 +23,8 @@ def calculate_win_rate(pnl_series: pd.Series) -> float:
 
 
 def calculate_profit_factor(pnl_series: pd.Series) -> float:
+    if len(pnl_series) == 0:
+        return 0.0
     profits = float(pnl_series[pnl_series > 0].sum())
     losses = float(abs(pnl_series[pnl_series < 0].sum()))
     return float(profits / losses if losses != 0 else float("inf"))
@@ -64,7 +66,7 @@ def calculate_fee_metrics(fee_series: pd.Series) -> FeeMetrics:
     return FeeMetrics(
         total_fee=float(fee_series.sum()),
         biggest_fee=float(fee_series.max()),
-        avg_fee=float(fee_series.mean()),
+        avg_fee=float(fee_series.mean()) if len(fee_series) > 0 else 0.0,
     )
 
 

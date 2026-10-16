@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -9,6 +11,7 @@ from robottraderslab.cli import app
 from robottraderslab.exceptions import (
     ExchangeCriticalError,
     ExchangeRecoverableError,
+    SymbolNotListedError,
 )
 from robottraderslab.exchanges import Balance
 
@@ -214,6 +217,25 @@ def test_a_balance_read_the_venue_rejects(cli, workspace, venue, account):
     assert refused.stderr == "Error: the venue rejects the read\n"
 
 
+def test_a_symbol_the_venue_does_not_list_names_the_symbol_and_the_market(
+    cli, workspace, venue, make_registered_adapter
+):
+    async def check(**arguments: Any) -> list[str]:
+        raise SymbolNotListedError(
+            "TAO/USDT:USDT has no usable contract on the demo market of Bitget."
+        )
+
+    make_registered_adapter(check, VENUE, group=SECRET_CHECK_GROUP)
+    write_secrets(workspace, VENUE_ENTRY)
+
+    refused = cli.invoke(app, ["check", "venue-pilot", "--symbol", "TAO/USDT:USDT"])
+
+    assert refused.exit_code == 1
+    assert refused.stderr == (
+        "Error: TAO/USDT:USDT has no usable contract on the demo market of Bitget.\n"
+    )
+
+
 def test_a_secrets_file_naming_one_entry_twice(cli, workspace):
     write_secrets(workspace, VENUE_ENTRY + VENUE_ENTRY)
 
@@ -266,3 +288,24 @@ def test_a_webhook_with_no_plugin_installed(cli, workspace):
         "Error: `trades-channel` carries a `webhook_url`, and the Discord "
         "notifications plugin, which checks one, is not installed\n"
     )
+
+
+def test_a_refusal_read_through_a_pipe_follows_the_progress_line(project):
+    write_secrets(
+        project / "workspace",
+        '[[secrets]]\nname = "absent-venue"\nexchange = "no-such-venue"\n',
+    )
+
+    piped = subprocess.run(
+        [sys.executable, "-m", "robottraderslab", "check", "absent-venue"],
+        cwd=project,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    last_line = piped.stdout.splitlines()[-1]
+    assert piped.returncode == 1
+    assert last_line.startswith("Error:")

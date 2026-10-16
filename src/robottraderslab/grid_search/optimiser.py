@@ -89,8 +89,7 @@ class GridSearchOptimiser:
             result = _measure_point(config_dict, grid_point)
             results.append(result)
 
-            if not result.is_successful:
-                logger.warning(f"Grid point {i}/{total_points} failed: {result.error}")
+            log_outcome(result, i, total_points)
 
         logger.info(f"Grid search completed. {len(results)} results")
         return results

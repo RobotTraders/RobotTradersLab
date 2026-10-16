@@ -182,6 +182,12 @@ class AccountSnapshot:
         """
         return self._resting_protections(OrderType.TAKE_PROFIT, symbol)
 
+    def _has_margin_settings(self, symbol: Symbol) -> bool:
+        """A symbol the connector left out of the read, a contract the venue does
+        not list, has no settings to hold.
+        """
+        return symbol in self._declared(self._margin_settings, "margin_settings=True")
+
     def _hold_margin_settings(self, symbol: Symbol, settings: MarginSettings) -> None:
         """The engine sets a declared margin target before the strategy books,
         so the settings it read are replaced by the ones the venue now holds.

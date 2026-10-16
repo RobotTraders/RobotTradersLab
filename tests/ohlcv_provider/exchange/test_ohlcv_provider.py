@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,12 @@ from robottraderslab._core import (
     assemble_available_ohlcvs_from_requirements,
     to_seconds,
 )
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import (
+    DataError,
+    ExchangeCriticalError,
+    StrategyCriticalError,
+    SymbolNotListedError,
+)
 from robottraderslab.exchanges import OhlcvAdapterProtocol, OhlcvData
 from robottraderslab.ohlcv_provider import ExchangeOHLCVProvider
 from robottraderslab.ohlcv_provider.ccxt_ohlcv_adapter import EXCHANGES
@@ -405,7 +411,7 @@ class TestExchangeOHLCVProvider:
         "failure",
         [
             ExchangeCriticalError("key revoked"),
-            StrategyCriticalError("SOL/USD:USD is not a Kraken perpetual"),
+            StrategyCriticalError("the strategy names no account"),
         ],
         ids=["exchange_critical", "strategy_critical"],
     )
@@ -421,6 +427,50 @@ class TestExchangeOHLCVProvider:
 
         with pytest.raises(type(failure), match=str(failure)):
             await assemble_available_ohlcvs_from_requirements(provider, requirements)
+
+    async def test_a_symbol_the_venue_does_not_list_is_dropped_from_the_live_assembly_at_warning(
+        self, make_registered_adapter, caplog
+    ):
+        make_registered_adapter(_FailingAdapter, "failing_exchange")
+        _OHLCV_CACHE.clear()
+        provider = ExchangeOHLCVProvider(
+            exchange="failing_exchange",
+            failure=SymbolNotListedError(
+                "TAO/USDT:USDT has no usable contract on the demo market of Bitget."
+            ),
+        )
+        provider.set_dates("2025-01-01", "2025-01-03")
+        requirements = OHLCVRequirements()
+        requirements.add(Symbol.create("TAO/USDT:USDT"), "1h")
+
+        assembled = await assemble_available_ohlcvs_from_requirements(
+            provider, requirements
+        )
+
+        assert assembled is None
+        assert "its profiles sit out this cycle" in caplog.text
+        assert "demo market of Bitget" in caplog.text
+        assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+    async def test_a_symbol_the_venue_does_not_list_stops_the_backtest_assembly_as_a_data_error(
+        self, make_registered_adapter
+    ):
+        make_registered_adapter(_FailingAdapter, "failing_exchange")
+        _OHLCV_CACHE.clear()
+        provider = ExchangeOHLCVProvider(
+            exchange="failing_exchange",
+            failure=SymbolNotListedError(
+                "TAO/USDT:USDT has no usable contract on the demo market of Bitget."
+            ),
+        )
+        provider.set_dates("2025-01-01", "2025-01-03")
+        requirements = OHLCVRequirements()
+        requirements.add(Symbol.create("TAO/USDT:USDT"), "1h")
+
+        with pytest.raises(
+            DataError, match="TAO/USDT:USDT@1h: .*demo market of Bitget"
+        ):
+            await assemble_all_ohlcvs_from_requirements(provider, requirements)
 
     async def test_fetch_ohlcvs_returns_frame_per_pair(
         self, shared_provider: ExchangeOHLCVProvider, provider_mocks

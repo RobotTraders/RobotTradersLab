@@ -42,6 +42,7 @@ _MODULE_BY_NAME = {
     "RateLimiterProtocol": "robottraderslab._core.rate_limiting",
     "RequestSigner": "robottraderslab._core.exchanges",
     "RequestToSign": "robottraderslab._core.exchanges",
+    "SharedAnnouncedWindow": "robottraderslab._core.rate_limiting",
     "SharedRateLimiter": "robottraderslab._core.rate_limiting",
     "SharedRequestWindow": "robottraderslab._core.rate_limiting",
     "SharedTokenBucket": "robottraderslab._core.rate_limiting",

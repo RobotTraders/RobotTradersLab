@@ -40,6 +40,7 @@ from .exceptions import (
     OhlcvValidationError,
     RateLimitExceededError,
     StrategyCriticalError,
+    SymbolNotListedError,
 )
 from .exit_codes import EX_CONFIG, EX_DATAERR, EX_TEMPFAIL
 from .fees import DEFAULT_FEE_MODE, FeeMode, PlacementReserve
@@ -262,6 +263,7 @@ __all__ = [
     "sweep_orphan_protections",
     "Symbol",
     "SymbolAnalysis",
+    "SymbolNotListedError",
     "SymbolStr",
     "tag_of",
     "TakeProfit",

@@ -19,7 +19,8 @@ async def hold_margin_targets(
     """Run before the strategy books on the snapshots.
 
     Each snapshot then carries what the venue holds: the target where its
-    setter ran, the settings read where the venue refused it.
+    setter ran, the settings read where the venue refused it. A symbol the
+    connector left out of the read carries no target.
 
     Args:
         max_attempts: Total retry attempts for transient errors, per setter.
@@ -27,8 +28,6 @@ async def hold_margin_targets(
 
     Raises:
         ExchangeCriticalError: If the venue is unusable.
-        StrategyCriticalError: If a margin target names a symbol the venue
-            cannot trade.
     """
     for requirement in requirements._get_all():
         if not requirement.margin_targets:
@@ -37,7 +36,8 @@ async def hold_margin_targets(
         drifted = [
             (symbol, target)
             for symbol, target in requirement.margin_targets.items()
-            if _differs(snapshot.margin_settings(symbol), target)
+            if snapshot._has_margin_settings(symbol)
+            and _differs(snapshot.margin_settings(symbol), target)
         ]
         if drifted:
             await asyncio.gather(

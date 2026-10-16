@@ -8,7 +8,6 @@ from robottraderslab._core import (
     MAX_ATTEMPTS,
     RESTING_ENTRY_KINDS,
     VENUE_FIRED_SOURCES,
-    AccountRequirements,
     BaseExchangeAction,
     CandleWindows,
     Execution,
@@ -99,7 +98,6 @@ class LiveBot:
             max_attempts=self._max_attempts,
             base_delay=self._base_delay,
         )
-        self._log_trading_accounts(requirements.account)
         log_strategy_slots(self._strategy)
 
         declared_timeframes = {r.timeframe for r in requirements.ohlcv._get_all()}
@@ -223,12 +221,6 @@ class LiveBot:
     def _log_cycle_header(self) -> None:  # pragma: no cover
         logger.info("=" * 80)
         logger.info("LiveBot Trading Cycle Started")
-
-    def _log_trading_accounts(self, accounts: AccountRequirements) -> None:
-        account_names = [
-            requirement.account.name for requirement in accounts._get_all()
-        ]
-        logger.info("Trading real accounts: %s", ", ".join(account_names))
 
     async def _book_timeframes(
         self,

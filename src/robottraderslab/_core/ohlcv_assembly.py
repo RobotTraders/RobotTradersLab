@@ -5,7 +5,12 @@ from typing import cast
 
 import pandas as pd
 
-from .exceptions import ExchangeCriticalError, StrategyCriticalError
+from .exceptions import (
+    DataError,
+    ExchangeCriticalError,
+    StrategyCriticalError,
+    SymbolNotListedError,
+)
 from .interfaces import OHLCVFetcher, OHLCVProviderProtocol
 from .ohlcv.ohlcv_requirements import OHLCVRequirement, OHLCVRequirements
 from .ohlcv.ohlcvs import OHLCVs, OHLCVsByTimeframeAndSymbol
@@ -33,16 +38,19 @@ async def assemble_all_ohlcvs_from_requirements(
 
     Raises:
         StrategyCriticalError: If strategy declared no OHLCV requirements.
+        DataError: If the venue does not list a declared symbol.
     """
     symbol_timeframes = _declared_symbol_timeframes(provider, requirements)
     pairs = _unique_pairs(symbol_timeframes)
     outcomes = await _fetch_pairs(provider, pairs, max_attempts=1, base_delay=0.0)
 
     frames: dict[_Pair, pd.DataFrame] = {}
-    for pair, outcome in zip(pairs, outcomes, strict=True):
+    for (symbol, timeframe), outcome in zip(pairs, outcomes, strict=True):
+        if isinstance(outcome, SymbolNotListedError):
+            raise DataError(f"{symbol}@{timeframe}: {outcome}") from outcome
         if isinstance(outcome, BaseException):
             raise outcome
-        frames[pair] = outcome
+        frames[(symbol, timeframe)] = outcome
     return _assembled(frames, symbol_timeframes)
 
 
@@ -57,7 +65,9 @@ async def assemble_available_ohlcvs_from_requirements(
 
     Every pair is fetched concurrently and retried on transient errors. A
     pair that still cannot be fetched is dropped from this assembly and
-    reported at ERROR, so one symbol's data failure never blocks the others.
+    reported at ERROR, so one symbol's data failure never blocks the others;
+    a symbol the venue does not list is dropped at WARNING, since the listing
+    is the venue's fact.
 
     Args:
         requirements: Requirements collected from strategy.setup().
@@ -68,8 +78,7 @@ async def assemble_available_ohlcvs_from_requirements(
         Assembled OHLCVs, or None when no declared pair could be fetched.
 
     Raises:
-        StrategyCriticalError: If the strategy declared no OHLCV requirements,
-            or a fetch reports a symbol the venue cannot trade.
+        StrategyCriticalError: If the strategy declared no OHLCV requirements.
         ExchangeCriticalError: If a fetch reports the venue unusable.
     """
     symbol_timeframes = _declared_symbol_timeframes(provider, requirements)
@@ -82,6 +91,11 @@ async def assemble_available_ohlcvs_from_requirements(
     for (symbol, timeframe), outcome in zip(pairs, outcomes, strict=True):
         if isinstance(outcome, (ExchangeCriticalError, StrategyCriticalError)):
             raise outcome
+        if isinstance(outcome, SymbolNotListedError):
+            logger.warning(
+                "%s@%s: its profiles sit out this cycle: %s", symbol, timeframe, outcome
+            )
+            continue
         if isinstance(outcome, BaseException):
             logger.error("%s@%s: skipping this cycle: %s", symbol, timeframe, outcome)
             continue

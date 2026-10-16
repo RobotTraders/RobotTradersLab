@@ -228,11 +228,13 @@ def test_logs_the_profile_strategy_once_over_every_candle(
         "2024-01-04",
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         asyncio.run(backtester.run())
 
     assert len(strategy.booked) == 4
-    assert caplog.messages.count("Strategy: 1 profile; slots: per-profile booking") == 1
+    logged = [(record.levelno, record.getMessage()) for record in caplog.records]
+    assert logged.count((logging.INFO, "Strategy: 1 profile")) == 1
+    assert logged.count((logging.DEBUG, "Strategy slots: per-profile booking")) == 1
 
 
 def test_calls_on_filled_callbacks(

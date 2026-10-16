@@ -17,6 +17,7 @@ from robottraderslab.exceptions import (
     ExchangeTransientError,
     MissingOhlcvDataError,
     StrategyCriticalError,
+    SymbolNotListedError,
 )
 from robottraderslab.exchanges import (
     Execution,
@@ -40,6 +41,7 @@ from robottraderslab.strategies import (
     FillDescriber,
     OHLCVs,
     OrderProtocol,
+    Profile,
     ProfileStrategy,
     StrategyProtocol,
     StrategyRequirements,
@@ -176,40 +178,6 @@ def test_calls_setup_before_generate_trading_signals(account):
     assert calls[:2] == ["setup", "generate"]
 
 
-def test_cycle_logs_the_accounts_it_trades_for_real(account, caplog):
-    symbol = Symbol.create("BTC/USDT:USDT")
-
-    async def add_requirements(requirements):
-        requirements.ohlcv.add(symbol, "1d")
-        requirements.account.add(account, positions=True)
-
-    strategy = Mock(spec=StrategyProtocol)
-    strategy.setup = AsyncMock(side_effect=add_requirements)
-
-    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
-    ohlcv_provider.fetch_ohlcv.return_value = pd.DataFrame(
-        {
-            "open": [100.0],
-            "high": [110.0],
-            "low": [90.0],
-            "close": [105.0],
-            "volume": [1000],
-        },
-        index=[pd.Timestamp("2024-01-01")],
-    )
-    livebot = LiveBot(strategy, ohlcv_provider)
-
-    with caplog.at_level(logging.INFO):
-        asyncio.run(livebot.run())
-
-    accounts_record = next(
-        record
-        for record in caplog.records
-        if record.getMessage().startswith("Trading real accounts:")
-    )
-    assert account.name in accounts_record.getMessage()
-
-
 def test_cycle_logs_the_profile_strategy_once_when_setup_is_retried(caplog):
     symbol = Symbol.create("BTC/USDT:USDT")
 
@@ -241,11 +209,13 @@ def test_cycle_logs_the_profile_strategy_once_when_setup_is_retried(caplog):
     ohlcv_provider.fetch_ohlcv.return_value = _candles(["2024-01-01"])
     livebot = LiveBot(strategy, ohlcv_provider, base_delay=0)
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         asyncio.run(livebot.run())
 
     assert strategy._setup_calls == 2
-    assert caplog.messages.count("Strategy: 1 profile; slots: per-profile booking") == 1
+    logged = [(record.levelno, record.getMessage()) for record in caplog.records]
+    assert logged.count((logging.INFO, "Strategy: 1 profile")) == 1
+    assert logged.count((logging.DEBUG, "Strategy slots: per-profile booking")) == 1
 
 
 def test_calls_on_filled_callbacks(
@@ -2210,3 +2180,104 @@ def test_a_limit_order_that_filled_on_placement_is_settled_when_its_fill_is_repo
     assert notified_fill.kind == "limit"
     assert notified_fill.effect == "close"
     assert notified_fill.realised_profit == 0.42
+
+
+BTC = Symbol.create("BTC/USDT:USDT")
+ETH = Symbol.create("ETH/USDT:USDT")
+TAO = Symbol.create("TAO/USDT:USDT")
+LISTED_SYMBOLS = frozenset({BTC, ETH})
+TAO_NOT_LISTED = "TAO/USDT:USDT has no usable contract on the demo market of Bitget."
+
+
+@pytest.fixture
+def create_listing_livebot(
+    account: FuturesAccount, exchange: Mock
+) -> Callable[[], LiveBot]:
+    def _create() -> LiveBot:
+        async def get_margin_settings(symbols):
+            return {
+                symbol: MarginSettings(leverage=3.0, margin_mode=MarginMode.ISOLATED)
+                for symbol in symbols
+                if symbol in LISTED_SYMBOLS
+            }
+
+        exchange.get_margin_settings.side_effect = get_margin_settings
+
+        class Strategy(ProfileStrategy[Profile]):
+            market_type = "futures"
+
+            def __init__(self):
+                super().__init__(
+                    account=account,
+                    trading_system=TradingSystem(trading_mode=TradingMode.LIVE),
+                    config_dir=None,
+                    profiles=[
+                        {"symbol": str(symbol), "timeframe": "1d"}
+                        for symbol in (BTC, TAO, ETH)
+                    ],
+                )
+
+            async def setup(self, requirements):
+                symbols = [profile.symbol for profile in self.profiles]
+                for symbol in symbols:
+                    requirements.ohlcv.add(symbol, "1d")
+                requirements.account.add(
+                    account,
+                    symbols=symbols,
+                    margin_targets={symbol: ISOLATED_5X for symbol in symbols},
+                )
+
+            def book_profile_actions(
+                self, profile, ohlcvs, account_snapshots, timestamp, bookkeeper
+            ):
+                ohlcvs.column(profile.symbol, profile.timeframe, "close")
+                bookkeeper.add(account.long_entry(profile.symbol, 1.0))
+
+        def fetch_ohlcv(symbol, timeframe):
+            if symbol not in LISTED_SYMBOLS:
+                raise SymbolNotListedError(TAO_NOT_LISTED)
+            return _candles(["2024-01-01"])
+
+        ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+        ohlcv_provider.fetch_ohlcv.side_effect = fetch_ohlcv
+        return LiveBot(Strategy(), ohlcv_provider)
+
+    return _create
+
+
+def test_a_profile_on_an_unlisted_symbol_sits_out_while_the_others_trade(
+    create_listing_livebot, exchange
+):
+    asyncio.run(create_listing_livebot().run())
+
+    placed = {
+        call.kwargs["symbol"] for call in exchange.place_market_order.await_args_list
+    }
+    assert placed == {BTC, ETH}
+
+
+def test_the_profile_on_an_unlisted_symbol_is_reported_with_the_symbol_and_the_market(
+    create_listing_livebot, caplog
+):
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(create_listing_livebot().run())
+
+    reports = [
+        record.getMessage()
+        for record in caplog.records
+        if TAO_NOT_LISTED in record.getMessage()
+    ]
+    assert len(reports) == 1
+    assert reports[0].startswith("TAO/USDT:USDT@1d: its profiles sit out this cycle")
+    assert [
+        record for record in caplog.records if record.levelno >= logging.ERROR
+    ] == []
+
+
+def test_a_leverage_target_on_an_unlisted_symbol_is_left_unset(
+    create_listing_livebot, exchange
+):
+    asyncio.run(create_listing_livebot().run())
+
+    set_for = {call.args[0] for call in exchange.set_leverage.await_args_list}
+    assert set_for == {BTC, ETH}

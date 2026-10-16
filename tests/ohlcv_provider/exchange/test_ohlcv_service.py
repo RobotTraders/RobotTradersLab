@@ -19,6 +19,7 @@ from robottraderslab.exceptions import (
     ExchangeCriticalError,
     ExchangeTransientError,
     StrategyCriticalError,
+    SymbolNotListedError,
 )
 from robottraderslab.exchanges import no_candles
 from robottraderslab.ohlcv_provider.exceptions import PartialDownloadError
@@ -657,7 +658,7 @@ class TestCriticalsFromTheVenue:
         "failure",
         [
             ExchangeCriticalError("key revoked"),
-            StrategyCriticalError("SOL/USD:USD is not a Kraken perpetual"),
+            StrategyCriticalError("the strategy names no account"),
         ],
         ids=["exchange_critical", "strategy_critical"],
     )
@@ -665,6 +666,26 @@ class TestCriticalsFromTheVenue:
         self, failure
     ):
         with pytest.raises(type(failure), match=str(failure)):
+            await fetch_ohlcv_with(
+                adapter_factory=FakeVenueFactory(_FailingVenue(failure)),
+                repository=InMemoryRepository(empty_frame()),
+                adapter_name="test_exchange",
+                dataset_name="test_exchange",
+                symbol=SYMBOL_BTC,
+                timeframe="1h",
+                start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+                end_date=datetime(2024, 1, 2, tzinfo=timezone.utc),
+                market_open_mask=_FailingVenue.market_open_mask,
+            )
+
+
+class TestSymbolNotListedByTheVenue:
+    async def test_the_refusal_reaches_the_caller_with_its_class(self):
+        failure = SymbolNotListedError(
+            "TAO/USDT:USDT has no usable contract on Bitget."
+        )
+
+        with pytest.raises(SymbolNotListedError, match="no usable contract"):
             await fetch_ohlcv_with(
                 adapter_factory=FakeVenueFactory(_FailingVenue(failure)),
                 repository=InMemoryRepository(empty_frame()),

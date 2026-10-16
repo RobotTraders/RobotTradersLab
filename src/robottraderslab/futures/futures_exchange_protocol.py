@@ -52,7 +52,7 @@ class FuturesExchangeProtocol(Protocol):
         """Return the margin mode and leverage currently active for each symbol.
 
         Returns:
-            One entry per requested symbol. Leverage is None when the venue
+            One entry per requested symbol the venue lists. Leverage is None when the venue
             defines no per-symbol leverage in the active margin mode.
         """
         ...

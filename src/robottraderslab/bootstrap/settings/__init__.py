@@ -6,6 +6,7 @@ from .load_secrets import (
     reveal_secrets,
 )
 from .settings import (
+    TRADING_ACCOUNT_SECTION,
     AccountConfig,
     BacktestConfig,
     BotConfig,
@@ -17,6 +18,7 @@ from .settings import (
 
 __all__ = [
     "SECRET_REFERENCE_KEY",
+    "TRADING_ACCOUNT_SECTION",
     "AccountConfig",
     "BacktestConfig",
     "BotConfig",

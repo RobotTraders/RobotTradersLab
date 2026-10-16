@@ -161,6 +161,7 @@ def test_exchanges_gate():
         "RateLimiterProtocol",
         "RequestSigner",
         "RequestToSign",
+        "SharedAnnouncedWindow",
         "SharedRateLimiter",
         "SharedRequestWindow",
         "SharedTokenBucket",
@@ -192,6 +193,7 @@ def test_exceptions_gate():
         "NoOpenPositionError",
         "RateLimitExceededError",
         "StrategyCriticalError",
+        "SymbolNotListedError",
     ]
 
 

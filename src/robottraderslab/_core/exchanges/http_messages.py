@@ -1,16 +1,24 @@
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 _FIRST_ERROR_STATUS = 400
 
 
 @dataclass(frozen=True, slots=True)
 class HttpResponse:
-    """The parts of a response an exchange plugin classifies errors from."""
+    """The parts of a response an exchange plugin reads, to classify errors and
+    to take in what the venue announces.
+
+    Attributes:
+        headers: Looked up without regard to case when the transport built
+            the response.
+    """
 
     status_code: int
     reason_phrase: str
     url: str
     path: str
+    headers: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def is_error(self) -> bool:

@@ -10,6 +10,7 @@ from robottraderslab._core.exceptions import (
     NoOpenPositionError,
     RateLimitExceededError,
     StrategyCriticalError,
+    SymbolNotListedError,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "NoOpenPositionError",
     "RateLimitExceededError",
     "StrategyCriticalError",
+    "SymbolNotListedError",
 ]
