@@ -685,21 +685,36 @@ class TestSlotLogging:
         ]
         strategy = _create(_ThreeSlotStrategy, profiles, TradingMode.LIVE)
 
+        with caplog.at_level(logging.DEBUG):
+            log_strategy_slots(strategy)
+
+        assert [(record.levelno, record.getMessage()) for record in caplog.records] == [
+            (logging.INFO, "_ThreeSlotStrategy: 3 profiles"),
+            (
+                logging.DEBUG,
+                "_ThreeSlotStrategy slots: per-profile signals, "
+                "general booking, per-profile booking",
+            ),
+        ]
+
+    def test_the_slots_stay_out_of_an_info_log(self, caplog):
+        strategy = _create(_ThreeSlotStrategy, PROFILES[:1], TradingMode.LIVE)
+
         with caplog.at_level(logging.INFO):
             log_strategy_slots(strategy)
 
-        assert caplog.messages == [
-            "_ThreeSlotStrategy: 3 profiles; slots: per-profile signals, "
-            "general booking, per-profile booking"
-        ]
+        assert caplog.messages == ["_ThreeSlotStrategy: 1 profile"]
 
     def test_a_strategy_filling_no_slot(self, caplog):
         strategy = _create(_BareStrategy, PROFILES[:1], TradingMode.BACKTEST)
 
-        with caplog.at_level(logging.INFO):
+        with caplog.at_level(logging.DEBUG):
             log_strategy_slots(strategy)
 
-        assert caplog.messages == ["_BareStrategy: 1 profile; slots: none"]
+        assert [(record.levelno, record.getMessage()) for record in caplog.records] == [
+            (logging.INFO, "_BareStrategy: 1 profile"),
+            (logging.DEBUG, "_BareStrategy slots: none"),
+        ]
 
     def test_a_strategy_that_does_not_run_profile_by_profile(self, caplog):
         with caplog.at_level(logging.INFO):

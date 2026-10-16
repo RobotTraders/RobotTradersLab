@@ -36,11 +36,14 @@ def _classify(response: HttpResponse, response_json: JsonLike) -> None:
 
 
 def _make_response(
-    status_code: int = 200, body: str = '{"data": "ok"}'
+    status_code: int = 200,
+    body: str = '{"data": "ok"}',
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     return httpx.Response(
         status_code,
         content=body.encode(),
+        headers=headers,
         request=httpx.Request("GET", f"{BASE_URL}/v1/data"),
     )
 
@@ -124,7 +127,8 @@ async def test_error_response_raises_via_classifier(transport, session):
         await transport.request("GET", "/v1/data")
 
 
-async def test_classifier_reads_the_status_and_url_of_the_response(session):
+async def test_classifier_reads_the_status_url_and_headers_of_the_response(session):
+    session.send.return_value = _make_response(headers={"X-Remaining": "3"})
     classified: list[HttpResponse] = []
     transport = HttpTransport(
         session,
@@ -142,8 +146,33 @@ async def test_classifier_reads_the_status_and_url_of_the_response(session):
             reason_phrase="OK",
             url=f"{BASE_URL}/v1/data",
             path="/v1/data",
+            headers={"x-remaining": "3", "content-length": "14"},
         )
     ]
+
+
+async def test_observer_reads_the_response_before_it_is_classified(session):
+    events: list[str] = []
+
+    async def observe(response: HttpResponse) -> None:
+        events.append(f"observed {response.status_code}")
+
+    def classify(response: HttpResponse, _: JsonLike) -> None:
+        events.append(f"classified {response.status_code}")
+
+    session.send.return_value = _make_response(status_code=429, body="{}")
+    transport = HttpTransport(
+        session,
+        BASE_URL,
+        classify_response=classify,
+        connection_error=FakeConnectionError,
+        sign_request=None,
+        observe_response=observe,
+    )
+
+    await transport.request("GET", "/v1/data")
+
+    assert events == ["observed 429", "classified 429"]
 
 
 async def test_signature_headers_are_sent(signing_transport, session):

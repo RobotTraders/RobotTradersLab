@@ -155,6 +155,9 @@ app = typer.Typer(
 
 
 def main() -> None:
+    """A handler delivering over the network needs the thread pool the
+    interpreter retires before it runs the logging shutdown it registers.
+    """
     use_utf8_console()
     try:
         app()
@@ -166,6 +169,8 @@ def main() -> None:
         _report(logging.ERROR, "Venue error", e, EX_TEMPFAIL)
     except Exception as e:
         _report(logging.ERROR, "Fatal error", e, _EX_CRASH)
+    finally:
+        logging.shutdown()
 
 
 @app.callback(invoke_without_command=True)
@@ -436,7 +441,6 @@ def _report(
     exit_code = spoken_code
     if logging.getLogger().hasHandlers():
         logger.log(level, "%s: %s", headline, failure, exc_info=True)
-        logging.shutdown()
     else:
         exit_code = EX_DATAERR
     typer.echo(f"Error: {failure}", err=True)

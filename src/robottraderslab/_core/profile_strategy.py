@@ -257,8 +257,11 @@ class ProfileStrategy(Generic[TProfile]):
 
 
 def log_strategy_slots(strategy: StrategyProtocol) -> None:
-    """Every slot runs whether a subclass fills it or not, so this line is the
-    operator's only view of which ones do.
+    """Log a profile strategy's profile count at INFO and its filled slots at DEBUG.
+
+    The INFO line reads `<Strategy>: <n> profile(s)`. The DEBUG line reads
+    `<Strategy> slots: <labels>`, or `<Strategy> slots: none` when the class
+    fills no slot.
 
     Raises:
         StrategyCriticalError: If the strategy's profiles fail the checks its
@@ -269,11 +272,11 @@ def log_strategy_slots(strategy: StrategyProtocol) -> None:
     strategy._check_profiles()
     profile_count = len(strategy.profiles)
     plural = "" if profile_count == 1 else "s"
-    logger.info(
-        "%s: %d profile%s; slots: %s",
-        type(strategy).__name__,
-        profile_count,
-        plural,
+    strategy_name = type(strategy).__name__
+    logger.info("%s: %d profile%s", strategy_name, profile_count, plural)
+    logger.debug(
+        "%s slots: %s",
+        strategy_name,
         ", ".join(_filled_slot_labels(type(strategy))) or "none",
     )
 

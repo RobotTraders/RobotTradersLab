@@ -1,3 +1,4 @@
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -7,7 +8,11 @@ import pytest
 from robottraderslab.exceptions import StrategyCriticalError
 from robottraderslab.grid_search.grid_point import GridPoint
 from robottraderslab.grid_search.optimisation_result import OptimisationResult
-from robottraderslab.grid_search.pooled_sweep import MAX_POOL_BREAKS, measure_pooled
+from robottraderslab.grid_search.pooled_sweep import (
+    MAX_POOL_BREAKS,
+    log_outcome,
+    measure_pooled,
+)
 
 GRID_SIZE = 6
 KILLER = 3
@@ -94,3 +99,25 @@ def test_a_result_that_cannot_travel_back_fails_its_point():
 
     assert not results[0].is_successful
     assert results[0].parameters == {"position": 0}
+
+
+class TestLogOutcome:
+    def test_a_scored_point_is_logged_completed_at_info(self, caplog):
+        scored = OptimisationResult(grid_point=GridPoint(parameters={}), roi=0.0)
+
+        with caplog.at_level(logging.INFO):
+            log_outcome(scored, 3, 72)
+
+        assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+            (logging.INFO, "Grid point 3/72 completed")
+        ]
+
+    def test_a_failed_point_is_logged_with_its_error_at_warning(self, caplog):
+        failed = OptimisationResult.from_error(GridPoint(parameters={}), "boom")
+
+        with caplog.at_level(logging.INFO):
+            log_outcome(failed, 4, 72)
+
+        assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+            (logging.WARNING, "Grid point 4/72 failed: boom")
+        ]

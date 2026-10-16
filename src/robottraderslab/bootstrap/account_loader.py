@@ -9,6 +9,7 @@ from robottraderslab.futures import FuturesAccount
 from .exchange_loader import load_exchange
 from .settings import (
     SECRET_REFERENCE_KEY,
+    TRADING_ACCOUNT_SECTION,
     AccountConfig,
     SecretsByName,
     resolve_secret_references,
@@ -93,7 +94,8 @@ def _named_config(
     config = dict(account_config)
     name = config.pop(_ACCOUNT_NAME_KEY, "") or config.get(_EXCHANGE_KEY, "")
     if SECRET_REFERENCE_KEY in config:
-        merged = resolve_secret_references({name: config}, secrets_by_name)[name]
+        label = name or TRADING_ACCOUNT_SECTION
+        merged = resolve_secret_references({label: config}, secrets_by_name)[label]
     else:
         merged = {**config, **secrets_by_name.get(name, {})}
     if _EXCHANGE_KEY not in merged:

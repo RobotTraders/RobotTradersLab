@@ -18,9 +18,9 @@ async def mock_exchange() -> AsyncMock:
     return AsyncMock(spec=FuturesExchangeProtocol)
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 async def mock_load_exchange(mock_exchange: AsyncMock) -> AsyncIterator[Mock]:
-    """Stand in for the venue, so no test in this module needs credentials."""
+    """A test that requests it never reaches a venue, so it needs no credentials."""
     with patch(
         "robottraderslab.bootstrap.account_loader.load_exchange",
         return_value=mock_exchange,
@@ -39,12 +39,14 @@ async def test_exchange_is_required():
         await load_accounts([{}], _SECRETS)
 
 
+@pytest.mark.usefixtures("mock_load_exchange")
 async def test_exchange_is_the_default_name_of_account():
     accounts = await load_accounts([{"exchange": "bitget"}], _SECRETS)
 
     assert set(accounts.keys()) == {"bitget"}
 
 
+@pytest.mark.usefixtures("mock_load_exchange")
 async def test_account_name_is_used_when_provided():
     accounts = await load_accounts(
         [{"exchange": "bitget", "account_name": "my_account"}], _SECRETS
@@ -63,6 +65,7 @@ config_with_account_name = {
 }
 
 
+@pytest.mark.usefixtures("mock_load_exchange")
 @pytest.mark.parametrize(
     "accounts_config",
     [
@@ -76,6 +79,7 @@ async def test_cant_have_accounts_with_same_account_name(accounts_config):
         await load_accounts(accounts_config, _SECRETS)
 
 
+@pytest.mark.usefixtures("mock_load_exchange")
 async def test_account_carries_its_configured_name():
     accounts = await load_accounts(
         [{"exchange": "bitget", "account_name": "hedge"}], _SECRETS
@@ -84,12 +88,14 @@ async def test_account_carries_its_configured_name():
     assert accounts["hedge"].name == "hedge"
 
 
+@pytest.mark.usefixtures("mock_load_exchange")
 async def test_account_falls_back_to_the_exchange_name():
     accounts = await load_accounts([{"exchange": "bitget"}], _SECRETS)
 
     assert accounts["bitget"].name == "bitget"
 
 
+@pytest.mark.usefixtures("mock_load_exchange")
 async def test_single_exchange_is_the_loaded_instance(mock_exchange):
     exchange = await load_single_exchange({"exchange": "bitget"}, _SECRETS)
 
@@ -138,8 +144,16 @@ async def test_an_explicit_secret_name_is_used_over_the_account_name(
     )
 
 
-async def test_an_unknown_secret_name_is_refused(mock_load_exchange):
+async def test_an_unknown_secret_name_is_refused():
     with pytest.raises(
         StrategyCriticalError, match="`bitget` references secret `missing`.*not defined"
     ):
         await load_single_exchange({"exchange": "bitget", "secret_name": "missing"}, {})
+
+
+async def test_an_account_without_a_name_is_named_by_its_section():
+    with pytest.raises(
+        StrategyCriticalError,
+        match="`live.trading_account` references secret `missing`.*not defined",
+    ):
+        await load_single_exchange({"secret_name": "missing"}, {})

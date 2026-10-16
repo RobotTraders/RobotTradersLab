@@ -146,6 +146,33 @@ class TestSweepOutcome:
             _on_a_symbol_the_provider_refuses(_with_resolved_file(TEST_CONFIG_TOML)),
         )
 
+    @pytest.fixture
+    def config_no_point_trades(self, tmp_path: Path) -> Path:
+        return _written(
+            tmp_path,
+            _with_resolved_file(TEST_CONFIG_TOML).replace(
+                "min = 20.0\nmax = 40.0", "min = 364.0\nmax = 366.0"
+            ),
+        )
+
+    def test_a_grid_where_no_point_trades_scores_flat_and_runs_to_the_end(
+        self, config_no_point_trades, tmp_path, capsys
+    ):
+        exported = tmp_path / "results.csv"
+
+        grid_search_main(config_no_point_trades, exported)
+
+        flat_rows = pd.read_csv(exported)
+        assert flat_rows["closed_trades"].tolist() == [0] * EXPECTED_GRID_SIZE
+        assert flat_rows["error"].isna().all()
+        console = capsys.readouterr().out
+        for position in range(1, EXPECTED_GRID_SIZE + 1):
+            assert (
+                f"INFO: Grid point {position}/{EXPECTED_GRID_SIZE} completed" in console
+            )
+        assert "ERROR" not in console
+        assert "Grid search completed: 6/6 successful" in console
+
     def test_a_grid_with_scored_points_runs_to_the_end(self, config_every_point_scores):
         grid_search_main(config_every_point_scores, None)
 

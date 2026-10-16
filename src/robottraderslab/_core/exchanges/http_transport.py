@@ -1,6 +1,6 @@
 import logging
 import ssl
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import cache
 from typing import Any, cast
 
@@ -18,6 +18,7 @@ KEEPALIVE_EXPIRY_SECONDS = 60.0
 
 type JsonLike = dict[str, Any]
 type ResponseClassifier = Callable[[HttpResponse, JsonLike], None]
+type ResponseObserver = Callable[[HttpResponse], Awaitable[None]]
 type RequestSigner = Callable[[RequestToSign], dict[str, str]]
 
 
@@ -29,7 +30,9 @@ class HttpTransport:
     classifier that inspects every response and raises the exchange's own
     exceptions, and the exception type raised for connection-level failures.
     Authenticated exchanges add a third: a signer handed the request as it
-    goes on the wire, returning the headers that authenticate it.
+    goes on the wire, returning the headers that authenticate it. An exchange
+    whose responses announce its limits adds a fourth: an observer awaited
+    with each response.
     """
 
     def __init__(
@@ -39,6 +42,7 @@ class HttpTransport:
         classify_response: ResponseClassifier,
         connection_error: type[Exception],
         sign_request: RequestSigner | None,
+        observe_response: ResponseObserver | None = None,
     ) -> None:
         """Use `create` unless a preconfigured session is needed.
 
@@ -54,12 +58,16 @@ class HttpTransport:
             sign_request: Called with each request before it is sent; returns
                 the authentication headers to add. Omitted for public
                 endpoints, which need none.
+            observe_response: Awaited with each response, error responses
+                included, before it is classified. Omitted when nothing in
+                a response concerns the client beyond its classification.
         """
         self.session = session
         self._base_url = base_url.rstrip("/")
         self._classify_response = classify_response
         self._connection_error = connection_error
         self._sign_request = sign_request
+        self._observe_response = observe_response
 
     @classmethod
     def create(
@@ -69,6 +77,7 @@ class HttpTransport:
         classify_response: ResponseClassifier,
         connection_error: type[Exception],
         sign_request: RequestSigner | None = None,
+        observe_response: ResponseObserver | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
     ) -> "HttpTransport":
@@ -83,6 +92,8 @@ class HttpTransport:
                 message.
             sign_request: Called with each request before it is sent; returns
                 the authentication headers to add.
+            observe_response: Awaited with each response, error responses
+                included, before it is classified.
             headers: Optional headers sent with every request.
             timeout: Timeout in seconds for connect and read operations.
         """
@@ -96,7 +107,14 @@ class HttpTransport:
                 keepalive_expiry=KEEPALIVE_EXPIRY_SECONDS,
             ),
         )
-        return cls(session, base_url, classify_response, connection_error, sign_request)
+        return cls(
+            session,
+            base_url,
+            classify_response,
+            connection_error,
+            sign_request,
+            observe_response,
+        )
 
     async def request(
         self,
@@ -105,7 +123,7 @@ class HttpTransport:
         *,
         params: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
-        json: JsonLike | None = None,
+        json: JsonLike | list[JsonLike] | None = None,
     ) -> JsonLike:
         """Send a request and return the parsed JSON response body.
 
@@ -142,7 +160,10 @@ class HttpTransport:
             logger.warning(f"Failed to parse JSON response from {path}")
             response_json = {}
 
-        self._classify_response(_http_response(response), response_json)
+        http_response = _http_response(response)
+        if self._observe_response is not None:
+            await self._observe_response(http_response)
+        self._classify_response(http_response, response_json)
         return cast(JsonLike, response_json)
 
 
@@ -162,6 +183,7 @@ def _http_response(response: httpx.Response) -> HttpResponse:
         reason_phrase=response.reason_phrase,
         url=str(response.url),
         path=response.url.path,
+        headers=response.headers,
     )
 
 

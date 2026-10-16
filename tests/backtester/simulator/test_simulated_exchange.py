@@ -2,7 +2,10 @@ import asyncio
 from datetime import datetime
 
 from robottraderslab import Symbol
-from robottraderslab.backtester.simulator import CacheFillRecorder
+from robottraderslab.backtester.simulator import (
+    CacheFillRecorder,
+    SimulatedFuturesExchange,
+)
 from robottraderslab.exchanges import (
     OrderModifyRequest,
     OrderRequest,
@@ -224,3 +227,7 @@ class TestFillTags:
 
         recorded_tags = {fill[_TAG_COLUMN] for fill in sim.fill_recorder.fills}
         assert recorded_tags == {None}
+
+
+def test_declares_in_place_modification_of_resting_orders():
+    assert SimulatedFuturesExchange.capabilities.modifies_resting_orders_in_place

@@ -102,10 +102,10 @@ class TestCalculateProfitFactor:
         profit_factor = calculate_profit_factor(pnl)
         assert np.isinf(profit_factor)
 
-    def test_with_empty_series(self):
+    def test_no_trade_reads_zero(self):
         pnl = pd.Series([], dtype=float)
         profit_factor = calculate_profit_factor(pnl)
-        assert np.isinf(profit_factor)
+        assert profit_factor == 0.0
 
 
 class TestCalculateStreaks:
@@ -145,7 +145,7 @@ class TestCalculateFeeMetrics:
         fees = calculate_fee_metrics(empty_fees)
         assert fees.total_fee == 0.0
         assert np.isnan(fees.biggest_fee)
-        assert np.isnan(fees.avg_fee)
+        assert fees.avg_fee == 0.0
 
 
 class TestCalculateTradeCounts:

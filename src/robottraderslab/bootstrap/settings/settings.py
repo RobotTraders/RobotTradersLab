@@ -73,6 +73,7 @@ class LiveLoggingConfig(LoggingConfig):
     retention_days: int = 60
 
 
+TRADING_ACCOUNT_SECTION = "live.trading_account"
 _MOVED_TO_REPORT = ("reference_symbol", "reports_dir")
 
 
@@ -136,7 +137,7 @@ class LiveConfig(BaseModel):
 
     @model_validator(mode="after")
     def _refuse_inline_credentials(self) -> "LiveConfig":
-        _refuse_bare_credential("live.trading_account", self.trading_account)
+        _refuse_bare_credential(TRADING_ACCOUNT_SECTION, self.trading_account)
         refuse_credentials_in_notifiers("live.notifier", self.notifier)
         return self
 
@@ -199,6 +200,15 @@ class BotConfig(BaseSettings):
     live: LiveConfig | None = None
     report: ReportConfig = ReportConfig()
     optimisation: dict[str, Any] | None = None
+
+    @classmethod
+    def _validated(
+        cls, declared: dict[str, Any], source: str | Path | None
+    ) -> "BotConfig":
+        try:
+            return cls(**declared)
+        except ValidationError as e:
+            raise StrategyCriticalError(_configuration_failure(source, e)) from e
 
     @classmethod
     def from_file(
@@ -266,15 +276,6 @@ class BotConfig(BaseSettings):
         return cls._validated(declared, None)
 
     @classmethod
-    def _validated(
-        cls, declared: dict[str, Any], source: str | Path | None
-    ) -> "BotConfig":
-        try:
-            return cls(**declared)
-        except ValidationError as e:
-            raise StrategyCriticalError(_configuration_failure(source, e)) from e
-
-    @classmethod
     def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],
@@ -326,36 +327,6 @@ def refuse_credentials_in_notifiers(
             )
 
 
-def _refuse_bare_credential(block_label: str, config: dict[str, Any]) -> None:
-    """Refuse a credential spelled out in a config block.
-
-    Raises:
-        ValueError: If `config` declares one of a fixed set of credential key
-            names as a plain value.
-    """
-    bare_keys = sorted(_CREDENTIAL_KEYS.intersection(config))
-    if bare_keys:
-        named = ", ".join(f"`{block_label}.{key}`" for key in bare_keys)
-        raise ValueError(
-            f"{named} is a bare credential; declare it under `[[secrets]]` "
-            "in the secrets file and reference it with `secret_name` instead"
-        )
-
-
-def _configuration_failure(
-    config_file: str | Path | None, error: ValidationError
-) -> str:
-    """State which declaration is wrong, so the fix is the file and not the
-    traceback.
-    """
-    faults = "; ".join(
-        f"{'.'.join(str(part) for part in fault['loc'])}: {fault['msg']}"
-        for fault in error.errors()
-    )
-    source = f"`{config_file}`" if config_file is not None else "the given config"
-    return f"{source} is not a valid configuration: {faults}"
-
-
 def resolve_path(bot_config: BotConfig, key: str) -> Path | None:
     """Resolve a config value to an absolute path against the config directory.
 
@@ -392,6 +363,28 @@ _RELATIVE_PATHS = (
     "live.logging.logfile",
     "report.reports_dir",
 )
+
+
+def _refuse_bare_credential(block_label: str, config: dict[str, Any]) -> None:
+    bare_keys = sorted(_CREDENTIAL_KEYS.intersection(config))
+    if bare_keys:
+        named = ", ".join(f"`{block_label}.{key}`" for key in bare_keys)
+        raise ValueError(
+            f"{named} is a bare credential; declare it under `[[secrets]]` "
+            "in the secrets file and reference it with `secret_name` instead"
+        )
+
+
+def _configuration_failure(
+    config_file: str | Path | None, error: ValidationError
+) -> str:
+    """The message names the declaration to change."""
+    faults = "; ".join(
+        f"{'.'.join(str(part) for part in fault['loc'])}: {fault['msg']}"
+        for fault in error.errors()
+    )
+    source = f"`{config_file}`" if config_file is not None else "the given config"
+    return f"{source} is not a valid configuration: {faults}"
 
 
 def _resolve_relative_paths(data: dict[str, Any], base_dir: Path) -> None:

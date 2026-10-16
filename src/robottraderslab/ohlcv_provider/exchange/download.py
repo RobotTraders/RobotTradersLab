@@ -12,6 +12,7 @@ from robottraderslab._core import (
     ExchangeTransientError,
     OhlcvValidationError,
     Symbol,
+    SymbolNotListedError,
     TimeFrame,
     drain_tasks,
 )
@@ -43,8 +44,8 @@ async def fetch_missing_data(
         DownloadError: If every range failed on a transient error.
         DataError: If every range failed on an error a retry cannot fix.
         ExchangeCriticalError: If the adapter reports the venue unusable.
-        StrategyCriticalError: If the adapter reports a symbol the venue
-            cannot trade; only the config can name one it can.
+        SymbolNotListedError: If the adapter reports a symbol the venue does
+            not list.
     """
     fetched: list[pd.DataFrame] = []
 
@@ -148,6 +149,8 @@ async def _fetch_rows(
         raise DownloadError(
             f"{symbol}@{timeframe}: failed to fetch from exchange: {str(e)}"
         ) from e
+    except SymbolNotListedError:
+        raise
     except Exception as e:
         raise DataError(
             f"{symbol}@{timeframe}: failed to fetch from exchange: {str(e)}"

@@ -422,16 +422,39 @@ def test_what_stops_the_engine_is_recorded(
     assert str(failure) in caplog.text
 
 
-def test_logging_is_flushed_before_a_fatal_error_escapes(monkeypatch, replace_command):
-    replace_command("live", _raising(RuntimeError("unexpected failure")))
+def test_logging_is_flushed_after_a_fatal_error_escapes(monkeypatch, replace_command):
+    events: list[str] = []
+
+    def failing(**_: Any) -> None:
+        events.append("ran")
+        raise RuntimeError("unexpected failure")
+
+    replace_command("live", failing)
     monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
-    flushes: list[None] = []
-    monkeypatch.setattr(logging, "shutdown", lambda: flushes.append(None))
+    monkeypatch.setattr(logging, "shutdown", lambda: events.append("flushed"))
 
     with pytest.raises(SystemExit):
         main()
 
-    assert flushes == [None]
+    assert events == ["ran", "flushed"]
+
+
+def test_logging_is_flushed_after_a_command_completes(monkeypatch, replace_command):
+    events: list[str] = []
+
+    def completing(**_: Any) -> int:
+        events.append("ran")
+        return 0
+
+    replace_command("live", completing)
+    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
+    monkeypatch.setattr(logging, "shutdown", lambda: events.append("flushed"))
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 0
+    assert events == ["ran", "flushed"]
 
 
 def test_the_terminal_gets_one_sentence_naming_the_cause(

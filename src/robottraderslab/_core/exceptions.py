@@ -33,6 +33,15 @@ class MissingOhlcvDataError(ExchangeRecoverableError):
         super().__init__(f"{symbol}@{timeframe}: {detail}")
 
 
+class SymbolNotListedError(ExchangeRecoverableError):
+    """The venue lists no contract for a symbol, so the symbol cannot be traded
+    on it. The symbol owns the failure: the profiles that trade it sit out
+    while every other symbol trades.
+    """
+
+    pass
+
+
 class NoOpenPositionError(ExchangeRecoverableError):
     """A protection update named a symbol the account holds no position on,
     so there is nothing left to protect.

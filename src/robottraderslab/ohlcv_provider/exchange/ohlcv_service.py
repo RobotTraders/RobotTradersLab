@@ -10,6 +10,7 @@ from robottraderslab._core import (
     DataError,
     OhlcvValidationError,
     Symbol,
+    SymbolNotListedError,
     TimeFrame,
     candles_back,
     newest_settled_candle_start,
@@ -65,8 +66,8 @@ async def fetch_ohlcv_with(
         DataError: If every missing range failed on an error a retry cannot
             fix, or another data operation fails.
         ExchangeCriticalError: If the adapter reports the venue unusable.
-        StrategyCriticalError: If the adapter reports a symbol the venue
-            cannot trade; only the config can name one it can.
+        SymbolNotListedError: If the adapter reports a symbol the venue does
+            not list.
     """
     try:
         start_date, end_date = _validate_dates(start_date, end_date)
@@ -144,7 +145,7 @@ async def fetch_ohlcv_with(
 
         return result
 
-    except DataError:
+    except (DataError, SymbolNotListedError):
         raise
     except Exception as e:
         raise DataError(

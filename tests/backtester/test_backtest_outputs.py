@@ -1,5 +1,6 @@
 import logging
 import re
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -10,6 +11,7 @@ import pytest
 
 from robottraderslab import BotConfig, Symbol
 from robottraderslab._core import OHLCVProviderProtocol
+from robottraderslab.analyser import SummaryMetrics
 from robottraderslab.backtester import BacktestOutputs
 from robottraderslab.backtester.simulator import (
     EquitySnapshot,
@@ -901,7 +903,8 @@ class TestCreateAnalyser:
 
         assert isinstance(analyser, Analyser)
 
-    def test_with_no_trades(self, equity_snapshots):
+    @pytest.fixture
+    def flat_outputs(self, equity_snapshots) -> BacktestOutputs:
         empty_fills = pd.DataFrame(
             columns=[
                 "symbol",
@@ -913,7 +916,7 @@ class TestCreateAnalyser:
                 "fill_type",
             ]
         )
-        outputs = BacktestOutputs(
+        return BacktestOutputs(
             final_balance={"USDT": 10_000.0},
             equity_currency="USDT",
             daily_equity_snapshots=equity_snapshots,
@@ -922,8 +925,27 @@ class TestCreateAnalyser:
             ohlcv_provider=cast(OHLCVProviderProtocol, None),
         )
 
-        with pytest.raises(RuntimeError, match="No trades generated"):
-            outputs.create_analyser()
+    def test_a_run_that_closed_no_trade_is_analysed_flat(self, flat_outputs):
+        analyser = flat_outputs.create_analyser(save=False)
+
+        assert analyser.get_summary_metrics() == SummaryMetrics(
+            sharpe_ratio=0.0,
+            roi=0.0,
+            max_drawdown=0.0,
+            win_rate=0.0,
+            risk_reward_ratio=0.0,
+            closed_trades=0,
+        )
+
+    @pytest.mark.parametrize(
+        "flat_line", [r"Profit factor\s+0\.00\n", r"Average fee\s+\$0\.00\n"]
+    )
+    def test_a_run_that_closed_no_trade_prints_a_flat_report(
+        self, flat_outputs, capsys, flat_line
+    ):
+        flat_outputs.create_analyser(save=False).print_performance_summary()
+
+        assert re.search(flat_line, capsys.readouterr().out)
 
     @pytest.fixture
     def fills_with_intra_candle_round_trips(self) -> pd.DataFrame:
@@ -1195,3 +1217,10 @@ class TestSavedRunFolder:
         assert (run_folder / "report.txt").exists()
         assert not list(run_folder.glob("*.html"))
         assert "No chart page written" in caplog.text
+
+    def test_a_run_that_closed_no_trade_saves_no_run_folder(self, outputs, bot_config):
+        flat_outputs = replace(outputs, fills=outputs.fills.iloc[0:0])
+
+        flat_outputs.create_analyser()
+
+        assert not (cast(Path, bot_config.config_dir) / "reports").exists()
