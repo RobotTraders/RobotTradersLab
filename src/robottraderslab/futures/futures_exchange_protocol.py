@@ -6,6 +6,7 @@ from robottraderslab._core import (
     Balance,
     Currency,
     Execution,
+    Instrument,
     MarginMode,
     MarginSettings,
     OrderModifyRequest,
@@ -14,6 +15,7 @@ from robottraderslab._core import (
     OrderSide,
     PlacedOrder,
     PositionSnapshot,
+    Quote,
     StopLoss,
     Symbol,
     TakeProfit,
@@ -24,7 +26,7 @@ from .futures_capabilities import FuturesCapabilities
 
 
 class FuturesExchangeProtocol(Protocol):
-    """What the engine needs from a futures venue."""
+    """What the engine and a program running beside it need from a futures venue."""
 
     capabilities: FuturesCapabilities = FuturesCapabilities()
     placement_reserve_rate: float = 0.0
@@ -72,6 +74,48 @@ class FuturesExchangeProtocol(Protocol):
 
         Args:
             symbols: Symbols the read is scoped to; none means every one.
+        """
+        ...
+
+    async def get_instrument(self, symbol: Symbol) -> Instrument:
+        """Return the limits the venue enforces on the symbol.
+
+        A program sizing its own orders reads them here.
+
+        Raises:
+            SymbolNotListedError: If the venue lists no contract for the symbol.
+        """
+        ...
+
+    async def get_quote(self, symbol: Symbol) -> Quote:
+        """Return the best bid and the best ask of the symbol at the moment of the read.
+
+        A program deciding on a price reads it here; the engine decides on
+        candle closes and never calls it.
+
+        Returns:
+            The top level of each side of the book.
+
+        Raises:
+            SymbolNotListedError: If the venue lists no contract for the symbol.
+            ExchangeRecoverableError: If the book holds no bid or no ask.
+        """
+        ...
+
+    async def round_price(self, symbol: Symbol, price: float) -> float:
+        """Return the price rounded the way the venue accepts it on the symbol.
+
+        Raises:
+            SymbolNotListedError: If the venue lists no contract for the symbol.
+        """
+        ...
+
+    async def round_quantity(self, symbol: Symbol, quantity: float) -> float:
+        """Return the quantity cut down to what the venue accepts on the symbol,
+        never above the one given.
+
+        Raises:
+            SymbolNotListedError: If the venue lists no contract for the symbol.
         """
         ...
 
@@ -225,6 +269,37 @@ class FuturesExchangeProtocol(Protocol):
 
         Raises:
             NoOpenPositionError: If the account holds no position on the symbol.
+        """
+
+    async def place_trailing_stop_order(
+        self,
+        symbol: Symbol,
+        distance: float,
+        activation_price: float | None = None,
+        quantity: float | None = None,
+    ) -> PlacedOrder:
+        """Place a trailing stop on an open position: an order the venue trails
+        behind the price.
+
+        Args:
+            distance: How far, in the quote currency, the order stays behind
+                the best price reached.
+            activation_price: Price the market reaches before the trail
+                starts; without it the trail starts at once.
+            quantity: Size the order closes, in the units of the position's
+                quantity; none means the whole position.
+
+        Returns:
+            The trailing stop the venue now holds, under the id it
+            reports among its open orders, at its activation price when it
+            has one.
+
+        Raises:
+            NoOpenPositionError: If the account holds no position on the symbol.
+            StrategyCriticalError: If the venue offers no trailing stop,
+                takes only an activation price and none was given, takes none
+                and one was given, or cannot express the distance; no request
+                is sent.
         """
 
     async def update_position_take_profit(

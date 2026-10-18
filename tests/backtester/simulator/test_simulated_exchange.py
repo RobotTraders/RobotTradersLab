@@ -1,16 +1,21 @@
 import asyncio
 from datetime import datetime
 
+import pytest
+
 from robottraderslab import Symbol
 from robottraderslab.backtester.simulator import (
     CacheFillRecorder,
     SimulatedFuturesExchange,
 )
+from robottraderslab.exceptions import StrategyCriticalError, SymbolNotListedError
 from robottraderslab.exchanges import (
+    Instrument,
     OrderModifyRequest,
     OrderRequest,
     OrderSide,
     PlacedOrder,
+    Quote,
     VenueFill,
 )
 
@@ -75,6 +80,70 @@ class TestModifyOrders:
 
         assert len(replaced) == 2
         assert trace == ["start 1.0", "end 1.0", "start 2.0", "end 2.0"]
+
+
+class TestGetQuote:
+    async def test_the_close_of_the_candle_stood_on_is_bid_and_ask(
+        self, sim, btc_usdt_perp
+    ):
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
+
+        quote = await sim.exchange.get_quote(btc_usdt_perp)
+
+        assert quote == Quote(bid=101.5, ask=101.5)
+
+    async def test_the_next_candle_moves_the_quote(self, sim, btc_usdt_perp):
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=99.0)
+
+        quote = await sim.exchange.get_quote(btc_usdt_perp)
+
+        assert quote == Quote(bid=99.0, ask=99.0)
+
+    async def test_a_symbol_with_no_candle_seen(self, sim, btc_usdt_perp):
+        with pytest.raises(SymbolNotListedError):
+            await sim.exchange.get_quote(btc_usdt_perp)
+
+
+class TestInstrument:
+    async def test_the_step_an_order_is_cut_to(self, sim, btc_usdt_perp):
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
+
+        instrument = await sim.exchange.get_instrument(btc_usdt_perp)
+
+        assert instrument == Instrument(
+            quantity_step=1e-8,
+            minimum_order_value=None,
+            maximum_leverage=None,
+            maximum_order_quantity=None,
+            maximum_market_order_quantity=None,
+        )
+
+    async def test_a_quantity_cut_down_to_its_step(self, sim, btc_usdt_perp):
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
+
+        rounded_quantity = await sim.exchange.round_quantity(
+            btc_usdt_perp, 0.123456789923
+        )
+
+        assert rounded_quantity == 0.12345678
+
+    async def test_a_price_left_as_it_is(self, sim, btc_usdt_perp):
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
+
+        rounded_price = await sim.exchange.round_price(btc_usdt_perp, 101.123456789)
+
+        assert rounded_price == 101.123456789
+
+    @pytest.mark.parametrize(
+        ("read", "arguments"),
+        [("get_instrument", ()), ("round_price", (1.0,)), ("round_quantity", (1.0,))],
+    )
+    async def test_a_symbol_with_no_candle_seen(
+        self, sim, btc_usdt_perp, read, arguments
+    ):
+        with pytest.raises(SymbolNotListedError):
+            await getattr(sim.exchange, read)(btc_usdt_perp, *arguments)
 
 
 class TestGetExecutionsSince:
@@ -231,3 +300,12 @@ class TestFillTags:
 
 def test_declares_in_place_modification_of_resting_orders():
     assert SimulatedFuturesExchange.capabilities.modifies_resting_orders_in_place
+
+
+def test_declares_no_trailing_stop_order():
+    assert not SimulatedFuturesExchange.capabilities.places_trailing_stop_orders
+
+
+async def test_trailing_stop_order_requested_on_the_simulator(sim, btc_usdt_perp):
+    with pytest.raises(StrategyCriticalError, match="simulator"):
+        await sim.exchange.place_trailing_stop_order(btc_usdt_perp, distance=5.0)

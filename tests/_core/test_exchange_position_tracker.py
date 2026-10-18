@@ -623,7 +623,12 @@ class TestUnownedQuantity:
 
         with caplog.at_level(logging.WARNING):
             tracker.widen(
-                snapshot, [by_hand, opened], READ_SINCE, CANDLE_OPEN, CANDLE_CLOSE
+                snapshot,
+                [by_hand, opened],
+                tracker.unanchored_symbols(),
+                READ_SINCE,
+                CANDLE_OPEN,
+                CANDLE_CLOSE,
             )
 
         assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 4.0)
@@ -646,7 +651,14 @@ class TestUnownedQuantity:
         tracker.refresh(snapshot, CANDLE_OPEN, CANDLE_CLOSE)
 
         with caplog.at_level(logging.WARNING):
-            tracker.widen(snapshot, [opened], READ_SINCE, CANDLE_OPEN, CANDLE_CLOSE)
+            tracker.widen(
+                snapshot,
+                [opened],
+                tracker.unanchored_symbols(),
+                READ_SINCE,
+                CANDLE_OPEN,
+                CANDLE_CLOSE,
+            )
 
         assert "+6" in caplog.text
         assert "2025-10-03 00:00 UTC" in caplog.text

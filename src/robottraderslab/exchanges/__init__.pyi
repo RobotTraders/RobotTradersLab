@@ -18,11 +18,13 @@ from robottraderslab._core.exchanges import (
     RequestSigner,
     RequestToSign,
     fetch_pages,
+    lacks_a_closed_candle,
     no_candles,
     page_bounds,
     without_the_open_candle,
 )
 from robottraderslab._core.fees import PlacementReserve
+from robottraderslab._core.instrument import Instrument
 from robottraderslab._core.interfaces import OHLCVProviderProtocol
 from robottraderslab._core.margin import MarginMode, MarginSettings
 from robottraderslab._core.market import MarketType
@@ -43,12 +45,14 @@ from robottraderslab._core.order import (
     TakeProfit,
     TimeInForce,
     VenueFill,
+    describe_order,
 )
 from robottraderslab._core.position import (
     PositionProtocol,
     PositionSide,
     PositionSnapshot,
 )
+from robottraderslab._core.quote import Quote
 from robottraderslab._core.rate_limiting import (
     ChainedRateLimiter,
     RateLimiter,
@@ -82,6 +86,7 @@ __all__ = [
     "FuturesExchangeProtocol",
     "HttpResponse",
     "HttpTransport",
+    "Instrument",
     "JsonLike",
     "MarginMode",
     "MarginSettings",
@@ -103,6 +108,7 @@ __all__ = [
     "PositionProtocol",
     "PositionSide",
     "PositionSnapshot",
+    "Quote",
     "RateLimiter",
     "RateLimiterProtocol",
     "RequestSigner",
@@ -117,8 +123,10 @@ __all__ = [
     "TimeInForce",
     "VenueFill",
     "fetch_pages",
+    "lacks_a_closed_candle",
     "no_candles",
     "client_order_id_carrying",
+    "describe_order",
     "page_bounds",
     "tag_of",
     "to_milliseconds",

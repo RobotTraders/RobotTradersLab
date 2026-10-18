@@ -37,10 +37,15 @@ webhook_url = "{WEBHOOK}"
 
 
 class StubAccount:
-    """The account a key opens, answering the balance read."""
+    """The account a key opens, answering the listing and the balance read."""
 
     def __init__(self) -> None:
         self.read_symbols: list[Symbol] = []
+        self.unlisted: set[Symbol] = set()
+
+    async def get_instrument(self, symbol: Symbol) -> None:
+        if symbol in self.unlisted:
+            raise SymbolNotListedError(f"the venue lists no perpetual for {symbol}")
 
     async def get_balances(self, symbols: Iterable[Symbol]) -> dict[str, Balance]:
         self.read_symbols.extend(symbols)
@@ -234,6 +239,20 @@ def test_a_symbol_the_venue_does_not_list_names_the_symbol_and_the_market(
     assert refused.stderr == (
         "Error: TAO/USDT:USDT has no usable contract on the demo market of Bitget.\n"
     )
+
+
+def test_a_symbol_the_connector_does_not_list_is_refused_before_the_balances(
+    cli, workspace, venue, account
+):
+    delisted = Symbol.create("FET/USDC:USDC")
+    account.unlisted.add(delisted)
+    write_secrets(workspace, VENUE_ENTRY)
+
+    refused = cli.invoke(app, ["check", "venue-pilot", "--symbol", str(delisted)])
+
+    assert refused.exit_code == 1
+    assert refused.stderr == ("Error: the venue lists no perpetual for FET/USDC:USDC\n")
+    assert account.read_symbols == []
 
 
 def test_a_secrets_file_naming_one_entry_twice(cli, workspace):

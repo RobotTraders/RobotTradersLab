@@ -79,6 +79,26 @@ async def fetch_pages(
     return np.concatenate(fetched)
 
 
+def lacks_a_closed_candle(rows: OhlcvData, timeframe: TimeFrame, end_ms: int) -> bool:
+    """Whether a range misses a candle that closed before its end.
+
+    A venue serves a listed contract's candles up to the present, so a range
+    holding none, or whose newest candle is followed by one that closed by
+    the range's end, is missing a candle the venue would have served.
+
+    Args:
+        rows: Candles as returned by the source, oldest first.
+        timeframe: Candle timeframe.
+        end_ms: End of the range, where the present cuts it short when it
+            lies ahead.
+    """
+    if rows.size == 0:
+        return True
+    reached_ms = min(end_ms, time.time() * _MILLISECONDS_PER_SECOND)
+    next_stamp_ms = candle_closes_after(timeframe, int(rows[-1, 0]))
+    return candle_closes_after(timeframe, next_stamp_ms) <= reached_ms
+
+
 def without_the_open_candle(rows: OhlcvData, timeframe: TimeFrame) -> OhlcvData:
     """Drop the last candle when its period has not elapsed yet.
 

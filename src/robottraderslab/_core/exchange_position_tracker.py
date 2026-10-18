@@ -108,6 +108,18 @@ class ExchangePositionTracker:
                 _report(symbol, self._cursors[symbol], reported_since, reported_until)
         return bool(self._unanchored)
 
+    def settle_unlisted(self, symbol: Symbol) -> None:
+        """A delisting settles every position on the contract and no fill of it
+        arrives afterwards, so the profiles on the symbol hold nothing
+        whatever fills the window carries. The venue's listing keeps the
+        symbol settled, so it stays unanchored.
+        """
+        self._clear(symbol, self._cursors.setdefault(symbol, _SymbolCursor()))
+        logger.warning(
+            f"{symbol}: the venue lists no contract for it, so its position is "
+            "settled and no profile holds any of it"
+        )
+
     def unanchored_symbols(self) -> frozenset[Symbol]:
         """Return the symbols whose fills do not reach back to a flat moment.
 
@@ -121,6 +133,7 @@ class ExchangePositionTracker:
         self,
         account_snapshot: AccountSnapshot,
         executions: Sequence[Execution],
+        symbols: Iterable[Symbol],
         read_since: datetime,
         reported_since: datetime,
         reported_until: datetime,
@@ -130,13 +143,15 @@ class ExchangePositionTracker:
 
         Args:
             executions: The executions of the longer read, whatever symbol,
-                from which each unanchored symbol takes its own.
+                from which each widened symbol takes its own.
+            symbols: The unanchored symbols whose position a delisting has not
+                settled.
             read_since: Where that read starts, which is what a position
                 still unattributed after it was opened before.
             reported_since: See `refresh`.
             reported_until: See `refresh`.
         """
-        for symbol in self.unanchored_symbols():
+        for symbol in symbols:
             cursor = self._refold(symbol, account_snapshot, executions)
             _report(symbol, cursor, reported_since, reported_until)
             if cursor.unattributed_steps != 0:

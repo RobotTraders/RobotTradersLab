@@ -3,13 +3,24 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Self, cast
 
-from robottraderslab._core import DEFAULT_FEE_MODE, FeeMode, PlacementReserve, Symbol
-from robottraderslab.exceptions import ExchangeRecoverableError, NoOpenPositionError
+from robottraderslab._core import (
+    DEFAULT_FEE_MODE,
+    FeeMode,
+    PlacementReserve,
+    Symbol,
+    to_quantity,
+)
+from robottraderslab.exceptions import (
+    ExchangeRecoverableError,
+    NoOpenPositionError,
+    StrategyCriticalError,
+)
 from robottraderslab.exchanges import (
     Balance,
     Currency,
     Execution,
     FuturesExchangeProtocol,
+    Instrument,
     MarginMode,
     MarginSettings,
     OrderModifyRequest,
@@ -18,6 +29,7 @@ from robottraderslab.exchanges import (
     OrderSide,
     PlacedOrder,
     PositionSnapshot,
+    Quote,
     StopLoss,
     TakeProfit,
     TimeInForce,
@@ -35,6 +47,7 @@ from .order_models import (
     TakeProfitOrder,
     TriggerOrder,
 )
+from .quantities import to_floored_step_count
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +133,30 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         self, symbols: Iterable[Symbol]
     ) -> dict[Symbol, PositionSnapshot]:
         return self.simulation_engine.open_positions
+
+    async def get_instrument(self, symbol: Symbol) -> Instrument:
+        self.simulation_engine.require_listed(symbol)
+        return Instrument(
+            quantity_step=to_quantity(1),
+            minimum_order_value=None,
+            maximum_leverage=None,
+            maximum_order_quantity=None,
+            maximum_market_order_quantity=None,
+        )
+
+    async def get_quote(self, symbol: Symbol) -> Quote:
+        """A candle holds no book, so its close is both the bid and the ask."""
+        close = self.simulation_engine.get_last_price(symbol)
+        return Quote(bid=close, ask=close)
+
+    async def round_price(self, symbol: Symbol, price: float) -> float:
+        """A candle fills at any price."""
+        self.simulation_engine.require_listed(symbol)
+        return price
+
+    async def round_quantity(self, symbol: Symbol, quantity: float) -> float:
+        self.simulation_engine.require_listed(symbol)
+        return to_quantity(to_floored_step_count(quantity))
 
     async def get_quote_conversion_rate(self, symbol: Symbol) -> float:
         """Rate converting the symbol's quote currency into the margin currency."""
@@ -287,6 +324,19 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
     async def cancel_orders_for_symbol(self, symbol: Symbol) -> None:
         """Cancel all open orders for the symbol."""
         self.simulation_engine.cancel_orders_for_symbol(symbol)
+
+    async def place_trailing_stop_order(
+        self,
+        symbol: Symbol,
+        distance: float,
+        activation_price: float | None = None,
+        quantity: float | None = None,
+    ) -> PlacedOrder:
+        """
+        Raises:
+            StrategyCriticalError: Always, whatever the symbol and the distance.
+        """
+        raise StrategyCriticalError(f"{symbol}: the simulator offers no trailing stop")
 
     async def update_position_stop_loss(
         self, symbol: Symbol, trigger_price: float

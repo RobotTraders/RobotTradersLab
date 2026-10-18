@@ -15,7 +15,10 @@ class FuturesCapabilities:
             limit order to a new price and size under the same order id, with
             its attached brackets and label kept; a venue without it serves
             the move as a cancel and a placement.
+        places_trailing_stop_orders: Whether the venue places a trailing stop on a
+            position and trails it behind the price on its own.
     """
 
     reserves_margin_on_pending_orders: bool = False
     modifies_resting_orders_in_place: bool = True
+    places_trailing_stop_orders: bool = False

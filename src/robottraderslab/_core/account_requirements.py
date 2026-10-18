@@ -132,6 +132,16 @@ class AccountProtocol(NamedAccount, Protocol):
         """
         ...
 
+    async def _unlisted_among(self, symbols: Iterable[Symbol]) -> frozenset[Symbol]:
+        """A delisting settles every position on its contract, so a symbol
+        returned here has no position left to account for and no fill still
+        to arrive.
+
+        Args:
+            symbols: Symbols to test against the venue's listing.
+        """
+        ...
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AccountRequirement:
@@ -232,8 +242,8 @@ class AccountRequirements:
             sizing: The rules the strategy sizes with, which declare what they
                 read: `balances`, equity for the margin currencies of
                 `symbols`, or `margin_settings`.
-            sweep_protections: Cancel a stop-loss or take-profit left resting on
-                a symbol this account holds no position on. Needs `positions`
+            sweep_protections: Cancel a stop-loss, take-profit or trailing stop
+                left resting on a symbol this account holds no position on. Needs `positions`
                 and `open_orders`, and does nothing without them. Pass False to
                 keep protective orders the venue did not clean up.
 

@@ -21,7 +21,8 @@ async def widen_tracked_positions(
     """A tracker accounts for a symbol's whole position only from a moment
     the symbol held nothing, and the candle's own read reaches back no
     further than the strategy's lookback, so a position older than that
-    leaves the tracker asking for more.
+    leaves the tracker asking for more. A symbol the venue's listing lacks
+    has had its position settled by the delisting, so no read widens for it.
 
     Args:
         executions_since: Where the candle's own read starts. The second
@@ -37,15 +38,23 @@ async def widen_tracked_positions(
     accounts = _accounts_by_name(requirements)
     since = min(executions_since, datetime.now(UTC) - ATTRIBUTION_REACH)
     for requirement, symbols in asking:
-        executions = await accounts[requirement.account.name]._executions_since(
+        account = accounts[requirement.account.name]
+        unlisted = await account._unlisted_among(symbols)
+        for symbol in unlisted:
+            requirement.tracker.settle_unlisted(symbol)
+        listed = symbols - unlisted
+        if not listed:
+            continue
+        executions = await account._executions_since(
             since,
-            symbols,
+            listed,
             max_attempts=max_attempts,
             base_delay=base_delay,
         )
         requirement.tracker.widen(
             account_snapshots.of(requirement.account),
             executions,
+            listed,
             since,
             reported_since,
             reported_until,
