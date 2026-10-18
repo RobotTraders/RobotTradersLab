@@ -9,6 +9,7 @@ from robottraderslab.exceptions import (
     ExchangeRecoverableError,
     ExchangeTransientError,
     StrategyCriticalError,
+    SymbolNotListedError,
 )
 from robottraderslab.exchanges import (
     Balance,
@@ -36,6 +37,7 @@ from robottraderslab.futures.futures_update_position_take_profit import (
 from robottraderslab.strategies import TrackedPosition
 
 BTCUSDT = Symbol.create("BTC/USDT:USDT")
+ETHUSDT = Symbol.create("ETH/USDT:USDT")
 WINDOW_START = datetime(2026, 5, 1)
 
 
@@ -518,3 +520,21 @@ class TestAttributedExecutions:
             await account._attributed_executions(WINDOW_START, [BTCUSDT])
 
         exchange.get_executions_since.assert_awaited_once()
+
+
+class TestUnlistedAmong:
+    async def test_names_the_symbols_the_venue_lists_no_contract_for(self, exchange):
+        exchange.get_instrument.side_effect = _list_only(ETHUSDT)
+        account = FuturesAccount(exchange)
+
+        unlisted = await account._unlisted_among([BTCUSDT, ETHUSDT])
+
+        assert unlisted == frozenset({BTCUSDT})
+
+
+def _list_only(listed: Symbol):
+    async def get_instrument(symbol: Symbol) -> None:
+        if symbol != listed:
+            raise SymbolNotListedError(f"{symbol} is not listed")
+
+    return get_instrument

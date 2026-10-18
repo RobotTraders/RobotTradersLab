@@ -5,7 +5,11 @@ from datetime import datetime
 from typing import cast
 
 from robottraderslab._core import FillDescriber, OHLCVRow, OHLCVsBySymbol, Symbol
-from robottraderslab.exceptions import ExchangeRecoverableError, StrategyCriticalError
+from robottraderslab.exceptions import (
+    ExchangeRecoverableError,
+    StrategyCriticalError,
+    SymbolNotListedError,
+)
 from robottraderslab.exchanges import (
     Balance,
     Currency,
@@ -173,6 +177,20 @@ class BaseSimulationEngine(ABC):
 
     def get_last_fills(self) -> dict[str, VenueFill]:
         return self._last_fills
+
+    def get_last_price(self, symbol: Symbol) -> float:
+        self.require_listed(symbol)
+        return self._last_seen_prices[symbol]
+
+    def require_listed(self, symbol: Symbol) -> None:
+        """A symbol with no candle seen is not listed: the simulated market
+        holds nothing to trade it at.
+
+        Raises:
+            SymbolNotListedError: If no candle of the symbol has been seen.
+        """
+        if symbol not in self._last_seen_prices:
+            raise SymbolNotListedError(f"The simulation has seen no candle of {symbol}")
 
     def get_trade_equity_snapshots(self) -> list[EquitySnapshot]:
         return self._trade_equity_recorder.snapshots

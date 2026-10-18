@@ -104,6 +104,14 @@ class TestSweepOrphanProtections:
 
         assert account.cancelled == [(BTC, "tp-1")]
 
+    def test_cancels_a_trailing_stop_left_on_a_flat_symbol(self, account):
+        requirements = _declared(account)
+        snapshots = _snapshots(open_orders=[_order("trailing-stop", "ts-1")])
+
+        sweep_orphan_protections(requirements.account, snapshots, BookKeeper())
+
+        assert account.cancelled == [(BTC, "ts-1")]
+
     def test_books_the_cancel(self, account):
         requirements = _declared(account)
         snapshots = _snapshots(open_orders=[_order("stop-loss")])

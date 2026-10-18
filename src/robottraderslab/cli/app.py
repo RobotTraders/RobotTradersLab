@@ -229,7 +229,8 @@ def backtest(
     "account settings it trades under. The command exits 1 on every failure it "
     "names: a refused key, a refused or unreachable webhook, a missing file, "
     "entry, connector or plugin, an entry naming neither `exchange` nor "
-    "`webhook_url`, an account setting the connector does not trade under."
+    "`webhook_url`, an account setting the connector does not trade under, a "
+    "symbol the venue does not list."
 )
 def check(
     entry: _SecretsEntry,

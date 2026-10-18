@@ -8,6 +8,7 @@ from .http_transport import (
 from .ohlcv_adapter_interface import OhlcvAdapterProtocol, OhlcvData, no_candles
 from .ohlcv_pager import (
     fetch_pages,
+    lacks_a_closed_candle,
     page_bounds,
     without_the_open_candle,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "RequestSigner",
     "RequestToSign",
     "fetch_pages",
+    "lacks_a_closed_candle",
     "no_candles",
     "page_bounds",
     "without_the_open_candle",

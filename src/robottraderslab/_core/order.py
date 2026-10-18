@@ -14,8 +14,10 @@ class OrderType(StrEnum):
 
     A `TRIGGER` order waits for price to reach a level, then goes at market or
     at its limit. A `STOP_LOSS` or a `TAKE_PROFIT` protects a position and
-    closes it when its level is reached. A `LIQUIDATION` is the venue closing
-    a position whose margin ran out; no strategy places one.
+    closes it when its level is reached. A `TRAILING_STOP` closes a position
+    when the price retraces from its best point by a distance the venue holds
+    fixed. A `LIQUIDATION` is the venue closing a position whose margin ran
+    out; no strategy places one.
     """
 
     LIMIT = "limit"
@@ -23,6 +25,7 @@ class OrderType(StrEnum):
     TRIGGER = "trigger"
     STOP_LOSS = "stop-loss"
     TAKE_PROFIT = "take-profit"
+    TRAILING_STOP = "trailing-stop"
     LIQUIDATION = "liquidation"
 
 
@@ -81,6 +84,17 @@ class OrderProtocol(Protocol):
         kind: The kind of order, a protection included.
         trigger_price: The level a triggered order waits on, None on an
             order without a trigger.
+        limit_price: The price the order rests at, None on an order that
+            goes at market when it fills or triggers.
+        quantity: The order's size in the base currency, the part already
+            filled included, the size `modify_orders` takes; None on a
+            protection that closes whatever the position holds.
+        remaining_quantity: What still rests in the base currency, the
+            size a cancel and re-place carries; equal to `quantity` on an
+            order nothing filled, None where `quantity` is.
+        stop_loss_price: The level of the stop-loss attached to the order.
+        take_profit_price: The level of the take-profit attached to the
+            order.
         client_order_id: The id the order was placed with, which `tag_of`
             reads the tag from; None on a venue reporting none and on an
             order placed by hand.
@@ -89,9 +103,30 @@ class OrderProtocol(Protocol):
     order_id: str
     symbol: Symbol
     kind: OrderType
-    side: OrderSide
     trigger_price: float | None
     client_order_id: str | None
+
+    @property
+    def limit_price(self) -> float | None: ...
+
+    @property
+    def quantity(self) -> float | None: ...
+
+    @property
+    def remaining_quantity(self) -> float | None: ...
+
+    @property
+    def side(self) -> OrderSide | None:
+        """The order's side, None for a resting order whose side the venue
+        does not state.
+        """
+        ...
+
+    @property
+    def stop_loss_price(self) -> float | None: ...
+
+    @property
+    def take_profit_price(self) -> float | None: ...
 
 
 class ProtectionVenue(Protocol):
@@ -358,6 +393,30 @@ class OrderModifyRequest:
 
     order_id: str
     order: OrderRequest
+
+
+def describe_order(order: OrderRequest) -> str:
+    """Name an order as a log reads it: `long limit entry at 96.38`,
+    `short trigger entry at 111.43`, `market close of the long`.
+
+    A buy opens a long or closes a short, so the words follow `reduce_only`.
+    """
+    kind, at = _order_shape(order)
+    buy = order.side is OrderSide.BUY
+    if order.reduce_only:
+        return f"{kind} close of the {'short' if buy else 'long'}{at}"
+    return f"{'long' if buy else 'short'} {kind} entry{at}"
+
+
+def _order_shape(order: OrderRequest) -> tuple[str, str]:
+    limit, trigger = order.limit_price, order.trigger_price
+    if limit is not None and trigger is not None:
+        return "stop-limit", f" at {limit:g} (trigger {trigger:g})"
+    if trigger is not None:
+        return "trigger", f" at {trigger:g}"
+    if limit is not None:
+        return "limit", f" at {limit:g}"
+    return "market", ""
 
 
 async def _order_not_filled() -> None:

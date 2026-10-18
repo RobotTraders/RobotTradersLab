@@ -53,9 +53,22 @@ class _Order:
     stop_loss: StopLoss | None = None
     take_profit: TakeProfit | None = None
     reason: str | None = None
+    limit_price: float | None = None
     client_order_id: str | None = None
     extra_fields: dict[str, Any] | None = None
     triggered: bool = False
+
+    @property
+    def remaining_quantity(self) -> float:
+        return self.quantity
+
+    @property
+    def stop_loss_price(self) -> float | None:
+        return self.stop_loss.trigger_price if self.stop_loss else None
+
+    @property
+    def take_profit_price(self) -> float | None:
+        return self.take_profit.trigger_price if self.take_profit else None
 
 
 @dataclass(kw_only=True, slots=True)
@@ -83,8 +96,31 @@ class MarketOrder(_Order):
         return f"market order {self.side} {self.quantity:,.6f} of {self.symbol}"
 
 
+class _RestingProtection:
+    """A protection rests whole at its trigger until it fires."""
+
+    __slots__ = ()
+    quantity: float | None
+
+    @property
+    def remaining_quantity(self) -> float | None:
+        return self.quantity
+
+    @property
+    def limit_price(self) -> None:
+        return None
+
+    @property
+    def stop_loss_price(self) -> None:
+        return None
+
+    @property
+    def take_profit_price(self) -> None:
+        return None
+
+
 @dataclass(kw_only=True, slots=True)
-class StopLossOrder:
+class StopLossOrder(_RestingProtection):
     order_id: str = _get_order_id_field()
     kind: OrderType = OrderType.STOP_LOSS
     quantity: float | None = None
@@ -101,7 +137,7 @@ class StopLossOrder:
 
 
 @dataclass(kw_only=True, slots=True)
-class TakeProfitOrder:
+class TakeProfitOrder(_RestingProtection):
     order_id: str = _get_order_id_field()
     kind: OrderType = OrderType.TAKE_PROFIT
     quantity: float | None = None
@@ -144,6 +180,26 @@ class TriggerOrder:
     @property
     def client_order_id(self) -> str | None:
         return self.order.client_order_id
+
+    @property
+    def limit_price(self) -> float | None:
+        return self.order.limit_price
+
+    @property
+    def quantity(self) -> float:
+        return self.order.quantity
+
+    @property
+    def remaining_quantity(self) -> float:
+        return self.order.quantity
+
+    @property
+    def stop_loss_price(self) -> float | None:
+        return self.order.stop_loss_price
+
+    @property
+    def take_profit_price(self) -> float | None:
+        return self.order.take_profit_price
 
 
 Order = LimitOrder | MarketOrder | StopLossOrder | TakeProfitOrder | TriggerOrder

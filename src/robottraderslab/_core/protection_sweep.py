@@ -7,7 +7,11 @@ from .order import OrderType
 
 logger = logging.getLogger(__name__)
 
-_PROTECTION_KINDS = (OrderType.STOP_LOSS, OrderType.TAKE_PROFIT)
+_PROTECTION_KINDS = (
+    OrderType.STOP_LOSS,
+    OrderType.TAKE_PROFIT,
+    OrderType.TRAILING_STOP,
+)
 
 
 def sweep_orphan_protections(

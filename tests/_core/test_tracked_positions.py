@@ -34,11 +34,18 @@ CANDLE_CLOSE = datetime(2026, 9, 18, tzinfo=UTC)
 
 class _Account:
     def __init__(
-        self, older_executions: Sequence[Execution], name: str = ACCOUNT_NAME
+        self,
+        older_executions: Sequence[Execution],
+        name: str = ACCOUNT_NAME,
+        unlisted: Iterable[Symbol] = (),
     ) -> None:
         self.name = name
         self._older_executions = older_executions
+        self._unlisted = frozenset(unlisted)
         self.reads: list[tuple[datetime, list[Symbol]]] = []
+
+    async def _unlisted_among(self, symbols: Iterable[Symbol]) -> frozenset[Symbol]:
+        return self._unlisted.intersection(symbols)
 
     async def _executions_since(
         self,
@@ -90,6 +97,19 @@ def _snapshots(venue_quantity: float, executions: list[Execution]) -> AccountSna
             ACCOUNT_NAME: AccountSnapshot(
                 account_name=ACCOUNT_NAME,
                 positions={BTC: _position(BTC, venue_quantity)},
+                executions=executions,
+                executions_declared=True,
+            )
+        }
+    )
+
+
+def _snapshots_holding_nothing(executions: list[Execution]) -> AccountSnapshots:
+    return AccountSnapshots(
+        {
+            ACCOUNT_NAME: AccountSnapshot(
+                account_name=ACCOUNT_NAME,
+                positions={},
                 executions=executions,
                 executions_declared=True,
             )
@@ -268,3 +288,91 @@ async def test_a_position_no_read_explains_names_how_far_back_it_reached(
 
     assert "+0.06" in caplog.text
     assert "left unattributed" in caplog.text
+
+
+async def test_a_position_on_a_delisted_symbol_is_settled_with_no_second_read(
+    caplog,
+):
+    account = _Account([], unlisted=[BTC])
+    requirements = StrategyRequirements()
+    requirements.account.add(account, symbols=[BTC], positions=True)
+    tracker = requirements.tracker.add(
+        account=account, symbols={ALPHA: BTC}, tags={ALPHA: profile_tag("1h", "a")}
+    )
+    opened = _execution("e1", OrderSide.BUY, 2.0, WITHIN_THE_READ, tag="1h-a")
+
+    with caplog.at_level(logging.INFO):
+        await _settle(
+            requirements,
+            _snapshots_holding_nothing([opened]),
+            executions_since=CANDLE_READ,
+        )
+
+    assert tracker.get(ALPHA) is None
+    assert account.reads == []
+    assert [record.levelname for record in caplog.records] == ["WARNING"]
+    assert "BTC/USDT:USDT" in caplog.text
+
+
+async def test_a_delisted_symbol_is_reported_on_every_cycle_it_stands(caplog):
+    account = _Account([], unlisted=[BTC])
+    requirements = StrategyRequirements()
+    requirements.account.add(account, symbols=[BTC], positions=True)
+    tracker = requirements.tracker.add(
+        account=account, symbols={ALPHA: BTC}, tags={ALPHA: profile_tag("1h", "a")}
+    )
+    opened = _execution("e1", OrderSide.BUY, 2.0, WITHIN_THE_READ, tag="1h-a")
+    snapshots = _snapshots_holding_nothing([opened])
+
+    with caplog.at_level(logging.WARNING):
+        await _settle(requirements, snapshots, executions_since=CANDLE_READ)
+        await _settle(requirements, snapshots, executions_since=CANDLE_READ)
+
+    assert tracker.get(ALPHA) is None
+    assert account.reads == []
+    assert len(caplog.records) == 2
+
+
+async def test_a_flat_read_on_a_listed_symbol_still_asks_for_the_second_read(
+    create_run,
+):
+    opened = _execution("e1", OrderSide.BUY, 2.0, WITHIN_THE_READ, tag="1h-a")
+    requirements, account, tracker = create_run([opened])
+
+    await _settle(
+        requirements,
+        _snapshots_holding_nothing([opened]),
+        executions_since=CANDLE_READ,
+    )
+
+    assert len(account.reads) == 1
+    assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 2.0)
+
+
+async def test_the_second_read_leaves_out_a_delisted_symbol_beside_a_listed_one():
+    opened = _execution("e1", OrderSide.BUY, 0.02, LONG_AGO, tag="1h-b", symbol=ETH)
+    account = _Account([opened], unlisted=[BTC])
+    requirements = StrategyRequirements()
+    requirements.account.add(account, symbols=[BTC, ETH], positions=True)
+    tracker = requirements.tracker.add(
+        account=account,
+        symbols={ALPHA: BTC, BETA: ETH},
+        tags={ALPHA: profile_tag("1h", "a"), BETA: profile_tag("1h", "b")},
+    )
+    held = _execution("e2", OrderSide.BUY, 2.0, WITHIN_THE_READ, tag="1h-a")
+    snapshots = AccountSnapshots(
+        {
+            ACCOUNT_NAME: AccountSnapshot(
+                account_name=ACCOUNT_NAME,
+                positions={ETH: _position(ETH, 0.02)},
+                executions=[held],
+                executions_declared=True,
+            )
+        }
+    )
+
+    await _settle(requirements, snapshots, executions_since=CANDLE_READ)
+
+    assert account.reads[0][1] == [ETH]
+    assert tracker.get(ALPHA) is None
+    assert tracker.get(BETA) == TrackedPosition(PositionSide.LONG, 0.02)

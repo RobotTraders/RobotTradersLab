@@ -32,6 +32,7 @@ def main(entry: str, secrets: Path, symbol: str, workspace: Path) -> None:
         ExchangeCriticalError: If the connector is not installed, the venue
             refuses the key, or an account setting is not one the connector
             trades under.
+        SymbolNotListedError: If the venue lists no contract for the symbol.
         ExchangeRecoverableError: If the venue rejects or fails the read.
         Exception: If the plugin checking a webhook refuses it.
     """
@@ -76,6 +77,8 @@ async def _check_venue(
 ) -> None:
     """The connector's own account check runs first, since a connector
     refuses to build on an account set to a mode it does not trade under.
+    The balances are read on the symbol's account, so a symbol the venue does
+    not list is refused before them.
     """
     fields = secrets_by_name[entry]
     exchange_name = fields[_EXCHANGE_KEY]
@@ -87,6 +90,7 @@ async def _check_venue(
     exchange = await load_single_exchange(
         {_ACCOUNT_NAME_KEY: entry, SECRET_REFERENCE_KEY: entry}, secrets_by_name
     )
+    await exchange.get_instrument(symbol)
     balances = await exchange.get_balances([symbol])
     for currency, balance in sorted(balances.items()):
         print(_balance_line(currency, balance))

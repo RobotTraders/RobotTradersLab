@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from datetime import datetime
 from typing import Any
@@ -13,6 +14,7 @@ from robottraderslab._core import (
     OrderSide,
     PositionSide,
     Symbol,
+    SymbolNotListedError,
     TrackedPosition,
     attribute_fill_effects,
     finished,
@@ -40,6 +42,8 @@ from .futures_set_leverage import SetLeverageAction
 from .futures_set_margin_mode import SetMarginModeAction
 from .futures_update_position_stop_loss import UpdatePositionStopLossAction
 from .futures_update_position_take_profit import UpdatePositionTakeProfitAction
+
+logger = logging.getLogger(__name__)
 
 
 class FuturesAccount:
@@ -584,6 +588,16 @@ class FuturesAccount:
             executions=attributed,
             executions_declared=requirement.executions,
         )
+
+    async def _unlisted_among(self, symbols: Iterable[Symbol]) -> frozenset[Symbol]:
+        unlisted = set()
+        for symbol in symbols:
+            try:
+                await self._exchange.get_instrument(symbol)
+            except SymbolNotListedError as error:
+                logger.debug("%s", error)
+                unlisted.add(symbol)
+        return frozenset(unlisted)
 
 
 def _cross_quoted(symbols: tuple[Symbol, ...]) -> tuple[Symbol, ...]:
