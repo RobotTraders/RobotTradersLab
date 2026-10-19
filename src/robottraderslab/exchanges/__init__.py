@@ -22,6 +22,7 @@ _MODULE_BY_NAME = {
     "MarginMode": "robottraderslab._core.margin",
     "MarginSettings": "robottraderslab._core.margin",
     "MarketType": "robottraderslab._core.market",
+    "NO_VENUE_PARAMS": "robottraderslab._core.order",
     "OHLCVProviderProtocol": "robottraderslab._core.interfaces",
     "OhlcvAdapterProtocol": "robottraderslab._core.exchanges",
     "OhlcvData": "robottraderslab._core.exchanges",
@@ -52,7 +53,9 @@ _MODULE_BY_NAME = {
     "StopLoss": "robottraderslab._core.order",
     "TakeProfit": "robottraderslab._core.order",
     "TimeInForce": "robottraderslab._core.order",
+    "TriggerType": "robottraderslab._core.order",
     "VenueFill": "robottraderslab._core.order",
+    "VenueParams": "robottraderslab._core.order",
     "client_order_id_carrying": "robottraderslab._core.actions.members",
     "describe_order": "robottraderslab._core.order",
     "fetch_pages": "robottraderslab._core.exchanges",
@@ -61,6 +64,8 @@ _MODULE_BY_NAME = {
     "page_bounds": "robottraderslab._core.exchanges",
     "tag_of": "robottraderslab._core.actions.members",
     "to_milliseconds": "robottraderslab._core.timeframes",
+    "venue_trigger_type": "robottraderslab._core.order",
+    "with_venue_params": "robottraderslab._core.order",
     "without_the_open_candle": "robottraderslab._core.exchanges",
 }
 

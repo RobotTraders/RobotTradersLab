@@ -86,6 +86,26 @@ class TestBatchAction:
             TimeInForce.GTC,
         ]
 
+    async def test_each_order_travels_with_its_venue_params(self):
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            return_value=[PlacedOrder(order_id="1"), PlacedOrder(order_id="2")],
+        )
+        with_params = FuturesLimitOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.BUY,
+            quantity=1.0,
+            price=50000.0,
+            params={"bitget": {"venueOnly": "99"}},
+        )
+        batch = self.account.place_orders([with_params, self.market_order])
+
+        await batch.execute()
+
+        (requests,) = self.exchange.place_orders.await_args.args
+        assert [r.params for r in requests] == [{"bitget": {"venueOnly": "99"}}, {}]
+
     async def test_orders_travel_as_one_request(self):
         self.exchange.place_orders = AsyncMock(
             spec=FuturesExchangeProtocol.place_orders,
@@ -266,6 +286,26 @@ class TestBatchWaiting:
         await place_in_order(venue, self._requests())
 
         assert venue.trace == ["start 1.0", "end 1.0", "start 2.0", "end 2.0"]
+
+    async def test_one_by_one_each_order_carries_its_venue_params(self):
+        venue = self._TracingVenue()
+        venue.place_limit_order = AsyncMock(  # type: ignore[method-assign]
+            spec=FuturesExchangeBase.place_limit_order,
+            return_value=PlacedOrder(order_id="one"),
+        )
+        request = OrderRequest(
+            symbol=BTC_USDT,
+            side=OrderSide.BUY,
+            quantity=1.0,
+            limit_price=50000.0,
+            params={"bitget": {"venueOnly": "99"}},
+        )
+
+        await place_in_order(venue, [request])
+
+        assert venue.place_limit_order.await_args.kwargs["params"] == {
+            "bitget": {"venueOnly": "99"}
+        }
 
     async def test_in_order_reports_a_rejected_order(self):
         venue = self._TracingVenue()

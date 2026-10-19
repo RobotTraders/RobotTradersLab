@@ -1,12 +1,14 @@
 import pytest
 
 from robottraderslab import Symbol
+from robottraderslab._core import OrderOverrides, OrderSettings
 from robottraderslab.exchanges import (
     Balance,
     OrderSide,
     PositionSide,
     PositionSnapshot,
 )
+from robottraderslab.futures import FuturesAccount
 from robottraderslab.futures.futures_limit_order import FuturesLimitOrderAction
 from robottraderslab.strategies import AccountSnapshot
 from robottraderslab.strategies.futures import (
@@ -216,3 +218,35 @@ class TestPositionTarget:
     def test_nan_quantity(self, account):
         with pytest.raises(ValueError, match="`quantity` must be zero or above"):
             account.long_target(BTC_USDT, _holding(None)).quantity(float("nan"), 100.0)
+
+
+class TestConfiguredOrderSettings:
+    @pytest.fixture
+    def configured_account(self, account: FuturesAccount) -> FuturesAccount:
+        return FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                entry=OrderSettings(params={"bitget": {"role": "entry"}}),
+                exit=OrderSettings(params={"bitget": {"role": "exit"}}),
+            ),
+        )
+
+    def test_a_target_growing_the_position_takes_the_entry_settings(
+        self, configured_account
+    ):
+        order = configured_account.long_target(BTC_USDT, _holding(None)).size(
+            TotalBalanceRatio(0.3), 100.0
+        )
+
+        assert order.build().params == {"bitget": {"role": "entry"}}
+
+    def test_a_target_shrinking_the_position_takes_the_exit_settings(
+        self, configured_account, make_position
+    ):
+        holding = _holding(make_position(PositionSide.LONG, 30.0))
+
+        order = configured_account.long_target(BTC_USDT, holding).size(
+            TotalBalanceRatio(0.1), 100.0
+        )
+
+        assert order.build().params == {"bitget": {"role": "exit"}}

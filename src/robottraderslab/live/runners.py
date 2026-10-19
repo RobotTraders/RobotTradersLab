@@ -1,6 +1,7 @@
 import logging
 
 from robottraderslab._core import (
+    OrderOverrides,
     auto_configure_notebook_logging,
     retry_on_transient,
     run_async,
@@ -45,6 +46,7 @@ async def _run_livebot(bot_config: BotConfig) -> None:
     account = await _load_account(
         live_config.trading_account,
         secrets_by_name,
+        bot_config.orders.to_overrides(),
         max_attempts=live_config.retry.max_attempts,
         base_delay=live_config.retry.base_delay_seconds,
     )
@@ -76,6 +78,7 @@ async def _run_livebot(bot_config: BotConfig) -> None:
 async def _load_account(
     account_config: AccountConfig,
     secrets_by_name: SecretsByName,
+    order_overrides: OrderOverrides,
     *,
     max_attempts: int,
     base_delay: float,
@@ -93,6 +96,7 @@ async def _load_account(
             load_single_account,
             account_config,
             secrets_by_name,
+            order_overrides,
             max_attempts=max_attempts,
             base_delay=base_delay,
             retryable=ExchangeRecoverableError,

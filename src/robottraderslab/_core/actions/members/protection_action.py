@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import ClassVar
 
-from ...order import PlacedOrder, ProtectionKind, ProtectionVenue
+from ...order import PlacedOrder, ProtectionKind, ProtectionVenue, TriggerType
 from .base_action import BaseExchangeAction
 
 
@@ -18,6 +18,7 @@ class PositionProtectionAction(BaseExchangeAction):
     held: tuple[PlacedOrder, ...] = field(default=(), init=False)
     position_gone: bool = field(default=False, init=False)
     trigger_price: float
+    trigger_type: TriggerType = TriggerType.DEFAULT
 
     @property
     def venue(self) -> ProtectionVenue:

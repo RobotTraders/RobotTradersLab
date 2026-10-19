@@ -10,7 +10,7 @@ from typing import Any, ClassVar
 import numpy as np
 import numpy.typing as npt
 
-from robottraderslab._core import Symbol, TimeFrame
+from robottraderslab import Symbol, TimeFrame
 from robottraderslab.exceptions import StrategyCriticalError
 from robottraderslab.indicators import sma
 from robottraderslab.strategies import (

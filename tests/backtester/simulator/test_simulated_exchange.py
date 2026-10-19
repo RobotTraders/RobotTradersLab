@@ -16,8 +16,10 @@ from robottraderslab.exchanges import (
     OrderSide,
     PlacedOrder,
     Quote,
+    TriggerType,
     VenueFill,
 )
+from robottraderslab.futures.futures_market_order import FuturesMarketOrderAction
 
 
 class TestPlaceOrders:
@@ -218,6 +220,37 @@ class TestSimlatedExchange:
 
         assert isinstance(order_fill, VenueFill)
         assert order_fill.order_id == placed_order.order_id
+
+    async def test_a_market_order_carrying_venue_params_fills(self, sim, btc_usdt_perp):
+        order = FuturesMarketOrderAction(
+            exchange=sim.exchange,
+            symbol=btc_usdt_perp,
+            side=OrderSide.BUY,
+            quantity=1.5,
+            params={"bitget": {"venueOnly": "99"}},
+        )
+        (outcome,) = (await order.execute()).orders
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=100.0)
+
+        order_fill = await outcome.placed_order.get_fill()
+
+        assert isinstance(order_fill, VenueFill)
+        assert order_fill.quantity == 1.5
+
+    async def test_a_trigger_watching_the_index_fills_on_the_candle(
+        self, sim, btc_usdt_perp
+    ):
+        await sim.exchange.place_market_order(
+            symbol=btc_usdt_perp,
+            side=OrderSide.BUY,
+            quantity=1.0,
+            trigger_price=90.0,
+            trigger_type=TriggerType.INDEX_PRICE,
+        )
+
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=100.0, low=80.0)
+
+        assert len(sim.fill_recorder.fills) == 1
 
     async def test_a_market_order_still_resting_reports_no_fill(
         self, sim, btc_usdt_perp: Symbol

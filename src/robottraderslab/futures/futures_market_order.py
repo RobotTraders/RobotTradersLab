@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from robottraderslab._core import (
+    NO_VENUE_PARAMS,
     ActionResult,
     BaseExchangeAction,
     OnFillRead,
@@ -12,6 +13,8 @@ from robottraderslab._core import (
     StopLoss,
     Symbol,
     TakeProfit,
+    TriggerType,
+    VenueParams,
 )
 
 from .futures_exchange_protocol import FuturesExchangeProtocol
@@ -33,8 +36,10 @@ class FuturesMarketOrderAction(BaseExchangeAction):
     stop_loss: StopLoss | None = None
     take_profit: TakeProfit | None = None
     trigger_price: float | None = None
+    trigger_type: TriggerType = TriggerType.DEFAULT
     reason: str | None = None
     extra_fields: dict[str, Any] | None = None
+    params: VenueParams = NO_VENUE_PARAMS
     on_filled: OnFillRead | None = None
 
     async def execute(self) -> ActionResult:
@@ -46,9 +51,11 @@ class FuturesMarketOrderAction(BaseExchangeAction):
             stop_loss=self.stop_loss,
             take_profit=self.take_profit,
             trigger_price=self.trigger_price,
+            trigger_type=self.trigger_type,
             client_order_id=self.client_order_id,
             reason=self.reason,
             extra_fields=self.extra_fields,
+            params=self.params,
         )
 
         return ActionResult(

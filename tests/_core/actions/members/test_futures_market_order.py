@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from robottraderslab import Symbol
+from robottraderslab._core import TriggerType
 from robottraderslab.exchanges import (
     FuturesExchangeProtocol,
     OrderSide,
@@ -40,6 +41,7 @@ def market_order_action(mock_exchange) -> FuturesMarketOrderAction:
         take_profit=50000.0,
         stop_loss=40000.0,
         trigger_price=45000.0,
+        trigger_type=TriggerType.MARK_PRICE,
     )
 
 
@@ -54,9 +56,11 @@ async def test_execute_places_market_order(market_order_action):
         stop_loss=market_order_action.stop_loss,
         take_profit=market_order_action.take_profit,
         trigger_price=market_order_action.trigger_price,
+        trigger_type=TriggerType.MARK_PRICE,
         client_order_id=market_order_action.client_order_id,
         reason=market_order_action.reason,
         extra_fields=market_order_action.extra_fields,
+        params={},
     )
 
 

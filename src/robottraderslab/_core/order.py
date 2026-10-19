@@ -1,10 +1,12 @@
 import json
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal, Protocol
+from types import MappingProxyType
+from typing import Any, Literal, Protocol
 
+from .exceptions import StrategyCriticalError
 from .price import validate_price
 from .symbol import Symbol
 
@@ -49,6 +51,12 @@ RESTING_ENTRY_KINDS: frozenset[OrderType] = frozenset(
     {OrderType.LIMIT, OrderType.TRIGGER}
 )
 
+type VenueParams = Mapping[str, Mapping[str, Any]]
+"""Venue fields keyed by the name of the connector they are addressed to."""
+
+NO_VENUE_PARAMS: VenueParams = MappingProxyType({})
+_NO_FIELDS: Mapping[str, Any] = MappingProxyType({})
+
 
 class TimeInForce(StrEnum):
     """How long a limit order may wait on the book.
@@ -62,6 +70,22 @@ class TimeInForce(StrEnum):
     GTC = "gtc"
     IOC = "ioc"
     POST_ONLY = "post_only"
+
+
+class TriggerType(StrEnum):
+    """The price a trigger level watches.
+
+    `DEFAULT` is the mark price for a trigger entry and a stop-loss, since a
+    single trade's wick barely moves it and a level fired by that wick opens
+    or closes a position at a loss, and the last trade for a take-profit,
+    which closes in profit wherever it fires and reaches a target the mark
+    lags under; a venue offering one price alone watches that one.
+    """
+
+    DEFAULT = "default"
+    LAST_PRICE = "last_price"
+    MARK_PRICE = "mark_price"
+    INDEX_PRICE = "index_price"
 
 
 class OrderSide(StrEnum):
@@ -151,6 +175,7 @@ class StopLoss:
 
     trigger_price: float
     reason: str | None = None
+    trigger_type: TriggerType = TriggerType.DEFAULT
 
     def __post_init__(self) -> None:
         """Refuse a trigger price no venue accepts.
@@ -171,6 +196,7 @@ class TakeProfit:
 
     trigger_price: float
     reason: str | None = None
+    trigger_type: TriggerType = TriggerType.DEFAULT
 
     def __post_init__(self) -> None:
         """Refuse a trigger price no venue accepts.
@@ -369,6 +395,8 @@ class OrderRequest:
         client_order_id: Caller-assigned order id, unchanged across retried
             attempts, so a venue that rejects a duplicate admits one order
             for the whole sequence.
+        params: Venue fields by connector name; the connector the order is
+            placed on merges its own through `with_venue_params`.
     """
 
     symbol: Symbol
@@ -380,7 +408,9 @@ class OrderRequest:
     stop_loss: StopLoss | None = None
     take_profit: TakeProfit | None = None
     trigger_price: float | None = None
+    trigger_type: TriggerType = TriggerType.DEFAULT
     client_order_id: str | None = None
+    params: VenueParams = NO_VENUE_PARAMS
 
 
 @dataclass(kw_only=True, frozen=True, slots=True)
@@ -393,6 +423,68 @@ class OrderModifyRequest:
 
     order_id: str
     order: OrderRequest
+
+
+def with_venue_params(
+    body: Mapping[str, Any],
+    params: VenueParams,
+    *,
+    venue: str,
+    reserved: Collection[str],
+) -> dict[str, Any]:
+    """A field carrying the order itself is never a strategy's to set, so an
+    order booked without a stop-loss gains no protection through its venue
+    fields.
+
+    Args:
+        body: The fields the connector set from the order.
+        venue: The name the connector registers under.
+        reserved: Every field carrying an order, set on this one or not,
+            such as one the connector sets on other orders or one that
+            reshapes the position the engine tracks.
+
+    Raises:
+        StrategyCriticalError: If a strategy's field names one the
+            connector sets or reserves.
+    """
+    fields = params.get(venue, _NO_FIELDS)
+    overwritten = sorted(name for name in fields if name in body or name in reserved)
+    if overwritten:
+        raise StrategyCriticalError(
+            f"The order's {venue} params set {', '.join(overwritten)}, which the "
+            "connector sets from the order itself; set it through the order "
+            "builder and drop it from params()."
+        )
+    return {**body, **fields}
+
+
+def venue_trigger_type(
+    trigger_type: TriggerType,
+    names: Mapping[TriggerType, str],
+    *,
+    default: str,
+    venue: str,
+) -> str:
+    """A venue triggers only on the prices it names, so a trigger type it does
+    not name stops the run before anything is sent.
+
+    Args:
+        trigger_type: The type the strategy or the run's configuration set.
+        names: The venue's word for each trigger type it offers.
+        default: The venue's word for the price `DEFAULT` watches there.
+
+    Raises:
+        StrategyCriticalError: If the venue offers no such trigger type.
+    """
+    if trigger_type is TriggerType.DEFAULT:
+        return default
+    name = names.get(trigger_type)
+    if name is None:
+        offered = ", ".join(sorted(names)) or "its default price alone"
+        raise StrategyCriticalError(
+            f"{venue} offers no {trigger_type} trigger; it triggers on {offered}"
+        )
+    return name
 
 
 def describe_order(order: OrderRequest) -> str:

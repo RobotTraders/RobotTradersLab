@@ -36,8 +36,6 @@ _SUBPACKAGES = {
     "check": "robottraderslab.live.check",
     "flatten": "robottraderslab.live.flatten",
     "grid-search": "robottraderslab.grid_search",
-    "init": "robottraderslab.scaffold.workspace",
-    "init-cron": "robottraderslab.scaffold.cron",
     "live": "robottraderslab.live",
     "report": "robottraderslab.live.report",
     "scaffold": "robottraderslab.scaffold",
@@ -46,8 +44,18 @@ _SUBPACKAGES = {
 
 
 class _InitKind(StrEnum):
+    AGENTS = "agents"
+    CLAUDE = "claude"
     CRON = "cron"
     LIVE = "live"
+
+
+_INIT_SUBPACKAGES = {
+    _InitKind.AGENTS: "robottraderslab.scaffold.agents",
+    _InitKind.CLAUDE: "robottraderslab.scaffold.claude",
+    _InitKind.CRON: "robottraderslab.scaffold.cron",
+    _InitKind.LIVE: "robottraderslab.scaffold.workspace",
+}
 
 
 _ConfigFile = Annotated[
@@ -108,7 +116,7 @@ _ListExamplesFlag = Annotated[
 
 _InitKindArgument = Annotated[
     _InitKind,
-    typer.Argument(metavar="KIND", help="`live` or `cron`"),
+    typer.Argument(metavar="KIND", help="`live`, `cron`, `claude` or `agents`"),
 ]
 _Registry = Annotated[
     Path | None,
@@ -297,23 +305,34 @@ def init(
     registry: _Registry = None,
     workspace: _Workspace = None,
 ) -> None:
-    """Set up what a live bot needs: `live` lays out the example secrets file
-    and the example registry of bots in the workspace, to copy and fill; `cron`
-    makes sure the crontab of the user running it holds the line that runs the
-    project's scheduler every minute.
+    """Set up a project for live trading or for an AI agent: `live` lays out
+    the example secrets file and the example registry of bots in the workspace,
+    to copy and fill; `cron` makes sure the crontab of the user running it holds
+    the line that runs the project's scheduler every minute; `claude` sets up
+    Claude with the engine's agent instructions, `AGENTS.md`, and its skills,
+    the instructions as `.claude/rules/robottraderslab.md` and the skills under
+    `.claude/skills/`, leaving `CLAUDE.md` untouched; `agents` writes the same
+    files into `agents/`, for any other agent to copy and rename as it expects.
+    A rerun of `claude` or `agents` replaces the copies with the ones the
+    installed engine ships.
     """
+    if kind in (_InitKind.AGENTS, _InitKind.CLAUDE):
+        if workspace is not None or registry is not None:
+            ctx.fail(f"`init {kind}` takes no option")
+        _init(kind, project=_project())
+        return
     if kind is _InitKind.CRON:
         if workspace is not None:
             ctx.fail("--workspace goes with `init live`")
         project = _project()
         try:
-            _run("init-cron", project=project, registry=registry or _DEFAULT_REGISTRY)
+            _init(kind, project=project, registry=registry or _DEFAULT_REGISTRY)
         except CrontabError as e:
             _refuse(e)
         return
     if registry is not None:
         ctx.fail("--registry goes with `init cron`")
-    _run("init", workspace=_workspace(workspace))
+    _init(kind, workspace=_workspace(workspace))
 
 
 @app.command()
@@ -407,7 +426,15 @@ def _set_traceback(debug: bool) -> None:
 
 
 def _run(command: str, **arguments: Any) -> int | None:
-    failures: int | None = import_module(_SUBPACKAGES[command]).main(**arguments)
+    return _call(_SUBPACKAGES[command], **arguments)
+
+
+def _init(kind: _InitKind, **arguments: Any) -> None:
+    _call(_INIT_SUBPACKAGES[kind], **arguments)
+
+
+def _call(subpackage: str, **arguments: Any) -> int | None:
+    failures: int | None = import_module(subpackage).main(**arguments)
     return failures
 
 

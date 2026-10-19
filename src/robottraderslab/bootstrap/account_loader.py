@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Any
 
+from robottraderslab._core import NO_ORDER_OVERRIDES, OrderOverrides, TriggerType
 from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
 from robottraderslab.exchanges import FuturesExchangeProtocol
 from robottraderslab.futures import FuturesAccount
@@ -38,9 +39,13 @@ async def load_accounts(
 
 
 async def load_single_account(
-    account_config: AccountConfig, secrets_by_name: SecretsByName
+    account_config: AccountConfig,
+    secrets_by_name: SecretsByName,
+    order_overrides: OrderOverrides = NO_ORDER_OVERRIDES,
 ) -> FuturesAccount:
-    _, _, account = await _load_account(account_config, secrets_by_name)
+    _, _, account = await _load_account(
+        account_config, secrets_by_name, order_overrides
+    )
     return account
 
 
@@ -70,14 +75,49 @@ async def load_single_exchange(
 
 
 async def _load_account(
-    account_config: AccountConfig, secrets_by_name: SecretsByName
+    account_config: AccountConfig,
+    secrets_by_name: SecretsByName,
+    order_overrides: OrderOverrides = NO_ORDER_OVERRIDES,
 ) -> tuple[str, FuturesExchangeProtocol, FuturesAccount]:
     name, merged_config = _named_config(account_config, secrets_by_name)
     exchange_name = merged_config.get(_EXCHANGE_KEY)
     exchange = await load_exchange(merged_config)
-    account = FuturesAccount(exchange, name=name)
+    _refuse_unoffered_trigger_types(exchange_name, exchange, order_overrides)
+    account = FuturesAccount(exchange, name=name, order_overrides=order_overrides)
     logger.debug(f"FuturesAccount `{name}` loaded for exchange `{exchange_name}`")
     return name, exchange, account
+
+
+def _refuse_unoffered_trigger_types(
+    exchange_name: str | None,
+    exchange: FuturesExchangeProtocol,
+    order_overrides: OrderOverrides,
+) -> None:
+    """A configured trigger type the venue does not offer would stop the
+    run at its first order, so it stops the run before any.
+
+    Raises:
+        StrategyCriticalError: If `[orders]` names a trigger type the venue
+            offers no trigger on.
+    """
+    configured = {
+        "orders.entry.trigger_type": order_overrides.entry.trigger_type,
+        "orders.exit.trigger_type": order_overrides.exit.trigger_type,
+        "orders.stop_loss.trigger_type": order_overrides.stop_loss_trigger_type,
+        "orders.take_profit.trigger_type": order_overrides.take_profit_trigger_type,
+    }
+    offered = exchange.capabilities.trigger_types
+    refused = [
+        f"`{key} = {value}`"
+        for key, value in configured.items()
+        if value is not None and value not in offered
+    ]
+    if refused:
+        names = ", ".join(sorted(offered - {TriggerType.DEFAULT})) or "none"
+        raise StrategyCriticalError(
+            f"{exchange_name} offers no trigger on {', '.join(refused)}; "
+            f"it offers {names}"
+        )
 
 
 def _named_config(

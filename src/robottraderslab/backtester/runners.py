@@ -40,6 +40,7 @@ def run_backtest(bot_config: BotConfig) -> BacktestOutputs:
         taker_fee_rate=backtest_config.taker_fee_rate,
         fee_mode=backtest_config.fee_mode,
         placement_reserve=backtest_config.placement_reserve,
+        order_overrides=bot_config.orders.to_overrides(),
     )
 
     require_ohlcv_provider(

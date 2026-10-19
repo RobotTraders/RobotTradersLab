@@ -128,6 +128,12 @@ WORKSPACE_COMMANDS = [
     ("check", ["check", "impulse-example"]),
 ]
 
+AGENT_KINDS = [
+    ("agents", Path("agents", "AGENTS.md")),
+    ("claude", Path(".claude", "rules", "robottraderslab.md")),
+]
+AGENT_KIND_NAMES = [kind for kind, _ in AGENT_KINDS]
+
 type ReplaceCommand = Callable[[str, Callable[..., Any]], None]
 
 
@@ -195,6 +201,46 @@ def test_init_live_refuses_a_registry(cli, replace_command):
 
     assert invoked.exit_code == 2
     assert received == []
+
+
+@pytest.mark.parametrize(("kind", "instructions"), AGENT_KINDS)
+def test_init_for_agents_from_a_folder_inside_the_project_writes_into_the_project(
+    kind, instructions, cli, project, monkeypatch
+):
+    inside = project / "notes"
+    inside.mkdir()
+    monkeypatch.chdir(inside)
+
+    cli.invoke(app, ["init", kind])
+
+    assert (project / instructions).is_file()
+    assert list(inside.iterdir()) == []
+
+
+@pytest.mark.parametrize("kind", AGENT_KIND_NAMES)
+@pytest.mark.parametrize(
+    "option", [["--workspace", "elsewhere"], ["--registry", "pilot.toml"]]
+)
+def test_init_for_agents_refuses_an_option(kind, option, cli, project):
+    before = sorted(project.iterdir())
+
+    invoked = cli.invoke(app, ["init", kind, *option])
+
+    assert invoked.exit_code == 2
+    assert sorted(project.iterdir()) == before
+
+
+@pytest.mark.parametrize("kind", AGENT_KIND_NAMES)
+def test_init_for_agents_outside_any_project_is_refused(
+    kind, cli, tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+
+    refused = cli.invoke(app, ["init", kind])
+
+    assert refused.exit_code == 1
+    assert "no `pyproject.toml` at or above" in refused.stderr
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_init_requires_a_kind_of_run(cli):

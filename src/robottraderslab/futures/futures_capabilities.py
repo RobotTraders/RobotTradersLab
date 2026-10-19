@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from robottraderslab._core import TriggerType
+
 
 @dataclass(frozen=True, slots=True)
 class FuturesCapabilities:
@@ -17,8 +19,12 @@ class FuturesCapabilities:
             the move as a cancel and a placement.
         places_trailing_stop_orders: Whether the venue places a trailing stop on a
             position and trails it behind the price on its own.
+        trigger_types: The prices a trigger level may watch on the venue,
+            `DEFAULT` among them; an order carrying another type is refused
+            before it is sent.
     """
 
     reserves_margin_on_pending_orders: bool = False
     modifies_resting_orders_in_place: bool = True
     places_trailing_stop_orders: bool = False
+    trigger_types: frozenset[TriggerType] = frozenset({TriggerType.DEFAULT})

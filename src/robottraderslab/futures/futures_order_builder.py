@@ -3,15 +3,19 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
 
 from robottraderslab._core import (
+    NO_VENUE_PARAMS,
     AccountSnapshot,
     ActionBuilder,
     OnFillRead,
+    OrderSettings,
     OrderSide,
     SizingRule,
     StopLoss,
     Symbol,
     TakeProfit,
     TimeInForce,
+    TriggerType,
+    VenueParams,
     validate_price,
 )
 from robottraderslab.exceptions import StrategyCriticalError
@@ -51,11 +55,13 @@ class _FuturesOrderParams:
     stop_loss: StopLoss | None = None
     take_profit: TakeProfit | None = None
     trigger_price: float | None = None
+    trigger_type: TriggerType = TriggerType.DEFAULT
     time_in_force: TimeInForce = TimeInForce.GTC
     reduce_only: bool = False
     reason: str | None = None
     tag: str | None = None
     extra_fields: dict[str, Any] | None = None
+    venue_params: VenueParams = NO_VENUE_PARAMS
     on_filled: OnFillRead | None = None
     sizing: _PendingSizing | None = None
 
@@ -76,6 +82,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         quantity: float | None,
         side: OrderSide,
         symbol: Symbol,
+        settings: OrderSettings,
         reduce_only: bool = False,
     ) -> None:
         """Initialise the builder.
@@ -83,6 +90,8 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         Args:
             quantity: The quantity to trade, in the base currency; None leaves
                 the sizing to `size`.
+            settings: What the run's configuration sets on orders of the
+                order's role, each winning over the chain's at `build()`.
             reduce_only: Whether the order may only reduce an existing position.
 
         Raises:
@@ -94,6 +103,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         _require_margin_currency(symbol)
 
         self._account = account
+        self._settings = settings
         self._params = _FuturesOrderParams(
             quantity=quantity,
             side=side,
@@ -133,7 +143,9 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
 
         Args:
             time_in_force: How long the order may wait on the book, one of
-                `TimeInForce`.
+                `TimeInForce`; unless the order also waits on a trigger, a
+                run's `[orders.entry]` or `[orders.exit]` `time_in_force`
+                wins.
 
         Raises:
             ValueError: If price is not positive or is NaN.
@@ -143,41 +155,93 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         self._params.time_in_force = time_in_force
         return self
 
-    def stop_loss(self, price: float, *, reason: str | None = None) -> Self:
+    def stop_loss(
+        self,
+        price: float,
+        *,
+        reason: str | None = None,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
+    ) -> Self:
         """Attach a stop-loss the venue places together with the order.
 
         Args:
             reason: Label for the stop-loss (e.g. "SL 1", "tight stop"). An
                 unnamed one is reported by the kind of order that fired it.
+            trigger_type: The price the stop-loss watches; a type the venue
+                offers no trigger on stops the run before the order is sent,
+                and a run's `[orders.stop_loss]` `trigger_type` wins.
 
         Raises:
             ValueError: If price is not positive or is NaN.
         """
-        self._params.stop_loss = StopLoss(trigger_price=price, reason=reason)
+        self._params.stop_loss = StopLoss(
+            trigger_price=price, reason=reason, trigger_type=trigger_type
+        )
         return self
 
-    def take_profit(self, price: float, *, reason: str | None = None) -> Self:
+    def take_profit(
+        self,
+        price: float,
+        *,
+        reason: str | None = None,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
+    ) -> Self:
         """Attach a take-profit the venue places together with the order.
 
         Args:
             reason: Label for the take-profit (e.g. "TP 1", "target 50pct").
                 An unnamed one is reported by the kind of order that fired it.
+            trigger_type: The price the take-profit watches; a type the venue
+                offers no trigger on stops the run before the order is sent,
+                and a run's `[orders.take_profit]` `trigger_type` wins.
 
         Raises:
             ValueError: If price is not positive or is NaN.
         """
-        self._params.take_profit = TakeProfit(trigger_price=price, reason=reason)
+        self._params.take_profit = TakeProfit(
+            trigger_price=price, reason=reason, trigger_type=trigger_type
+        )
         return self
 
-    def trigger(self, price: float) -> Self:
+    def trigger(
+        self, price: float, *, trigger_type: TriggerType = TriggerType.DEFAULT
+    ) -> Self:
         """Hold the order back until price reaches the level, then submit it
         at market, or at the limit when `.limit()` is also set.
+
+        Args:
+            trigger_type: The price the level watches; a type the venue
+                offers no trigger on stops the run before the order is sent,
+                and a run's `[orders.entry]` or `[orders.exit]`
+                `trigger_type` wins.
 
         Raises:
             ValueError: If price is not positive or is NaN.
         """
         validate_price("price", price)
         self._params.trigger_price = price
+        self._params.trigger_type = trigger_type
+        return self
+
+    def params(self, venue: str, **fields: Any) -> Self:
+        """Send fields of one venue's own API in the request that places the
+        order on that venue, named as its API names them; an order placed on
+        another venue carries none of them.
+
+        A field the connector sets from any order stops the run before the
+        order is sent, even when this order leaves it unset, and a run's
+        `[orders]` section wins over a field of the same name. A backtest
+        ignores them.
+
+        Args:
+            venue: The name the venue's connector registers under, the one
+                the account's configuration names, such as `bitget`.
+            **fields: Merges into any fields an earlier call gave that venue.
+        """
+        self._params.venue_params = {
+            **self._params.venue_params,
+            venue: {**self._params.venue_params.get(venue, {}), **fields},
+        }
         return self
 
     def reason(self, reason: str) -> Self:
@@ -237,38 +301,39 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         """
         action: BatchableOrderAction
 
-        if self._params.sizing is not None:
-            self._params.quantity = self._quantity_from_rule(self._params.sizing)
-        if self._params.quantity is None:
-            raise StrategyCriticalError(
-                "The order has no size. Give it a quantity or size it with "
-                "size(rule, price, account_snapshot) before it is built."
-            )
-        if (
-            self._params.trigger_price is not None
-            and self._params.time_in_force is not TimeInForce.GTC
-        ):
-            raise StrategyCriticalError(
-                f"A time in force of {self._params.time_in_force} on a triggered "
-                "order: the trigger decides when the order goes, and it then "
-                "rests until cancelled."
-            )
-
+        quantity = self._sized_quantity()
         exchange = self._account._exchange
+        settings = self._settings
+        time_in_force = self._params.time_in_force
+        if self._params.trigger_price is None:
+            time_in_force = settings.time_in_force_over(time_in_force)
+        elif time_in_force is not TimeInForce.GTC:
+            raise StrategyCriticalError(
+                f"A time in force of {time_in_force} on a triggered order: the "
+                "trigger decides when the order goes, and it then rests until "
+                "cancelled."
+            )
+        params = settings.params_over(self._params.venue_params)
+        trigger_type = settings.trigger_type_over(self._params.trigger_type)
+        overrides = self._account._order_overrides
+        stop_loss = overrides.stop_loss_over(self._params.stop_loss)
+        take_profit = overrides.take_profit_over(self._params.take_profit)
 
         if self._params.limit_price is None:
             action = FuturesMarketOrderAction(
                 exchange=exchange,
                 symbol=self._params.symbol,
                 side=self._params.side,
-                quantity=self._params.quantity,
+                quantity=quantity,
                 reduce_only=self._params.reduce_only,
-                stop_loss=self._params.stop_loss,
-                take_profit=self._params.take_profit,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
                 trigger_price=self._params.trigger_price,
+                trigger_type=trigger_type,
                 reason=self._params.reason,
                 tag=self._params.tag,
                 extra_fields=self._params.extra_fields,
+                params=params,
                 on_filled=self._params.on_filled,
             )
         else:
@@ -277,19 +342,31 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
                 exchange=exchange,
                 symbol=self._params.symbol,
                 side=self._params.side,
-                quantity=self._params.quantity,
+                quantity=quantity,
                 reduce_only=self._params.reduce_only,
-                stop_loss=self._params.stop_loss,
-                take_profit=self._params.take_profit,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
                 trigger_price=self._params.trigger_price,
-                time_in_force=self._params.time_in_force,
+                trigger_type=trigger_type,
+                time_in_force=time_in_force,
                 reason=self._params.reason,
                 tag=self._params.tag,
                 extra_fields=self._params.extra_fields,
+                params=params,
                 on_filled=self._params.on_filled,
             )
 
         return action
+
+    def _sized_quantity(self) -> float:
+        if self._params.sizing is not None:
+            self._params.quantity = self._quantity_from_rule(self._params.sizing)
+        if self._params.quantity is None:
+            raise StrategyCriticalError(
+                "The order has no size. Give it a quantity or size it with "
+                "size(rule, price, account_snapshot) before it is built."
+            )
+        return self._params.quantity
 
     def _quantity_from_rule(self, sizing: _PendingSizing) -> float:
         stop_loss = self._params.stop_loss

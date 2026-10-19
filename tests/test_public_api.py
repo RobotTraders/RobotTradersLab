@@ -114,6 +114,7 @@ def test_futures_strategies_gate():
         "SizingRule",
         "TimeInForce",
         "TotalBalanceRatio",
+        "TriggerType",
         "UpdatePositionStopLossAction",
         "UpdatePositionTakeProfitAction",
     ]
@@ -141,6 +142,7 @@ def test_exchanges_gate():
         "MarginMode",
         "MarginSettings",
         "MarketType",
+        "NO_VENUE_PARAMS",
         "OHLCVProviderProtocol",
         "OhlcvAdapterProtocol",
         "OhlcvData",
@@ -171,7 +173,9 @@ def test_exchanges_gate():
         "StopLoss",
         "TakeProfit",
         "TimeInForce",
+        "TriggerType",
         "VenueFill",
+        "VenueParams",
         "client_order_id_carrying",
         "describe_order",
         "fetch_pages",
@@ -180,6 +184,8 @@ def test_exchanges_gate():
         "page_bounds",
         "tag_of",
         "to_milliseconds",
+        "venue_trigger_type",
+        "with_venue_params",
         "without_the_open_candle",
     ]
 
@@ -223,6 +229,7 @@ def test_order_builder_surface():
         "build",
         "extra_fields",
         "limit",
+        "params",
         "reason",
         "size",
         "stop_loss",
