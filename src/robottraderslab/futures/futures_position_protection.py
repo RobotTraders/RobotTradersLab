@@ -1,7 +1,12 @@
 import logging
 from collections.abc import Awaitable, Callable
 
-from robottraderslab._core import PlacedOrder, PositionProtectionAction, Symbol
+from robottraderslab._core import (
+    PlacedOrder,
+    PositionProtectionAction,
+    Symbol,
+    TriggerType,
+)
 from robottraderslab.exceptions import (
     ExchangeRecoverableError,
     ExchangeTransientError,
@@ -21,7 +26,7 @@ _REJECTION_REPORTS = (
 
 async def hold_protection(
     action: PositionProtectionAction,
-    update: Callable[[Symbol, float], Awaitable[PlacedOrder]],
+    update: Callable[[Symbol, float, TriggerType], Awaitable[PlacedOrder]],
 ) -> None:
     """A position guarded at a level the strategy did not book is the failure
     this prevents. A symbol the account holds no position on any more has
@@ -34,7 +39,9 @@ async def hold_protection(
     action.position_gone = False
     for level, message in _REJECTION_REPORTS:
         try:
-            action.held = (await update(action.symbol, action.trigger_price),)
+            action.held = (
+                await update(action.symbol, action.trigger_price, action.trigger_type),
+            )
             return
         except NoOpenPositionError as gone:
             action.position_gone = True

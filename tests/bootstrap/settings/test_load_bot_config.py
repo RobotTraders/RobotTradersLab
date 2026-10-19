@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from robottraderslab._core import PlacementReserve
+from robottraderslab._core import PlacementReserve, TimeInForce, TriggerType
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.exceptions import StrategyCriticalError
 
@@ -655,3 +655,56 @@ def test_a_config_that_is_not_valid_toml_names_the_file(tmp_path):
 
     with pytest.raises(StrategyCriticalError, match="is not valid TOML"):
         BotConfig.from_file(str(toml_file))
+
+
+def test_the_orders_section_sets_each_role(toml_string):
+    bot_config = BotConfig.from_text(
+        toml_string
+        + """
+[orders.entry]
+time_in_force = "post_only"
+
+[orders.exit.params.simulator]
+venueOnly = "99"
+"""
+    )
+
+    overrides = bot_config.orders.to_overrides()
+
+    assert overrides.entry.time_in_force is TimeInForce.POST_ONLY
+    assert overrides.exit.params == {"simulator": {"venueOnly": "99"}}
+
+
+def test_an_orders_key_the_engine_does_not_set(toml_string):
+    with pytest.raises(StrategyCriticalError, match="time_in_forse"):
+        BotConfig.from_text(toml_string + '\n[orders.entry]\ntime_in_forse = "ioc"\n')
+
+
+def test_orders_params_naming_no_installed_connector(toml_string):
+    with pytest.raises(StrategyCriticalError, match="bitgte"):
+        BotConfig.from_text(
+            toml_string + '\n[orders.entry.params.bitgte]\nvenueOnly = "99"\n'
+        )
+
+
+def test_the_orders_section_sets_the_protections_trigger_types(toml_string):
+    bot_config = BotConfig.from_text(
+        toml_string
+        + """
+[orders.stop_loss]
+trigger_type = "mark_price"
+
+[orders.take_profit]
+trigger_type = "last_price"
+"""
+    )
+
+    overrides = bot_config.orders.to_overrides()
+
+    assert overrides.stop_loss_trigger_type is TriggerType.MARK_PRICE
+    assert overrides.take_profit_trigger_type is TriggerType.LAST_PRICE
+
+
+def test_an_orders_trigger_type_outside_its_values(toml_string):
+    with pytest.raises(StrategyCriticalError, match="trigger_type"):
+        BotConfig.from_text(toml_string + '\n[orders.exit]\ntrigger_type = "close"\n')

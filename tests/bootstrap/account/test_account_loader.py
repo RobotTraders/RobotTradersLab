@@ -3,9 +3,15 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from robottraderslab.bootstrap.account_loader import load_accounts, load_single_exchange
+from robottraderslab import Symbol
+from robottraderslab._core import OrderOverrides, TriggerType
+from robottraderslab.bootstrap.account_loader import (
+    load_accounts,
+    load_single_account,
+    load_single_exchange,
+)
 from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
-from robottraderslab.exchanges import FuturesExchangeProtocol
+from robottraderslab.exchanges import FuturesCapabilities, FuturesExchangeProtocol
 
 _SECRETS = {
     "bitget": {"api_key": "", "secret_key": "", "passphrase": ""},
@@ -157,3 +163,28 @@ async def test_an_account_without_a_name_is_named_by_its_section():
         match="`live.trading_account` references secret `missing`.*not defined",
     ):
         await load_single_exchange({"secret_name": "missing"}, {})
+
+
+async def test_a_configured_trigger_type_the_venue_does_not_offer(mock_load_exchange):
+    mock_load_exchange.return_value.capabilities = FuturesCapabilities(
+        trigger_types=frozenset({TriggerType.DEFAULT, TriggerType.MARK_PRICE})
+    )
+
+    with pytest.raises(StrategyCriticalError, match="orders.stop_loss.trigger_type"):
+        await load_single_account(
+            {"exchange": "hyperliquid"},
+            {},
+            OrderOverrides(stop_loss_trigger_type=TriggerType.LAST_PRICE),
+        )
+
+
+async def test_a_configured_trigger_type_the_venue_offers(mock_load_exchange):
+    mock_load_exchange.return_value.capabilities = FuturesCapabilities(
+        trigger_types=frozenset({TriggerType.DEFAULT, TriggerType.MARK_PRICE})
+    )
+    overrides = OrderOverrides(stop_loss_trigger_type=TriggerType.MARK_PRICE)
+
+    account = await load_single_account({"exchange": "hyperliquid"}, {}, overrides)
+    moved = account.move_stop_loss(Symbol.create("BTC/USDC:USDC"), 90.0)
+
+    assert moved.trigger_type is TriggerType.MARK_PRICE

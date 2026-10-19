@@ -169,7 +169,9 @@ async def _place_one(
             stop_loss=request.stop_loss,
             take_profit=request.take_profit,
             trigger_price=request.trigger_price,
+            trigger_type=request.trigger_type,
             client_order_id=request.client_order_id,
+            params=request.params,
         )
     return await venue.place_limit_order(
         symbol=request.symbol,
@@ -180,6 +182,8 @@ async def _place_one(
         stop_loss=request.stop_loss,
         take_profit=request.take_profit,
         trigger_price=request.trigger_price,
+        trigger_type=request.trigger_type,
         client_order_id=request.client_order_id,
         time_in_force=request.time_in_force,
+        params=request.params,
     )

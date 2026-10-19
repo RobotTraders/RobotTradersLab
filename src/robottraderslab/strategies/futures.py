@@ -1,5 +1,5 @@
 from robottraderslab._core.margin import MarginMode, MarginSettings
-from robottraderslab._core.order import TimeInForce
+from robottraderslab._core.order import TimeInForce, TriggerType
 from robottraderslab._core.position import PositionSnapshot
 from robottraderslab._core.sizing import (
     AvailableBalanceRatio,
@@ -63,6 +63,7 @@ __all__ = [
     "SizingRule",
     "TimeInForce",
     "TotalBalanceRatio",
+    "TriggerType",
     "UpdatePositionStopLossAction",
     "UpdatePositionTakeProfitAction",
 ]

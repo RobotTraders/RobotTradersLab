@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from robottraderslab import Symbol, TimeFrame
-from robottraderslab._core import OHLCVProviderProtocol, TimeframeSnapshot
+from robottraderslab._core import OHLCVProviderProtocol, TimeframeSnapshot, TriggerType
 from robottraderslab.exceptions import (
     DataError,
     ExchangeCriticalError,
@@ -1699,7 +1699,9 @@ def test_a_protection_the_venue_rejects_once_rests_at_the_booked_level_when_the_
     asyncio.run(protection_livebot.run())
 
     assert exchange.update_position_take_profit.await_count == 2
-    exchange.update_position_take_profit.assert_awaited_with(DOGE, TAKE_PROFIT)
+    exchange.update_position_take_profit.assert_awaited_with(
+        DOGE, TAKE_PROFIT, TriggerType.DEFAULT
+    )
 
 
 def test_a_protection_the_venue_rejects_twice_names_the_symbol_the_protection_and_the_level(
@@ -1724,7 +1726,9 @@ def test_a_cycle_whose_protections_all_rest_as_booked(
     with caplog.at_level(logging.WARNING):
         asyncio.run(protection_livebot.run())
 
-    exchange.update_position_take_profit.assert_awaited_once_with(DOGE, TAKE_PROFIT)
+    exchange.update_position_take_profit.assert_awaited_once_with(
+        DOGE, TAKE_PROFIT, TriggerType.DEFAULT
+    )
     assert caplog.records == []
 
 

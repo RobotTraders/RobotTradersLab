@@ -117,12 +117,14 @@ class FuturesPositionTarget:
         if abs(difference) < minimum:
             return None
         reduce_only = _shrinks_without_crossing(held, target)
+        overrides = self._account._order_overrides
+        settings = overrides.exit if reduce_only else overrides.entry
         if difference > 0:
             return self._account._create_buy_order(
-                self._symbol, difference, reduce_only=reduce_only
+                self._symbol, difference, settings, reduce_only=reduce_only
             )
         return self._account._create_sell_order(
-            self._symbol, -difference, reduce_only=reduce_only
+            self._symbol, -difference, settings, reduce_only=reduce_only
         )
 
 

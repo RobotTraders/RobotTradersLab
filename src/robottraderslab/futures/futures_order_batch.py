@@ -146,5 +146,7 @@ def _to_request(order: BatchableOrderAction) -> OrderRequest:
         stop_loss=order.stop_loss,
         take_profit=order.take_profit,
         trigger_price=order.trigger_price,
+        trigger_type=order.trigger_type,
         client_order_id=order.client_order_id,
+        params=order.params,
     )

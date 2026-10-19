@@ -5,9 +5,11 @@ from typing import Any, Self, cast
 
 from robottraderslab._core import (
     DEFAULT_FEE_MODE,
+    NO_VENUE_PARAMS,
     FeeMode,
     PlacementReserve,
     Symbol,
+    VenueParams,
     to_quantity,
 )
 from robottraderslab.exceptions import (
@@ -19,6 +21,7 @@ from robottraderslab.exchanges import (
     Balance,
     Currency,
     Execution,
+    FuturesCapabilities,
     FuturesExchangeProtocol,
     Instrument,
     MarginMode,
@@ -33,6 +36,7 @@ from robottraderslab.exchanges import (
     StopLoss,
     TakeProfit,
     TimeInForce,
+    TriggerType,
     VenueFill,
 )
 from robottraderslab.futures import modify_in_order, place_in_order
@@ -53,7 +57,13 @@ logger = logging.getLogger(__name__)
 
 
 class SimulatedFuturesExchange(FuturesExchangeProtocol):
-    """Delegates every operation to the simulation engine driving it."""
+    """Delegates every operation to the simulation engine driving it.
+
+    A level is reached when a candle's prices reach it, whatever price the
+    trigger watches on a venue, so the simulator offers every trigger type.
+    """
+
+    capabilities = FuturesCapabilities(trigger_types=frozenset(TriggerType))
 
     def __init__(
         self,
@@ -200,6 +210,8 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         take_profit: TakeProfit | None = None,
         trigger_price: float | None = None,
         client_order_id: str | None = None,
+        params: VenueParams = NO_VENUE_PARAMS,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
         reason: str | None = None,
         extra_fields: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -253,6 +265,8 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         trigger_price: float | None = None,
         client_order_id: str | None = None,
         time_in_force: TimeInForce = TimeInForce.GTC,
+        params: VenueParams = NO_VENUE_PARAMS,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
         reason: str | None = None,
         extra_fields: dict[str, Any] | None = None,
         **kwargs: Any,
@@ -339,7 +353,10 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         raise StrategyCriticalError(f"{symbol}: the simulator offers no trailing stop")
 
     async def update_position_stop_loss(
-        self, symbol: Symbol, trigger_price: float
+        self,
+        symbol: Symbol,
+        trigger_price: float,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
     ) -> PlacedOrder:
         """Update the stop-loss trigger price of an open position.
 
@@ -357,7 +374,10 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         return PlacedOrder(order_id=stop_loss_order.order_id)
 
     async def update_position_take_profit(
-        self, symbol: Symbol, trigger_price: float
+        self,
+        symbol: Symbol,
+        trigger_price: float,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
     ) -> PlacedOrder:
         """Update the take-profit trigger price of an open position.
 

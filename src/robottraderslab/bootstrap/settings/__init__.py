@@ -6,6 +6,7 @@ from .load_secrets import (
     reveal_secrets,
 )
 from .settings import (
+    EXCHANGE_ENTRY_POINT_GROUP,
     TRADING_ACCOUNT_SECTION,
     AccountConfig,
     BacktestConfig,
@@ -17,6 +18,7 @@ from .settings import (
 )
 
 __all__ = [
+    "EXCHANGE_ENTRY_POINT_GROUP",
     "SECRET_REFERENCE_KEY",
     "TRADING_ACCOUNT_SECTION",
     "AccountConfig",

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from robottraderslab._core import (
+    NO_VENUE_PARAMS,
     ActionResult,
     BaseExchangeAction,
     OnFillRead,
@@ -13,6 +14,7 @@ from robottraderslab._core import (
     PlacedOrder,
     Symbol,
     TimeInForce,
+    VenueParams,
 )
 
 from .futures_exchange_protocol import FuturesExchangeProtocol
@@ -36,6 +38,7 @@ class ClosePositionAction(BaseExchangeAction):
     time_in_force: TimeInForce = TimeInForce.GTC
     reason: str | None = None
     extra_fields: dict[str, Any] | None = None
+    params: VenueParams = NO_VENUE_PARAMS
     on_filled: OnFillRead | None = None
 
     async def execute(self) -> ActionResult:
@@ -78,6 +81,7 @@ class ClosePositionAction(BaseExchangeAction):
                 client_order_id=self.client_order_id,
                 reason=self.reason,
                 extra_fields=self.extra_fields,
+                params=self.params,
             )
         return await self.exchange.place_limit_order(
             symbol=self.symbol,
@@ -89,6 +93,7 @@ class ClosePositionAction(BaseExchangeAction):
             time_in_force=self.time_in_force,
             reason=self.reason,
             extra_fields=self.extra_fields,
+            params=self.params,
         )
 
 

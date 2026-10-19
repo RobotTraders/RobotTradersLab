@@ -7,15 +7,19 @@ from typing import Any
 from robottraderslab._core import (
     BASE_DELAY_SECONDS,
     MAX_ATTEMPTS,
+    NO_ORDER_OVERRIDES,
     AccountRequirement,
     AccountSnapshot,
     Execution,
     MarginMode,
+    OrderOverrides,
+    OrderSettings,
     OrderSide,
     PositionSide,
     Symbol,
     SymbolNotListedError,
     TrackedPosition,
+    TriggerType,
     attribute_fill_effects,
     finished,
     retry_on_transient,
@@ -55,16 +59,25 @@ class FuturesAccount:
     builder. Every other method returns a finished action.
     """
 
-    def __init__(self, exchange: FuturesExchangeProtocol, name: str | None = None):
+    def __init__(
+        self,
+        exchange: FuturesExchangeProtocol,
+        name: str | None = None,
+        order_overrides: OrderOverrides = NO_ORDER_OVERRIDES,
+    ):
         """Initialise the account.
 
         Args:
             exchange: Venue the account trades on.
             name: Identifies the account among the ones a strategy uses, and
                 labels it in errors and logs. Defaults to the exchange type.
+            order_overrides: The order settings the run's configuration
+                sets; each takes the place of the strategy's setting on every
+                order the account builds.
         """
         self._exchange = exchange
         self.name = name or type(exchange).__name__
+        self._order_overrides = order_overrides
 
     @property
     def capabilities(self) -> FuturesCapabilities:
@@ -132,7 +145,10 @@ class FuturesAccount:
         """
         validate_closing_ratio(closing_ratio)
         return FuturesCloseBuilder(
-            exchange=self._exchange, symbol=symbol, closing_ratio=closing_ratio
+            exchange=self._exchange,
+            symbol=symbol,
+            closing_ratio=closing_ratio,
+            settings=self._order_overrides.exit,
         )
 
     def close_tracked_position(
@@ -160,8 +176,12 @@ class FuturesAccount:
         validate_closing_ratio(closing_ratio)
         quantity = tracked.quantity * closing_ratio
         if tracked.side is PositionSide.LONG:
-            return self._create_sell_order(symbol, quantity, reduce_only=False)
-        return self._create_buy_order(symbol, quantity, reduce_only=False)
+            return self._create_sell_order(
+                symbol, quantity, self._order_overrides.exit, reduce_only=False
+            )
+        return self._create_buy_order(
+            symbol, quantity, self._order_overrides.exit, reduce_only=False
+        )
 
     def long_entry(
         self, symbol: Symbol, quantity: float | None = None
@@ -176,7 +196,7 @@ class FuturesAccount:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_buy_order(symbol, quantity, reduce_only=False)
+        return self._create_buy_order(symbol, quantity, self._order_overrides.entry)
 
     def long_exit(
         self,
@@ -197,7 +217,9 @@ class FuturesAccount:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_sell_order(symbol, quantity, reduce_only=reduce_only)
+        return self._create_sell_order(
+            symbol, quantity, self._order_overrides.exit, reduce_only=reduce_only
+        )
 
     def long_target(
         self,
@@ -274,13 +296,22 @@ class FuturesAccount:
         )
 
     def move_stop_loss(
-        self, symbol: Symbol, price: float
+        self,
+        symbol: Symbol,
+        price: float,
+        *,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
     ) -> UpdatePositionStopLossAction:
         """Move the stop-loss guarding an open position to a price.
 
         A move the venue rejects is sent once more in the same cycle, and one
         it still refuses is logged at ERROR; a move on a symbol the account
         holds no position on is dropped at INFO.
+
+        Args:
+            trigger_type: The price the stop-loss watches; a run's
+                `[orders.stop_loss]` `trigger_type` wins, and a type the venue
+                offers no trigger on stops the run.
 
         Raises:
             ValueError: If the price is not positive or is NaN.
@@ -290,16 +321,28 @@ class FuturesAccount:
             exchange=self._exchange,
             symbol=symbol,
             trigger_price=price,
+            trigger_type=self._order_overrides.stop_loss_trigger_type_over(
+                trigger_type
+            ),
         )
 
     def move_take_profit(
-        self, symbol: Symbol, price: float
+        self,
+        symbol: Symbol,
+        price: float,
+        *,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
     ) -> UpdatePositionTakeProfitAction:
         """Move the take-profit on an open position to a price.
 
         A move the venue rejects is sent once more in the same cycle, and one
         it still refuses is logged at ERROR; a move on a symbol the account
         holds no position on is dropped at INFO.
+
+        Args:
+            trigger_type: The price the take-profit watches; a run's
+                `[orders.take_profit]` `trigger_type` wins, and a type the venue
+                offers no trigger on stops the run.
 
         Raises:
             ValueError: If the price is not positive or is NaN.
@@ -309,6 +352,9 @@ class FuturesAccount:
             exchange=self._exchange,
             symbol=symbol,
             trigger_price=price,
+            trigger_type=self._order_overrides.take_profit_trigger_type_over(
+                trigger_type
+            ),
         )
 
     def place_orders(self, orders: Iterable[BatchableOrder]) -> FuturesOrderBatchAction:
@@ -377,7 +423,7 @@ class FuturesAccount:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_sell_order(symbol, quantity, reduce_only=False)
+        return self._create_sell_order(symbol, quantity, self._order_overrides.entry)
 
     def short_exit(
         self,
@@ -398,7 +444,9 @@ class FuturesAccount:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_buy_order(symbol, quantity, reduce_only=reduce_only)
+        return self._create_buy_order(
+            symbol, quantity, self._order_overrides.exit, reduce_only=reduce_only
+        )
 
     def short_target(
         self,
@@ -454,6 +502,7 @@ class FuturesAccount:
         self,
         symbol: Symbol,
         quantity: float | None,
+        settings: OrderSettings,
         reduce_only: bool = False,
     ) -> FuturesOrderBuilder:
         """Create a BUY order (opens long or closes short)."""
@@ -462,6 +511,7 @@ class FuturesAccount:
             quantity=quantity,
             side=OrderSide.BUY,
             symbol=symbol,
+            settings=settings,
             reduce_only=reduce_only,
         )
 
@@ -469,6 +519,7 @@ class FuturesAccount:
         self,
         symbol: Symbol,
         quantity: float | None,
+        settings: OrderSettings,
         reduce_only: bool = False,
     ) -> FuturesOrderBuilder:
         """Create a SELL order (opens short or closes long)."""
@@ -477,6 +528,7 @@ class FuturesAccount:
             quantity=quantity,
             side=OrderSide.SELL,
             symbol=symbol,
+            settings=settings,
             reduce_only=reduce_only,
         )
 

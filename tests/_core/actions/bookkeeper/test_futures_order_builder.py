@@ -1,15 +1,22 @@
+from datetime import datetime
+
 import pytest
 
 from robottraderslab import Symbol
+from robottraderslab._core import OrderOverrides, OrderSettings
 from robottraderslab.exceptions import StrategyCriticalError
 from robottraderslab.exchanges import (
     Balance,
     Currency,
     OrderSide,
+    PositionSide,
+    PositionSnapshot,
     StopLoss,
     TakeProfit,
     TimeInForce,
+    TriggerType,
 )
+from robottraderslab.futures import FuturesAccount
 from robottraderslab.futures.futures_close_position import ClosePositionAction
 from robottraderslab.futures.futures_limit_order import FuturesLimitOrderAction
 from robottraderslab.futures.futures_market_order import FuturesMarketOrderAction
@@ -216,6 +223,30 @@ class TestPositionClose:
         booked = bookkeeper.add(account.close_position(BTC_USDT))
 
         assert isinstance(booked, ClosePositionAction)
+
+    async def test_venue_params_reach_the_venue_with_the_close(self, account):
+        account._exchange.get_open_positions.return_value = {
+            BTC_USDT: PositionSnapshot(
+                symbol=BTC_USDT,
+                side=PositionSide.LONG,
+                quantity=2.0,
+                average_entry_price=100.0,
+                entry_time=datetime(2026, 5, 1),
+                leverage=1.0,
+                liquidation_price=1.0,
+            )
+        }
+        close = (
+            account.close_position(BTC_USDT)
+            .params("bitget", venueOnly="99")
+            .params("bitget", other="1")
+            .build()
+        )
+
+        await close.execute()
+
+        sent = account._exchange.place_market_order.await_args.kwargs
+        assert sent["params"] == {"bitget": {"venueOnly": "99", "other": "1"}}
 
 
 class TestOrderValidation:
@@ -711,3 +742,187 @@ class TestPlacementReserve:
         )
 
         assert order.quantity == 500.0
+
+
+class TestVenueParams:
+    async def test_venue_params_reach_the_venue_with_a_market_order(self, account):
+        order = (
+            account.long_entry(BTC_USDT, 1.0).params("bitget", venueOnly="99").build()
+        )
+
+        await order.execute()
+
+        sent = account._exchange.place_market_order.await_args.kwargs
+        assert sent["params"] == {"bitget": {"venueOnly": "99"}}
+
+    async def test_venue_params_accumulate_on_a_limit_order(self, account):
+        order = (
+            account.long_entry(BTC_USDT, 1.0)
+            .limit(100.0)
+            .params("bitget", venueOnly="99")
+            .params("bitget", other="1")
+            .build()
+        )
+
+        await order.execute()
+
+        sent = account._exchange.place_limit_order.await_args.kwargs
+        assert sent["params"] == {"bitget": {"venueOnly": "99", "other": "1"}}
+
+
+@pytest.fixture
+def configured_account(account: FuturesAccount) -> FuturesAccount:
+    return FuturesAccount(
+        account._exchange,
+        order_overrides=OrderOverrides(
+            entry=OrderSettings(
+                time_in_force=TimeInForce.IOC,
+                params={"bitget": {"venueOnly": "configured"}},
+            ),
+            exit=OrderSettings(time_in_force=TimeInForce.POST_ONLY),
+        ),
+    )
+
+
+class TestConfiguredOrderSettings:
+    def test_the_configured_time_in_force_wins_on_an_entry(self, configured_account):
+        order = configured_account.long_entry(BTC_USDT, 1.0).limit(100.0).build()
+
+        assert order.time_in_force is TimeInForce.IOC
+
+    def test_a_configured_time_in_force_on_a_triggered_entry(self, configured_account):
+        order = (
+            configured_account.long_entry(BTC_USDT, 1.0)
+            .limit(100.0)
+            .trigger(101.0)
+            .build()
+        )
+
+        assert order.time_in_force is TimeInForce.GTC
+
+    def test_exits_take_the_exit_settings(self, configured_account):
+        order = configured_account.long_exit(BTC_USDT, 1.0).limit(100.0).build()
+
+        assert order.time_in_force is TimeInForce.POST_ONLY
+
+    def test_a_close_takes_the_exit_settings(self, configured_account):
+        close = configured_account.close_position(BTC_USDT).limit(100.0).build()
+
+        assert close.time_in_force is TimeInForce.POST_ONLY
+
+    def test_a_configured_venue_field_reaches_a_close(self, account):
+        configured = FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                exit=OrderSettings(params={"bitget": {"venueOnly": "configured"}})
+            ),
+        )
+
+        close = configured.close_position(BTC_USDT).build()
+
+        assert close.params == {"bitget": {"venueOnly": "configured"}}
+
+    def test_a_configured_venue_field_wins_over_the_strategys(self, configured_account):
+        order = (
+            configured_account.long_entry(BTC_USDT, 1.0)
+            .params("bitget", venueOnly="coded", other="1")
+            .build()
+        )
+
+        assert order.params == {"bitget": {"venueOnly": "configured", "other": "1"}}
+
+
+class TestTriggerTypes:
+    def test_a_trigger_watching_the_mark(self, account):
+        order = (
+            account.long_entry(BTC_USDT, 1.0)
+            .trigger(101.0, trigger_type=TriggerType.MARK_PRICE)
+            .build()
+        )
+
+        assert order.trigger_type is TriggerType.MARK_PRICE
+
+    def test_a_stop_loss_watching_the_last_trade(self, account):
+        order = (
+            account.long_entry(BTC_USDT, 1.0)
+            .stop_loss(90.0, trigger_type=TriggerType.LAST_PRICE)
+            .build()
+        )
+
+        assert order.stop_loss.trigger_type is TriggerType.LAST_PRICE
+
+    def test_the_configured_trigger_type_wins_on_a_triggered_entry(self, account):
+        configured = FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                entry=OrderSettings(trigger_type=TriggerType.INDEX_PRICE)
+            ),
+        )
+
+        order = (
+            configured.long_entry(BTC_USDT, 1.0)
+            .trigger(101.0, trigger_type=TriggerType.MARK_PRICE)
+            .build()
+        )
+
+        assert order.trigger_type is TriggerType.INDEX_PRICE
+
+    def test_the_configured_stop_loss_trigger_wins_on_an_attached_stop_loss(
+        self, account
+    ):
+        configured = FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                stop_loss_trigger_type=TriggerType.MARK_PRICE
+            ),
+        )
+
+        order = configured.long_entry(BTC_USDT, 1.0).stop_loss(90.0).build()
+
+        assert order.stop_loss.trigger_type is TriggerType.MARK_PRICE
+
+    def test_the_configured_take_profit_trigger_wins_on_an_attached_take_profit(
+        self, account
+    ):
+        configured = FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                take_profit_trigger_type=TriggerType.LAST_PRICE
+            ),
+        )
+
+        order = (
+            configured.long_entry(BTC_USDT, 1.0)
+            .take_profit(110.0, trigger_type=TriggerType.MARK_PRICE)
+            .build()
+        )
+
+        assert order.take_profit.trigger_type is TriggerType.LAST_PRICE
+
+    def test_the_configured_stop_loss_trigger_wins_on_a_moved_stop_loss(self, account):
+        configured = FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                stop_loss_trigger_type=TriggerType.MARK_PRICE
+            ),
+        )
+
+        moved = configured.move_stop_loss(
+            BTC_USDT, 91.0, trigger_type=TriggerType.LAST_PRICE
+        )
+
+        assert moved.trigger_type is TriggerType.MARK_PRICE
+
+    def test_the_configured_take_profit_trigger_wins_on_a_moved_take_profit(
+        self, account
+    ):
+        configured = FuturesAccount(
+            account._exchange,
+            order_overrides=OrderOverrides(
+                take_profit_trigger_type=TriggerType.INDEX_PRICE
+            ),
+        )
+
+        moved = configured.move_take_profit(BTC_USDT, 111.0)
+
+        assert moved.trigger_type is TriggerType.INDEX_PRICE

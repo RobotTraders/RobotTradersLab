@@ -29,6 +29,7 @@ from robottraderslab._core.interfaces import OHLCVProviderProtocol
 from robottraderslab._core.margin import MarginMode, MarginSettings
 from robottraderslab._core.market import MarketType
 from robottraderslab._core.order import (
+    NO_VENUE_PARAMS,
     Execution,
     FillEffect,
     FillSource,
@@ -44,8 +45,12 @@ from robottraderslab._core.order import (
     StopLoss,
     TakeProfit,
     TimeInForce,
+    TriggerType,
     VenueFill,
+    VenueParams,
     describe_order,
+    venue_trigger_type,
+    with_venue_params,
 )
 from robottraderslab._core.position import (
     PositionProtocol,
@@ -91,6 +96,7 @@ __all__ = [
     "MarginMode",
     "MarginSettings",
     "MarketType",
+    "NO_VENUE_PARAMS",
     "OHLCVProviderProtocol",
     "OhlcvAdapterProtocol",
     "OhlcvData",
@@ -121,7 +127,9 @@ __all__ = [
     "StopLoss",
     "TakeProfit",
     "TimeInForce",
+    "TriggerType",
     "VenueFill",
+    "VenueParams",
     "fetch_pages",
     "lacks_a_closed_candle",
     "no_candles",
@@ -130,5 +138,7 @@ __all__ = [
     "page_bounds",
     "tag_of",
     "to_milliseconds",
+    "venue_trigger_type",
+    "with_venue_params",
     "without_the_open_candle",
 ]

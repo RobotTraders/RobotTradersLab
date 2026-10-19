@@ -12,11 +12,10 @@ from robottraderslab._core import (
 from robottraderslab.exceptions import ExchangeCriticalError
 from robottraderslab.exchanges import FuturesExchangeProtocol
 
-from .settings import reveal_secrets
+from .settings import EXCHANGE_ENTRY_POINT_GROUP, reveal_secrets
 
 logger = logging.getLogger(__name__)
 
-_ENTRY_POINT_GROUP = "robot_traders_lab.exchanges"
 _SECRET_CHECK_GROUP = "robot_traders_lab.secret_checks"  # nosec B105
 _DEMO_SETTING = "demo_trading"
 
@@ -91,7 +90,7 @@ def _extract_exchange_name(config: dict[str, Any]) -> str:
 
 def _load_exchange_factory(exchange_name: str) -> Any:
     try:
-        return load_class(exchange_name, _ENTRY_POINT_GROUP)
+        return load_class(exchange_name, EXCHANGE_ENTRY_POINT_GROUP)
     except ClassLoadingError as e:
         raise ExchangeCriticalError(str(e)) from e
 

@@ -58,6 +58,7 @@ async def test_closes_at_market_what_the_venue_holds_when_it_runs(venue):
         client_order_id=close.client_order_id,
         reason="exit",
         extra_fields=None,
+        params={},
     )
 
 
@@ -98,6 +99,7 @@ async def test_a_limit_close_rests_reduce_only_at_its_price(venue):
         time_in_force=TimeInForce.POST_ONLY,
         reason=None,
         extra_fields=None,
+        params={},
     )
     venue.place_market_order.assert_not_awaited()
 

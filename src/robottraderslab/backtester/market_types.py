@@ -1,6 +1,11 @@
 from typing import Any
 
-from robottraderslab._core import FeeMode, PlacementReserve
+from robottraderslab._core import (
+    NO_ORDER_OVERRIDES,
+    FeeMode,
+    OrderOverrides,
+    PlacementReserve,
+)
 from robottraderslab.bootstrap import SimulatedMarket
 from robottraderslab.exchanges import Currency
 from robottraderslab.futures import FuturesAccount
@@ -15,6 +20,7 @@ def create_futures_market(
     taker_fee_rate: float,
     fee_mode: FeeMode,
     placement_reserve: PlacementReserve,
+    order_overrides: OrderOverrides = NO_ORDER_OVERRIDES,
     **_kwargs: Any,
 ) -> SimulatedMarket:
     simulator = SimulatedFuturesExchange.create_from_settings(
@@ -25,5 +31,8 @@ def create_futures_market(
         placement_reserve=placement_reserve,
     )
     return SimulatedMarket(
-        simulator=simulator, account=FuturesAccount(simulator, name="simulated")
+        simulator=simulator,
+        account=FuturesAccount(
+            simulator, name="simulated", order_overrides=order_overrides
+        ),
     )

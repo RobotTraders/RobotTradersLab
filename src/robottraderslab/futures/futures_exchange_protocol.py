@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from robottraderslab._core import (
+    NO_VENUE_PARAMS,
     Balance,
     Currency,
     Execution,
@@ -20,6 +21,8 @@ from robottraderslab._core import (
     Symbol,
     TakeProfit,
     TimeInForce,
+    TriggerType,
+    VenueParams,
 )
 
 from .futures_capabilities import FuturesCapabilities
@@ -169,6 +172,8 @@ class FuturesExchangeProtocol(Protocol):
         take_profit: TakeProfit | None = None,
         trigger_price: float | None = None,
         client_order_id: str | None = None,
+        params: VenueParams = NO_VENUE_PARAMS,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
         **kwargs: Any,
     ) -> PlacedOrder:
         """Place a market order.
@@ -177,7 +182,16 @@ class FuturesExchangeProtocol(Protocol):
             reduce_only: Whether the order only reduces an existing position.
             client_order_id: Caller-assigned order id, unchanged across
                 retried attempts so the venue rejects a duplicate submission.
+            params: Venue fields by connector name; the connector merges its
+                own through `with_venue_params`.
+            trigger_type: The price the trigger level watches; `DEFAULT`
+                leaves the choice to the connector.
             **kwargs: Additional keyword arguments (e.g., reason for analytics)
+
+        Raises:
+            StrategyCriticalError: If a venue field names one the connector
+                sets from the order itself, or the venue offers no trigger on
+                a trigger type the order carries; no request is sent.
         """
 
     async def place_limit_order(
@@ -192,6 +206,8 @@ class FuturesExchangeProtocol(Protocol):
         trigger_price: float | None = None,
         client_order_id: str | None = None,
         time_in_force: TimeInForce = TimeInForce.GTC,
+        params: VenueParams = NO_VENUE_PARAMS,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
         **kwargs: Any,
     ) -> PlacedOrder:
         """Place a limit order.
@@ -202,9 +218,16 @@ class FuturesExchangeProtocol(Protocol):
                 retried attempts so the venue rejects a duplicate submission.
             time_in_force: How long the order may wait on the book; a
                 `POST_ONLY` order that would fill at once is refused instead.
+            params: Venue fields by connector name; the connector merges its
+                own through `with_venue_params`.
+            trigger_type: The price the trigger level watches; `DEFAULT`
+                leaves the choice to the connector.
             **kwargs: Additional keyword arguments (e.g., reason for analytics)
 
         Raises:
+            StrategyCriticalError: If a venue field names one the connector
+                sets from the order itself, or the venue offers no trigger on
+                a trigger type the order carries; no request is sent.
             ExchangeRecoverableError: If the venue refuses the order,
                 including a `POST_ONLY` one that would take liquidity.
         """
@@ -259,9 +282,16 @@ class FuturesExchangeProtocol(Protocol):
         """Cancel all open orders for the symbol."""
 
     async def update_position_stop_loss(
-        self, symbol: Symbol, trigger_price: float
+        self,
+        symbol: Symbol,
+        trigger_price: float,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
     ) -> PlacedOrder:
         """Update the stop-loss trigger price of an open position.
+
+        Args:
+            trigger_type: The price the stop-loss watches; `DEFAULT` leaves the
+                choice to the connector.
 
         Returns:
             The protection order the venue now holds, under the id it reports
@@ -269,6 +299,8 @@ class FuturesExchangeProtocol(Protocol):
 
         Raises:
             NoOpenPositionError: If the account holds no position on the symbol.
+            StrategyCriticalError: If the venue offers no trigger on the
+                trigger type; no request is sent.
         """
 
     async def place_trailing_stop_order(
@@ -303,9 +335,16 @@ class FuturesExchangeProtocol(Protocol):
         """
 
     async def update_position_take_profit(
-        self, symbol: Symbol, trigger_price: float
+        self,
+        symbol: Symbol,
+        trigger_price: float,
+        trigger_type: TriggerType = TriggerType.DEFAULT,
     ) -> PlacedOrder:
         """Update the take-profit trigger price of an open position.
+
+        Args:
+            trigger_type: The price the take-profit watches; `DEFAULT` leaves the
+                choice to the connector.
 
         Returns:
             The protection order the venue now holds, under the id it reports
@@ -313,4 +352,6 @@ class FuturesExchangeProtocol(Protocol):
 
         Raises:
             NoOpenPositionError: If the account holds no position on the symbol.
+            StrategyCriticalError: If the venue offers no trigger on the
+                trigger type; no request is sent.
         """

@@ -1,6 +1,7 @@
 import json
 import logging
 import tomllib
+from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any
 
@@ -29,9 +30,13 @@ from robottraderslab._core import (
     Currency,
     FeeMode,
     LogLevel,
+    OrderOverrides,
+    OrderSettings,
     PlacementReserve,
     Symbol,
     TimeFrame,
+    TimeInForce,
+    TriggerType,
     tool_root,
 )
 from robottraderslab.exceptions import StrategyCriticalError
@@ -74,6 +79,7 @@ class LiveLoggingConfig(LoggingConfig):
 
 
 TRADING_ACCOUNT_SECTION = "live.trading_account"
+EXCHANGE_ENTRY_POINT_GROUP = "robot_traders_lab.exchanges"
 _MOVED_TO_REPORT = ("reference_symbol", "reports_dir")
 
 
@@ -169,6 +175,75 @@ class ReportConfig(BaseModel):
         return value
 
 
+class OrderRoleConfig(BaseModel):
+    """What a run sets on every order of one role, over the strategy's code."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    time_in_force: TimeInForce | None = None
+    trigger_type: TriggerType | None = None
+    params: dict[str, dict[str, Any]] = {}
+
+    @field_validator("params")
+    @classmethod
+    def _refuse_a_venue_no_connector_registers(
+        cls, value: dict[str, dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """A venue name no installed connector registers would address fields
+        no order ever carries, so a misspelt one is refused at load.
+        """
+        registered = {
+            entry_point.name
+            for entry_point in entry_points(group=EXCHANGE_ENTRY_POINT_GROUP)
+        }
+        unknown = sorted(set(value) - registered)
+        if unknown:
+            installed = ", ".join(sorted(registered)) or "none"
+            raise ValueError(
+                f"no installed connector registers {', '.join(unknown)}; "
+                f"the installed ones are {installed}"
+            )
+        return value
+
+    def to_settings(self) -> OrderSettings:
+        return OrderSettings(
+            time_in_force=self.time_in_force,
+            trigger_type=self.trigger_type,
+            params=self.params,
+        )
+
+
+class ProtectionConfig(BaseModel):
+    """What a run sets on every stop-loss or take-profit, attached to an order
+    or moved on a position.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_type: TriggerType | None = None
+
+
+class OrdersConfig(BaseModel):
+    """The order settings a run's configuration sets, which win over the
+    ones the strategy's code sets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entry: OrderRoleConfig = OrderRoleConfig()
+    exit: OrderRoleConfig = OrderRoleConfig()
+    stop_loss: ProtectionConfig = ProtectionConfig()
+    take_profit: ProtectionConfig = ProtectionConfig()
+
+    def to_overrides(self) -> OrderOverrides:
+        return OrderOverrides(
+            entry=self.entry.to_settings(),
+            exit=self.exit.to_settings(),
+            stop_loss_trigger_type=self.stop_loss.trigger_type,
+            take_profit_trigger_type=self.take_profit.trigger_type,
+        )
+
+
 class StrategyConfig(BaseModel):
     """What a strategy declares, its own parameters included.
 
@@ -199,6 +274,7 @@ class BotConfig(BaseSettings):
     backtest: BacktestConfig | None = None
     live: LiveConfig | None = None
     report: ReportConfig = ReportConfig()
+    orders: OrdersConfig = OrdersConfig()
     optimisation: dict[str, Any] | None = None
 
     @classmethod

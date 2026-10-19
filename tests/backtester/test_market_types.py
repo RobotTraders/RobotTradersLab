@@ -1,7 +1,13 @@
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab._core import FeeMode, PlacementReserve
+from robottraderslab._core import (
+    FeeMode,
+    OrderOverrides,
+    OrderSettings,
+    PlacementReserve,
+    TimeInForce,
+)
 from robottraderslab.backtester.market_types import create_futures_market
 from robottraderslab.bootstrap import SimulatedMarket
 from robottraderslab.exchanges import Balance
@@ -60,3 +66,19 @@ class TestTheFeeConventionReachesTheAccount:
         )
 
         assert order.quantity == pytest.approx(BALANCE / PRICE)
+
+
+def test_a_backtest_account_takes_the_configured_order_settings():
+    overrides = OrderOverrides(entry=OrderSettings(time_in_force=TimeInForce.IOC))
+    market = create_futures_market(
+        initial_balance={"USDT": BALANCE},
+        maker_fee_rate=0.0002,
+        taker_fee_rate=TAKER_FEE_RATE,
+        fee_mode="exchange",
+        placement_reserve=_NO_RESERVE,
+        order_overrides=overrides,
+    )
+
+    order = market.account.long_entry(BTC_USDT, 1.0).limit(PRICE).build()
+
+    assert order.time_in_force is TimeInForce.IOC

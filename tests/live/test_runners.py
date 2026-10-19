@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab._core import OHLCVProviderProtocol
+from robottraderslab._core import NO_ORDER_OVERRIDES, OHLCVProviderProtocol, TriggerType
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.exceptions import (
     ExchangeCriticalError,
@@ -105,6 +105,37 @@ def test_retry_config_forwarded_to_livebot(
 @patch("robottraderslab.live.runners.load_ohlcv_provider")
 @patch("robottraderslab.live.runners._load_account")
 @patch("robottraderslab.live.runners.load_notifiers")
+def test_the_configured_order_settings_reach_the_account(
+    mock_load_notifiers,
+    mock_load_account,
+    mock_load_ohlcv_provider,
+    mock_load_strategy,
+    mock_livebot_class,
+):
+    mock_load_notifiers.return_value = ([], [])
+    mock_livebot_class.return_value.run = AsyncMock()
+    bot_config = BotConfig.model_validate(
+        {
+            "strategy": {"strategy_class": "fake-strategy-99"},
+            "live": {
+                "trading_account": {},
+                "ohlcv_provider": {"ohlcv_provider": "mock"},
+            },
+            "orders": {"stop_loss": {"trigger_type": "mark_price"}},
+        }
+    )
+
+    run_livebot(bot_config)
+
+    overrides = mock_load_account.call_args.args[2]
+    assert overrides.stop_loss_trigger_type is TriggerType.MARK_PRICE
+
+
+@patch("robottraderslab.live.runners.LiveBot")
+@patch("robottraderslab.live.runners.load_strategy")
+@patch("robottraderslab.live.runners.load_ohlcv_provider")
+@patch("robottraderslab.live.runners._load_account")
+@patch("robottraderslab.live.runners.load_notifiers")
 def test_retry_config_forwarded_to_load_account(
     mock_load_notifiers,
     mock_load_account,
@@ -124,6 +155,7 @@ def test_retry_config_forwarded_to_load_account(
     mock_load_account.assert_called_once_with(
         {"exchange": "bitget"},
         {},
+        NO_ORDER_OVERRIDES,
         max_attempts=5,
         base_delay=2.0,
     )
@@ -135,7 +167,9 @@ async def test_load_account_transient_error_with_recovery(mock_load, mock_sleep)
     expected_account = Mock()
     mock_load.side_effect = [ExchangeTransientError("502"), expected_account]
 
-    account = await _load_account({}, {}, max_attempts=3, base_delay=1.0)
+    account = await _load_account(
+        {}, {}, NO_ORDER_OVERRIDES, max_attempts=3, base_delay=1.0
+    )
 
     assert account is expected_account
     assert mock_load.call_count == 2
@@ -147,7 +181,7 @@ async def test_load_account_transient_error_exhausted(mock_load, mock_sleep):
     mock_load.side_effect = ExchangeTransientError("502")
 
     with pytest.raises(ExchangeTransientError, match="502"):
-        await _load_account({}, {}, max_attempts=3, base_delay=1.0)
+        await _load_account({}, {}, NO_ORDER_OVERRIDES, max_attempts=3, base_delay=1.0)
 
 
 @patch("robottraderslab._core.retry.asyncio.sleep", new_callable=AsyncMock)
@@ -159,7 +193,9 @@ async def test_load_account_retries_a_venue_rejection(mock_load, mock_sleep):
         expected_account,
     ]
 
-    account = await _load_account({}, {}, max_attempts=3, base_delay=1.0)
+    account = await _load_account(
+        {}, {}, NO_ORDER_OVERRIDES, max_attempts=3, base_delay=1.0
+    )
 
     assert account is expected_account
     assert mock_load.call_count == 2
@@ -174,7 +210,9 @@ async def test_load_account_stops_when_the_venue_keeps_rejecting(
 
     with caplog.at_level(logging.ERROR):
         with pytest.raises(ExchangeRecoverableError, match="40015"):
-            await _load_account({}, {}, max_attempts=3, base_delay=1.0)
+            await _load_account(
+                {}, {}, NO_ORDER_OVERRIDES, max_attempts=3, base_delay=1.0
+            )
 
     assert mock_load.call_count == 3
     assert "Cannot initialize account" in caplog.records[-1].getMessage()
@@ -186,7 +224,7 @@ async def test_load_account_stops_on_a_critical_error(mock_load, mock_sleep):
     mock_load.side_effect = ExchangeCriticalError("auth failed")
 
     with pytest.raises(ExchangeCriticalError, match="auth failed"):
-        await _load_account({}, {}, max_attempts=3, base_delay=1.0)
+        await _load_account({}, {}, NO_ORDER_OVERRIDES, max_attempts=3, base_delay=1.0)
 
     assert mock_load.call_count == 1
 
@@ -200,7 +238,7 @@ async def test_load_account_respects_custom_retry_params(
     mock_load.side_effect = ExchangeTransientError("502")
 
     with pytest.raises(ExchangeTransientError):
-        await _load_account({}, {}, max_attempts=2, base_delay=5.0)
+        await _load_account({}, {}, NO_ORDER_OVERRIDES, max_attempts=2, base_delay=5.0)
 
     assert mock_load.call_count == 2
     mock_sleep.assert_called_once_with(5.0)

@@ -1,10 +1,13 @@
 from typing import Any, Self
 
 from robottraderslab._core import (
+    NO_VENUE_PARAMS,
     ActionBuilder,
     OnFillRead,
+    OrderSettings,
     Symbol,
     TimeInForce,
+    VenueParams,
     validate_price,
 )
 
@@ -20,14 +23,22 @@ class FuturesCloseBuilder(ActionBuilder[ClosePositionAction]):
     """
 
     def __init__(
-        self, *, exchange: FuturesExchangeProtocol, symbol: Symbol, closing_ratio: float
+        self,
+        *,
+        exchange: FuturesExchangeProtocol,
+        symbol: Symbol,
+        closing_ratio: float,
+        settings: OrderSettings,
     ) -> None:
         """Initialise the builder.
 
         Args:
             closing_ratio: Share of the position the order closes.
+            settings: What the run's configuration sets on exits, which
+                `build()` lets win over the chain's.
         """
         self._exchange = exchange
+        self._settings = settings
         self._symbol = symbol
         self._closing_ratio = closing_ratio
         self._limit_price: float | None = None
@@ -35,6 +46,7 @@ class FuturesCloseBuilder(ActionBuilder[ClosePositionAction]):
         self._reason: str | None = None
         self._tag: str | None = None
         self._extra_fields: dict[str, Any] | None = None
+        self._venue_params: VenueParams = NO_VENUE_PARAMS
         self._on_filled: OnFillRead | None = None
 
     def build(self) -> ClosePositionAction:
@@ -46,10 +58,11 @@ class FuturesCloseBuilder(ActionBuilder[ClosePositionAction]):
             symbol=self._symbol,
             closing_ratio=self._closing_ratio,
             limit_price=self._limit_price,
-            time_in_force=self._time_in_force,
+            time_in_force=self._settings.time_in_force_over(self._time_in_force),
             reason=self._reason,
             tag=self._tag,
             extra_fields=self._extra_fields,
+            params=self._settings.params_over(self._venue_params),
             on_filled=self._on_filled,
         )
 
@@ -72,7 +85,7 @@ class FuturesCloseBuilder(ActionBuilder[ClosePositionAction]):
 
         Args:
             time_in_force: How long the order may wait on the book, one of
-                `TimeInForce`.
+                `TimeInForce`; a run's `[orders.exit]` `time_in_force` wins.
 
         Raises:
             ValueError: If price is not positive or is NaN.
@@ -80,6 +93,27 @@ class FuturesCloseBuilder(ActionBuilder[ClosePositionAction]):
         validate_price("price", price)
         self._limit_price = price
         self._time_in_force = time_in_force
+        return self
+
+    def params(self, venue: str, **fields: Any) -> Self:
+        """Send fields of one venue's own API in the request that places the
+        order on that venue, named as its API names them; an order placed on
+        another venue carries none of them.
+
+        A field the connector sets from any order stops the run before the
+        order is sent, even when this order leaves it unset, and a run's
+        `[orders]` section wins over a field of the same name. A backtest
+        ignores them.
+
+        Args:
+            venue: The name the venue's connector registers under, the one
+                the account's configuration names, such as `bitget`.
+            **fields: Merges into any fields an earlier call gave that venue.
+        """
+        self._venue_params = {
+            **self._venue_params,
+            venue: {**self._venue_params.get(venue, {}), **fields},
+        }
         return self
 
     def reason(self, reason: str) -> Self:
