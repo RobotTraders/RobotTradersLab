@@ -222,14 +222,16 @@ class TestPositionTarget:
 
 class TestConfiguredOrderSettings:
     @pytest.fixture
-    def configured_account(self, account: FuturesAccount) -> FuturesAccount:
-        return FuturesAccount(
+    async def configured_account(self, account: FuturesAccount) -> FuturesAccount:
+        configured = FuturesAccount(
             account._exchange,
             order_overrides=OrderOverrides(
                 entry=OrderSettings(params={"bitget": {"role": "entry"}}),
                 exit=OrderSettings(params={"bitget": {"role": "exit"}}),
             ),
         )
+        await configured._read_instruments([BTC_USDT])
+        return configured
 
     def test_a_target_growing_the_position_takes_the_entry_settings(
         self, configured_account
@@ -250,3 +252,34 @@ class TestConfiguredOrderSettings:
         )
 
         assert order.build().params == {"bitget": {"role": "exit"}}
+
+
+class TestTradingRules:
+    @pytest.fixture
+    async def coarse_account(self, make_venue) -> FuturesAccount:
+        exchange = make_venue(quantity_step=1.0, minimum_order_value=5.0)
+        exchange.get_quote_conversion_rate.return_value = 1.0
+        exchange.placement_reserve_rate = 0.0
+        account = FuturesAccount(exchange)
+        await account._read_instruments([BTC_USDT])
+        return account
+
+    def test_a_target_measures_its_order_at_the_current_price(self, coarse_account):
+        order = coarse_account.long_target(
+            BTC_USDT, _holding(None, total=100.0)
+        ).quantity(4.0, 1.0)
+
+        assert order.build().denial == (
+            "Order of 4 BTC/USDT:USDT at 1 is worth 4, under the minimum order value of 5"
+        )
+
+    def test_a_short_target_measures_its_order_at_the_current_price(
+        self, coarse_account
+    ):
+        order = coarse_account.short_target(
+            BTC_USDT, _holding(None, total=100.0)
+        ).quantity(4.0, 1.0)
+
+        assert order.build().denial == (
+            "Order of 4 BTC/USDT:USDT at 1 is worth 4, under the minimum order value of 5"
+        )

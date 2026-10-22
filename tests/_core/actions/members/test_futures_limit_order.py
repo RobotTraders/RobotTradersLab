@@ -4,6 +4,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core import TriggerType
+from robottraderslab.exceptions import ExchangeRecoverableError
 from robottraderslab.exchanges import FuturesExchangeProtocol, OrderSide, PlacedOrder
 from robottraderslab.futures.futures_limit_order import FuturesLimitOrderAction
 
@@ -103,3 +104,19 @@ async def test_placement_carries_the_reason_the_strategy_gave():
 
     (outcome,) = action_result.orders
     assert outcome.placement.reason == "resting at the band"
+
+
+async def test_an_order_denied_by_the_trading_rules(mock_exchange):
+    action = FuturesLimitOrderAction(
+        exchange=mock_exchange,
+        symbol=Symbol.create("DOGE/USDT:USDT"),
+        side=OrderSide.BUY,
+        quantity=0.4,
+        price=1.0,
+        denial="Order quantity 0.4 of DOGE/USDT:USDT is under one quantity step",
+    )
+
+    with pytest.raises(ExchangeRecoverableError, match="under one quantity step"):
+        await action.execute()
+
+    mock_exchange.place_limit_order.assert_not_awaited()

@@ -29,6 +29,7 @@ from robottraderslab._core import (
     fetch_account_snapshots,
     hold_margin_targets,
     log_strategy_slots,
+    read_instruments,
     retry_on_transient,
     sweep_orphan_protections,
     widen_tracked_positions,
@@ -216,6 +217,7 @@ class LiveBot:
         """Load strategy with fresh requirements to avoid duplicates on retry."""
         requirements = self._requirements_factory()
         await self._strategy.setup(requirements)
+        await read_instruments(requirements.account)
         return requirements
 
     def _log_cycle_header(self) -> None:  # pragma: no cover

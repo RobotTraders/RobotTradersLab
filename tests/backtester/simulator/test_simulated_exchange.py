@@ -121,6 +121,11 @@ class TestInstrument:
             maximum_market_order_quantity=None,
         )
 
+    async def test_the_rules_of_a_symbol_with_no_candle_seen(self, sim, btc_usdt_perp):
+        instrument = await sim.exchange.get_instrument(btc_usdt_perp)
+
+        assert instrument.quantity_step == 1e-8
+
     async def test_a_quantity_cut_down_to_its_step(self, sim, btc_usdt_perp):
         sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
 
@@ -139,7 +144,7 @@ class TestInstrument:
 
     @pytest.mark.parametrize(
         ("read", "arguments"),
-        [("get_instrument", ()), ("round_price", (1.0,)), ("round_quantity", (1.0,))],
+        [("round_price", (1.0,)), ("round_quantity", (1.0,))],
     )
     async def test_a_symbol_with_no_candle_seen(
         self, sim, btc_usdt_perp, read, arguments

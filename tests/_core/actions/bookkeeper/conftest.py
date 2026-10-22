@@ -5,36 +5,39 @@ from unittest.mock import Mock
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab.exchanges import (
-    FuturesExchangeProtocol,
-    PositionSide,
-    PositionSnapshot,
-)
+from robottraderslab.exchanges import PositionSide, PositionSnapshot
 from robottraderslab.futures import FuturesAccount
 
 PLACEMENT_RESERVE_RATE = 0.25
 
 BTC_USDT = Symbol.create("BTC/USDT:USDT")
+AUD_CAD = Symbol.create("AUD/CAD:USD")
+
+
+async def _declared(exchange: Mock) -> FuturesAccount:
+    account = FuturesAccount(exchange)
+    await account._read_instruments([BTC_USDT, AUD_CAD])
+    return account
 
 
 @pytest.fixture
-def account() -> FuturesAccount:
-    exchange = Mock(spec=FuturesExchangeProtocol)
+async def account(make_venue: Callable[..., Mock]) -> FuturesAccount:
+    exchange = make_venue()
     exchange.get_quote_conversion_rate.return_value = 1.0
     exchange.placement_reserve_rate = 0.0
     exchange.placement_requirement_rate = lambda leverage: 1 / leverage
-    return FuturesAccount(exchange)
+    return await _declared(exchange)
 
 
 @pytest.fixture
-def reserving_account() -> FuturesAccount:
-    exchange = Mock(spec=FuturesExchangeProtocol)
+async def reserving_account(make_venue: Callable[..., Mock]) -> FuturesAccount:
+    exchange = make_venue()
     exchange.get_quote_conversion_rate.return_value = 1.0
     exchange.placement_reserve_rate = PLACEMENT_RESERVE_RATE
     exchange.placement_requirement_rate = lambda leverage: (
         1 / leverage + PLACEMENT_RESERVE_RATE
     )
-    return FuturesAccount(exchange)
+    return await _declared(exchange)
 
 
 @pytest.fixture

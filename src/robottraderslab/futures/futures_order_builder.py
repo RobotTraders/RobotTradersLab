@@ -18,7 +18,10 @@ from robottraderslab._core import (
     VenueParams,
     validate_price,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import (
+    ExchangeRecoverableError,
+    StrategyCriticalError,
+)
 
 from .futures_limit_order import FuturesLimitOrderAction
 from .futures_market_order import FuturesMarketOrderAction
@@ -46,6 +49,9 @@ class _FuturesOrderParams:
         on_filled: Async callback invoked once the order's fill is read.
         sizing: The rule `build()` sizes the order with; None when the order
             is sized by a quantity.
+        reference_price: Price a market order's value is measured at against
+            the venue's minimum order value; None for an order given its
+            quantity with no price in view.
     """
 
     quantity: float | None
@@ -64,6 +70,7 @@ class _FuturesOrderParams:
     venue_params: VenueParams = NO_VENUE_PARAMS
     on_filled: OnFillRead | None = None
     sizing: _PendingSizing | None = None
+    reference_price: float | None = None
 
 
 class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
@@ -84,6 +91,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         symbol: Symbol,
         settings: OrderSettings,
         reduce_only: bool = False,
+        reference_price: float | None = None,
     ) -> None:
         """Initialise the builder.
 
@@ -93,6 +101,9 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
             settings: What the run's configuration sets on orders of the
                 order's role, each winning over the chain's at `build()`.
             reduce_only: Whether the order may only reduce an existing position.
+            reference_price: Price a market order's value is measured at
+                against the venue's minimum order value; None for an order
+                given its quantity with no price in view.
 
         Raises:
             ValueError: If the quantity is zero, negative or NaN, or the
@@ -109,6 +120,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
             side=side,
             symbol=symbol,
             reduce_only=reduce_only,
+            reference_price=reference_price,
         )
 
     def size(
@@ -294,18 +306,43 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         finish a builder handed to them with this call, at the moment it is
         handed over.
 
+        An order the venue's trading rules refuse is built carrying its
+        denial, and nothing of it reaches the venue.
+
         Raises:
             StrategyCriticalError: If the order was never given a size, its
-                rule cannot size it, or a triggered order was given a time in
-                force other than `GTC`.
+                rule cannot size it, a triggered order was given a time in
+                force other than `GTC`, or the symbol was never declared for
+                the account.
         """
         action: BatchableOrderAction
 
+        order = self._params
+        account = self._account
+        symbol = order.symbol
         quantity = self._sized_quantity()
-        exchange = self._account._exchange
+        denial = None
+        try:
+            quantity = (
+                account._instruments.get(symbol) or account._instrument(symbol)
+            ).order_quantity(
+                symbol,
+                quantity,
+                price=order.limit_price
+                or order.trigger_price
+                or (
+                    order.reference_price
+                    if order.sizing is None
+                    else order.sizing.price
+                ),
+                reduce_only=order.reduce_only,
+            )
+        except ExchangeRecoverableError as refusal:
+            denial = str(refusal)
+        exchange = account._exchange
         settings = self._settings
-        time_in_force = self._params.time_in_force
-        if self._params.trigger_price is None:
+        time_in_force = order.time_in_force
+        if order.trigger_price is None:
             time_in_force = settings.time_in_force_over(time_in_force)
         elif time_in_force is not TimeInForce.GTC:
             raise StrategyCriticalError(
@@ -313,47 +350,49 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
                 "trigger decides when the order goes, and it then rests until "
                 "cancelled."
             )
-        params = settings.params_over(self._params.venue_params)
-        trigger_type = settings.trigger_type_over(self._params.trigger_type)
-        overrides = self._account._order_overrides
-        stop_loss = overrides.stop_loss_over(self._params.stop_loss)
-        take_profit = overrides.take_profit_over(self._params.take_profit)
+        params = settings.params_over(order.venue_params)
+        trigger_type = settings.trigger_type_over(order.trigger_type)
+        overrides = account._order_overrides
+        stop_loss = overrides.stop_loss_over(order.stop_loss)
+        take_profit = overrides.take_profit_over(order.take_profit)
 
-        if self._params.limit_price is None:
+        if order.limit_price is None:
             action = FuturesMarketOrderAction(
                 exchange=exchange,
-                symbol=self._params.symbol,
-                side=self._params.side,
+                symbol=order.symbol,
+                side=order.side,
                 quantity=quantity,
-                reduce_only=self._params.reduce_only,
+                reduce_only=order.reduce_only,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                trigger_price=self._params.trigger_price,
+                trigger_price=order.trigger_price,
                 trigger_type=trigger_type,
-                reason=self._params.reason,
-                tag=self._params.tag,
-                extra_fields=self._params.extra_fields,
+                reason=order.reason,
+                tag=order.tag,
+                extra_fields=order.extra_fields,
                 params=params,
-                on_filled=self._params.on_filled,
+                on_filled=order.on_filled,
+                denial=denial,
             )
         else:
             action = FuturesLimitOrderAction(
-                price=self._params.limit_price,
+                price=order.limit_price,
                 exchange=exchange,
-                symbol=self._params.symbol,
-                side=self._params.side,
+                symbol=order.symbol,
+                side=order.side,
                 quantity=quantity,
-                reduce_only=self._params.reduce_only,
+                reduce_only=order.reduce_only,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
-                trigger_price=self._params.trigger_price,
+                trigger_price=order.trigger_price,
                 trigger_type=trigger_type,
                 time_in_force=time_in_force,
-                reason=self._params.reason,
-                tag=self._params.tag,
-                extra_fields=self._params.extra_fields,
+                reason=order.reason,
+                tag=order.tag,
+                extra_fields=order.extra_fields,
                 params=params,
-                on_filled=self._params.on_filled,
+                on_filled=order.on_filled,
+                denial=denial,
             )
 
         return action

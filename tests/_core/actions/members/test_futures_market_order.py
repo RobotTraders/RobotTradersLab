@@ -4,6 +4,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core import TriggerType
+from robottraderslab.exceptions import ExchangeRecoverableError
 from robottraderslab.exchanges import (
     FuturesExchangeProtocol,
     OrderSide,
@@ -100,3 +101,18 @@ async def test_execute_returns_placed_order_and_callback():
     assert outcome.placed_order is placed_order
     assert outcome.on_filled is callback
     assert outcome.placement.kind == "market"
+
+
+async def test_an_order_denied_by_the_trading_rules(mock_exchange):
+    action = FuturesMarketOrderAction(
+        exchange=mock_exchange,
+        symbol=Symbol.create("DOGE/USDT:USDT"),
+        side=OrderSide.BUY,
+        quantity=0.4,
+        denial="Order quantity 0.4 of DOGE/USDT:USDT is under one quantity step",
+    )
+
+    with pytest.raises(ExchangeRecoverableError, match="under one quantity step"):
+        await action.execute()
+
+    mock_exchange.place_market_order.assert_not_awaited()

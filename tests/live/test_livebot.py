@@ -66,8 +66,8 @@ def candle_boundary_clock():
 
 
 @pytest.fixture
-def exchange() -> FuturesExchangeProtocol:
-    exchange = Mock(spec=FuturesExchangeProtocol)
+def exchange(make_venue: Callable[..., Mock]) -> FuturesExchangeProtocol:
+    exchange = make_venue()
     exchange.get_open_positions.return_value = {}
     return exchange
 
@@ -125,7 +125,7 @@ def create_strategy_place_market_order(
 
             async def setup(self, requirements):
                 requirements.ohlcv.add(symbol, "1d")
-                requirements.account.add(account, positions=True)
+                requirements.account.add(account, symbols=[symbol], positions=True)
 
             def generate_trading_signals(self, ohlcvs: OHLCVs) -> None:
                 pass
@@ -431,7 +431,7 @@ def test_declared_account_state_reaches_the_strategy(account, exchange):
 
         async def setup(self, requirements):
             requirements.ohlcv.add(symbol, "1d")
-            requirements.account.add(account, positions=True)
+            requirements.account.add(account, symbols=[symbol], positions=True)
 
         def generate_trading_signals(self, ohlcvs):
             pass
@@ -682,6 +682,7 @@ def test_notifier_fires_only_after_every_action_of_the_cycle_is_placed(
         async def setup(self, requirements):
             requirements.ohlcv.add(symbol, "5m")
             requirements.ohlcv.add(symbol, "15m")
+            requirements.account.add(account, symbols=[symbol])
 
         def generate_trading_signals(self, ohlcvs):
             pass
@@ -931,7 +932,7 @@ def test_no_entry_fill_reads_without_the_declaration(exchange, account):
 
     async def add_requirements(requirements):
         requirements.ohlcv.add(symbol, "1d")
-        requirements.account.add(account, positions=True)
+        requirements.account.add(account, symbols=[symbol], positions=True)
 
     exchange.get_open_positions.return_value = {}
     exchange.get_executions_since = AsyncMock(return_value=[])
@@ -1506,7 +1507,7 @@ def test_no_tp_sl_fetch_without_the_declaration(exchange, account):
 
     async def add_requirements(requirements):
         requirements.ohlcv.add(symbol, "1d")
-        requirements.account.add(account, positions=True)
+        requirements.account.add(account, symbols=[symbol], positions=True)
 
     exchange.get_open_positions.return_value = {}
     exchange.get_executions_since = AsyncMock(return_value=[])
@@ -1975,23 +1976,6 @@ def test_a_booked_fill_is_reported_unsettled_when_the_executions_cannot_be_read(
     assert "history unavailable" in caplog.text
 
 
-def test_a_booked_fill_on_an_account_declaring_no_symbol_is_reported_unsettled(
-    exchange, create_market_exit_strategy
-):
-    symbol = Symbol.create("HYPE/USDT:USDT")
-    exchange.place_market_order = _market_exit_placed_as(symbol, "order-1")
-    exchange.get_executions_since = AsyncMock(return_value=[])
-    notifier = AsyncMock()
-
-    _run_one_cycle(
-        create_market_exit_strategy(symbol, ["4h-alpha"], symbols=[]),
-        on_fill=[notifier],
-    )
-
-    assert notifier.await_args.args[0].effect is None
-    exchange.get_executions_since.assert_not_awaited()
-
-
 def test_orders_of_two_profiles_are_each_settled_by_one_read(
     exchange, create_market_exit_strategy
 ):
@@ -2285,3 +2269,35 @@ def test_a_leverage_target_on_an_unlisted_symbol_is_left_unset(
 
     set_for = {call.args[0] for call in exchange.set_leverage.await_args_list}
     assert set_for == {BTC, ETH}
+
+
+def test_an_order_under_one_quantity_step_is_reported_and_never_sent(
+    exchange, account, caplog
+):
+    symbol = Symbol.create("DOGE/USDT:USDT")
+    exchange.get_instrument.return_value = replace(
+        exchange.get_instrument.return_value, quantity_step=1.0
+    )
+
+    class Strategy(StrategyProtocol):
+        market_type = "futures"
+
+        async def setup(self, requirements):
+            requirements.ohlcv.add(symbol, "1d")
+            requirements.account.add(account, symbols=[symbol])
+
+        def generate_trading_signals(self, ohlcvs):
+            pass
+
+        def book_trading_actions(
+            self, ohlcvs, account_snapshots, timestamp, bookkeeper, triggered_timeframes
+        ):
+            bookkeeper.add(account.long_entry(symbol, 0.4).build())
+
+    with caplog.at_level(logging.WARNING):
+        _run_one_cycle(Strategy())
+
+    exchange.place_market_order.assert_not_awaited()
+    assert "Order quantity 0.4 of DOGE/USDT:USDT is under one quantity step" in (
+        caplog.text
+    )

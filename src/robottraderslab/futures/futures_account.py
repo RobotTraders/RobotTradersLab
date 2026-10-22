@@ -11,11 +11,13 @@ from robottraderslab._core import (
     AccountRequirement,
     AccountSnapshot,
     Execution,
+    Instrument,
     MarginMode,
     OrderOverrides,
     OrderSettings,
     OrderSide,
     PositionSide,
+    PositionSnapshot,
     Symbol,
     SymbolNotListedError,
     TrackedPosition,
@@ -26,6 +28,7 @@ from robottraderslab._core import (
     validate_price,
     validate_ratio,
 )
+from robottraderslab.exceptions import StrategyCriticalError
 
 from .futures_cancel_order import CancelOrderByIdAction
 from .futures_cancel_orders import CancelOrdersForSymbolAction
@@ -78,6 +81,8 @@ class FuturesAccount:
         self._exchange = exchange
         self.name = name or type(exchange).__name__
         self._order_overrides = order_overrides
+        self._instruments: dict[Symbol, Instrument] = {}
+        self._unlisted: dict[Symbol, str] = {}
 
     @property
     def capabilities(self) -> FuturesCapabilities:
@@ -485,16 +490,17 @@ class FuturesAccount:
         base_delay: float = BASE_DELAY_SECONDS,
     ) -> list[Execution]:
         symbol_list = list(symbols)
-        positions, executions = await asyncio.gather(
-            retry_on_transient(
-                self._exchange.get_open_positions,
-                symbol_list,
-                max_attempts=max_attempts,
-                base_delay=base_delay,
-            ),
-            self._executions_since(
-                since, symbol_list, max_attempts=max_attempts, base_delay=base_delay
-            ),
+        positions = await retry_on_transient(
+            self._exchange.get_open_positions,
+            symbol_list,
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+        )
+        executions = await self._executions_since(
+            since,
+            symbol_list,
+            max_attempts=max_attempts,
+            base_delay=base_delay,
         )
         return attribute_fill_effects(executions, positions)
 
@@ -504,6 +510,7 @@ class FuturesAccount:
         quantity: float | None,
         settings: OrderSettings,
         reduce_only: bool = False,
+        reference_price: float | None = None,
     ) -> FuturesOrderBuilder:
         """Create a BUY order (opens long or closes short)."""
         return FuturesOrderBuilder(
@@ -513,6 +520,7 @@ class FuturesAccount:
             symbol=symbol,
             settings=settings,
             reduce_only=reduce_only,
+            reference_price=reference_price,
         )
 
     def _create_sell_order(
@@ -521,6 +529,7 @@ class FuturesAccount:
         quantity: float | None,
         settings: OrderSettings,
         reduce_only: bool = False,
+        reference_price: float | None = None,
     ) -> FuturesOrderBuilder:
         """Create a SELL order (opens short or closes long)."""
         return FuturesOrderBuilder(
@@ -530,12 +539,12 @@ class FuturesAccount:
             symbol=symbol,
             settings=settings,
             reduce_only=reduce_only,
+            reference_price=reference_price,
         )
 
     def _declared_reads(
         self,
         requirement: AccountRequirement,
-        executions_since: datetime,
         report_fills: bool,
         max_attempts: int,
         base_delay: float,
@@ -560,16 +569,32 @@ class FuturesAccount:
                 )
         if requirement.margin_settings:
             declare("margin_settings", self._exchange.get_margin_settings, symbols)
-        if requirement.needs_executions(report_fills):
-            declare(
-                "executions",
-                self._exchange.get_executions_since,
-                executions_since,
-                symbols,
-            )
         for currency in requirement.equity:
             declare(f"equity:{currency}", self._exchange.get_equity, currency)
         return fetches
+
+    async def _executions_after(
+        self,
+        positions_read: asyncio.Future[dict[Symbol, PositionSnapshot]],
+        since: datetime,
+        symbols: Iterable[Symbol],
+        *,
+        max_attempts: int,
+        base_delay: float,
+    ) -> list[Execution]:
+        """Read the executions once the positions read has answered.
+
+        A stop-loss that fills before the positions answer is in the
+        executions answered after it, so a position seen closed always has
+        its stop-loss in the same snapshot.
+        """
+        await positions_read
+        return await self._executions_since(
+            since,
+            symbols,
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+        )
 
     async def _executions_since(
         self,
@@ -588,6 +613,29 @@ class FuturesAccount:
         )
         return executions
 
+    def _instrument(self, symbol: Symbol) -> Instrument:
+        try:
+            return self._instruments[symbol]
+        except KeyError:
+            unlisted = self._unlisted.get(symbol)
+            if unlisted is not None:
+                raise SymbolNotListedError(unlisted) from None
+            raise StrategyCriticalError(
+                f"{self.name} trades {symbol} without declaring it: name the "
+                "symbol in requirements.account.add(symbols=...) so the engine "
+                "reads its trading rules and state."
+            ) from None
+
+    async def _read_instruments(self, symbols: Iterable[Symbol]) -> None:
+        for symbol in symbols:
+            try:
+                self._instruments[symbol] = await self._exchange.get_instrument(symbol)
+                self._unlisted.pop(symbol, None)
+            except SymbolNotListedError as error:
+                logger.debug("%s", error)
+                self._instruments.pop(symbol, None)
+                self._unlisted[symbol] = str(error)
+
     async def _snapshot(
         self,
         requirement: AccountRequirement,
@@ -597,7 +645,8 @@ class FuturesAccount:
         max_attempts: int = MAX_ATTEMPTS,
         base_delay: float = BASE_DELAY_SECONDS,
     ) -> AccountSnapshot:
-        """Fetch the declared state in one concurrent burst.
+        """Fetch the declared state in one concurrent burst, the executions
+        read starting once the positions read has answered.
 
         Args:
             requirement: What the strategy declared for this account in `setup`.
@@ -612,9 +661,23 @@ class FuturesAccount:
             the positions the same burst read.
         """
         fetches = self._declared_reads(
-            requirement, executions_since, report_fills, max_attempts, base_delay
+            requirement,
+            report_fills,
+            max_attempts,
+            base_delay,
         )
-        results = dict(zip(fetches, await asyncio.gather(*fetches.values())))
+        reads = {key: asyncio.ensure_future(read) for key, read in fetches.items()}
+        if requirement.needs_executions(report_fills):
+            reads["executions"] = asyncio.ensure_future(
+                self._executions_after(
+                    reads["positions"],
+                    executions_since,
+                    requirement.symbols,
+                    max_attempts=max_attempts,
+                    base_delay=base_delay,
+                )
+            )
+        results = dict(zip(reads, await asyncio.gather(*reads.values())))
 
         executions = results.get("executions")
         attributed = (

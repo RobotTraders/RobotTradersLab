@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from unittest.mock import Mock
 
@@ -58,6 +59,23 @@ def _execution(
         timestamp=WINDOW_START.replace(minute=minute),
         kind=kind,
     )
+
+
+def _stop_loss_filling_while_positions_answer(exchange: Mock) -> None:
+    positions_answered = asyncio.Event()
+
+    async def get_open_positions(symbols: list[Symbol]) -> dict:
+        await asyncio.sleep(0)
+        positions_answered.set()
+        return {}
+
+    async def get_executions_since(*window: object) -> list[Execution]:
+        if not positions_answered.is_set():
+            return []
+        return [_execution("stop", OrderSide.SELL, 1.0, minute=1, kind="stop-loss")]
+
+    exchange.get_open_positions.side_effect = get_open_positions
+    exchange.get_executions_since.side_effect = get_executions_since
 
 
 def _long(quantity: float) -> PositionSnapshot:
@@ -176,9 +194,13 @@ def test_move_take_profit_with_a_price_not_above_zero(exchange, price):
 
 
 class TestCloseTrackedPosition:
-    def test_a_tracked_long_is_closed_with_a_sell_of_its_quantity(self, exchange):
-        account = FuturesAccount(exchange)
+    @pytest.fixture
+    async def account(self, make_venue) -> FuturesAccount:
+        account = FuturesAccount(make_venue())
+        await account._read_instruments([BTCUSDT])
+        return account
 
+    def test_a_tracked_long_is_closed_with_a_sell_of_its_quantity(self, account):
         exit_order = account.close_tracked_position(
             BTCUSDT, TrackedPosition(PositionSide.LONG, 3.0)
         ).build()
@@ -188,9 +210,7 @@ class TestCloseTrackedPosition:
         assert exit_order.quantity == 3.0
         assert exit_order.reduce_only is False
 
-    def test_a_tracked_short_is_closed_with_a_buy(self, exchange):
-        account = FuturesAccount(exchange)
-
+    def test_a_tracked_short_is_closed_with_a_buy(self, account):
         exit_order = account.close_tracked_position(
             BTCUSDT, TrackedPosition(PositionSide.SHORT, 5.0)
         ).build()
@@ -199,9 +219,7 @@ class TestCloseTrackedPosition:
         assert exit_order.quantity == 5.0
         assert exit_order.reduce_only is False
 
-    def test_a_closing_ratio_closes_that_share_of_the_tracked_position(self, exchange):
-        account = FuturesAccount(exchange)
-
+    def test_a_closing_ratio_closes_that_share_of_the_tracked_position(self, account):
         exit_order = account.close_tracked_position(
             BTCUSDT, TrackedPosition(PositionSide.LONG, 2.0), closing_ratio=0.25
         ).build()
@@ -408,6 +426,19 @@ class TestSnapshot:
             "exit": "reduce",
         }
 
+    async def test_executions_hold_a_stop_loss_filled_while_positions_answer(
+        self, exchange
+    ):
+        _stop_loss_filling_while_positions_answer(exchange)
+        account = FuturesAccount(exchange)
+
+        snapshot = await account._snapshot(
+            AccountRequirement(account=account, symbols=(BTCUSDT,), executions=True),
+            executions_since=WINDOW_START,
+        )
+
+        assert [e.execution_id for e in snapshot.stop_loss_fills(BTCUSDT)] == ["stop"]
+
     async def test_entry_fills_are_not_part_of_the_snapshot(self, exchange):
         account = FuturesAccount(exchange)
 
@@ -491,6 +522,16 @@ class TestAttributedExecutions:
         executions = await account._attributed_executions(WINDOW_START, [BTCUSDT])
 
         assert [execution.effect for execution in executions] == ["open", "reduce"]
+
+    async def test_executions_hold_a_stop_loss_filled_while_positions_answer(
+        self, exchange
+    ):
+        _stop_loss_filling_while_positions_answer(exchange)
+        account = FuturesAccount(exchange)
+
+        executions = await account._attributed_executions(WINDOW_START, [BTCUSDT])
+
+        assert [e.execution_id for e in executions] == ["stop"]
 
     async def test_both_reads_are_scoped_to_the_symbols_and_the_window(self, exchange):
         exchange.get_executions_since.return_value = []

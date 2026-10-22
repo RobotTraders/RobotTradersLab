@@ -17,7 +17,6 @@ from robottraderslab.strategies import (
     TrackingId,
     profile_tag,
 )
-from robottraderslab.strategies.futures import FuturesAccount
 
 _NO_RESERVE = PlacementReserve(margin_markup=0.0, fee_markup=0.0, notional_reserve=0.0)
 _PRICE = 100.0
@@ -73,12 +72,11 @@ def _tracker(btc_usdt_perp) -> ExchangePositionTracker:
     )
 
 
-async def _stack_and_partially_exit_alpha(sim, btc_usdt_perp):
+async def _stack_and_partially_exit_alpha(sim, btc_usdt_perp, account):
     """Beta holds the symbol throughout; alpha enters, then partially exits by
     one step less than it entered, in quantities whose float difference lands
     one ulp under the whole step it should leave behind.
     """
-    account = FuturesAccount(sim.exchange)
     tracker = _tracker(btc_usdt_perp)
     await _book(
         account.long_entry(btc_usdt_perp, _BETA_ENTRY_QUANTITY).tag(_BETA_TAG).build(),
@@ -102,9 +100,11 @@ async def _stack_and_partially_exit_alpha(sim, btc_usdt_perp):
 
 class TestClosingTheLastStepAStackedProfileHolds:
     async def test_a_partial_exit_leaves_each_profile_holding_only_its_own_fills(
-        self, sim, btc_usdt_perp
+        self, sim, btc_usdt_perp, declared_account
     ):
-        _, tracker, residual = await _stack_and_partially_exit_alpha(sim, btc_usdt_perp)
+        _, tracker, residual = await _stack_and_partially_exit_alpha(
+            sim, btc_usdt_perp, declared_account
+        )
 
         assert residual == TrackedPosition(PositionSide.LONG, _ALPHA_RESIDUAL_QUANTITY)
         assert tracker.get(BETA) == TrackedPosition(
@@ -112,10 +112,10 @@ class TestClosingTheLastStepAStackedProfileHolds:
         )
 
     async def test_closing_the_residual_is_never_refused_for_holding_under_one_step(
-        self, sim, btc_usdt_perp, caplog
+        self, sim, btc_usdt_perp, declared_account, caplog
     ):
         account, tracker, residual = await _stack_and_partially_exit_alpha(
-            sim, btc_usdt_perp
+            sim, btc_usdt_perp, declared_account
         )
 
         with caplog.at_level(logging.WARNING):
@@ -134,10 +134,10 @@ class TestClosingTheLastStepAStackedProfileHolds:
         )
 
     async def test_a_profile_that_closed_its_residual_takes_its_next_entry(
-        self, sim, btc_usdt_perp
+        self, sim, btc_usdt_perp, declared_account
     ):
         account, tracker, residual = await _stack_and_partially_exit_alpha(
-            sim, btc_usdt_perp
+            sim, btc_usdt_perp, declared_account
         )
         await _book(
             account.long_exit(btc_usdt_perp, residual.quantity, reduce_only=False)
@@ -161,9 +161,9 @@ class TestClosingTheLastStepAStackedProfileHolds:
 
 class TestTwoProfilesFlippingOnOneSymbol:
     async def test_each_profile_holds_only_what_its_own_fills_add_up_to(
-        self, sim, btc_usdt_perp
+        self, sim, btc_usdt_perp, declared_account
     ):
-        account = FuturesAccount(sim.exchange)
+        account = declared_account
         tracker = _tracker(btc_usdt_perp)
 
         await _book(

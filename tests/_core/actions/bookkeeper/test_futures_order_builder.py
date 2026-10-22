@@ -4,7 +4,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core import OrderOverrides, OrderSettings
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import StrategyCriticalError, SymbolNotListedError
 from robottraderslab.exchanges import (
     Balance,
     Currency,
@@ -771,8 +771,8 @@ class TestVenueParams:
 
 
 @pytest.fixture
-def configured_account(account: FuturesAccount) -> FuturesAccount:
-    return FuturesAccount(
+async def configured_account(account: FuturesAccount) -> FuturesAccount:
+    configured = FuturesAccount(
         account._exchange,
         order_overrides=OrderOverrides(
             entry=OrderSettings(
@@ -782,6 +782,8 @@ def configured_account(account: FuturesAccount) -> FuturesAccount:
             exit=OrderSettings(time_in_force=TimeInForce.POST_ONLY),
         ),
     )
+    await configured._read_instruments([BTC_USDT])
+    return configured
 
 
 class TestConfiguredOrderSettings:
@@ -810,13 +812,14 @@ class TestConfiguredOrderSettings:
 
         assert close.time_in_force is TimeInForce.POST_ONLY
 
-    def test_a_configured_venue_field_reaches_a_close(self, account):
+    async def test_a_configured_venue_field_reaches_a_close(self, account):
         configured = FuturesAccount(
             account._exchange,
             order_overrides=OrderOverrides(
                 exit=OrderSettings(params={"bitget": {"venueOnly": "configured"}})
             ),
         )
+        await configured._read_instruments([BTC_USDT])
 
         close = configured.close_position(BTC_USDT).build()
 
@@ -851,13 +854,14 @@ class TestTriggerTypes:
 
         assert order.stop_loss.trigger_type is TriggerType.LAST_PRICE
 
-    def test_the_configured_trigger_type_wins_on_a_triggered_entry(self, account):
+    async def test_the_configured_trigger_type_wins_on_a_triggered_entry(self, account):
         configured = FuturesAccount(
             account._exchange,
             order_overrides=OrderOverrides(
                 entry=OrderSettings(trigger_type=TriggerType.INDEX_PRICE)
             ),
         )
+        await configured._read_instruments([BTC_USDT])
 
         order = (
             configured.long_entry(BTC_USDT, 1.0)
@@ -867,7 +871,7 @@ class TestTriggerTypes:
 
         assert order.trigger_type is TriggerType.INDEX_PRICE
 
-    def test_the_configured_stop_loss_trigger_wins_on_an_attached_stop_loss(
+    async def test_the_configured_stop_loss_trigger_wins_on_an_attached_stop_loss(
         self, account
     ):
         configured = FuturesAccount(
@@ -876,12 +880,13 @@ class TestTriggerTypes:
                 stop_loss_trigger_type=TriggerType.MARK_PRICE
             ),
         )
+        await configured._read_instruments([BTC_USDT])
 
         order = configured.long_entry(BTC_USDT, 1.0).stop_loss(90.0).build()
 
         assert order.stop_loss.trigger_type is TriggerType.MARK_PRICE
 
-    def test_the_configured_take_profit_trigger_wins_on_an_attached_take_profit(
+    async def test_the_configured_take_profit_trigger_wins_on_an_attached_take_profit(
         self, account
     ):
         configured = FuturesAccount(
@@ -890,6 +895,7 @@ class TestTriggerTypes:
                 take_profit_trigger_type=TriggerType.LAST_PRICE
             ),
         )
+        await configured._read_instruments([BTC_USDT])
 
         order = (
             configured.long_entry(BTC_USDT, 1.0)
@@ -899,13 +905,16 @@ class TestTriggerTypes:
 
         assert order.take_profit.trigger_type is TriggerType.LAST_PRICE
 
-    def test_the_configured_stop_loss_trigger_wins_on_a_moved_stop_loss(self, account):
+    async def test_the_configured_stop_loss_trigger_wins_on_a_moved_stop_loss(
+        self, account
+    ):
         configured = FuturesAccount(
             account._exchange,
             order_overrides=OrderOverrides(
                 stop_loss_trigger_type=TriggerType.MARK_PRICE
             ),
         )
+        await configured._read_instruments([BTC_USDT])
 
         moved = configured.move_stop_loss(
             BTC_USDT, 91.0, trigger_type=TriggerType.LAST_PRICE
@@ -913,7 +922,7 @@ class TestTriggerTypes:
 
         assert moved.trigger_type is TriggerType.MARK_PRICE
 
-    def test_the_configured_take_profit_trigger_wins_on_a_moved_take_profit(
+    async def test_the_configured_take_profit_trigger_wins_on_a_moved_take_profit(
         self, account
     ):
         configured = FuturesAccount(
@@ -922,7 +931,85 @@ class TestTriggerTypes:
                 take_profit_trigger_type=TriggerType.INDEX_PRICE
             ),
         )
+        await configured._read_instruments([BTC_USDT])
 
         moved = configured.move_take_profit(BTC_USDT, 111.0)
 
         assert moved.trigger_type is TriggerType.INDEX_PRICE
+
+
+class TestTradingRules:
+    @pytest.fixture
+    async def coarse_account(self, make_venue) -> FuturesAccount:
+        exchange = make_venue(quantity_step=1.0, minimum_order_value=5.0)
+        exchange.get_quote_conversion_rate.return_value = 1.0
+        exchange.placement_reserve_rate = 0.0
+        account = FuturesAccount(exchange)
+        await account._read_instruments([BTC_USDT])
+        return account
+
+    def test_an_entry_under_one_step_carries_its_denial(self, coarse_account):
+        order = coarse_account.long_entry(BTC_USDT, 0.4).build()
+
+        assert order.denial == (
+            "Order quantity 0.4 of BTC/USDT:USDT is under one quantity step of 1"
+        )
+
+    def test_a_resting_entry_is_measured_at_its_limit_price(self, coarse_account):
+        order = coarse_account.long_entry(BTC_USDT, 4.0).limit(1.0).build()
+
+        assert order.denial == (
+            "Order of 4 BTC/USDT:USDT at 1 is worth 4, under the minimum order value of 5"
+        )
+
+    def test_a_sized_market_entry_is_measured_at_its_sizing_price(self, coarse_account):
+        snapshot = _snapshot({"USDT": Balance(locked=0.0, total=4.0)})
+
+        order = (
+            coarse_account.long_entry(BTC_USDT)
+            .size(TotalBalanceRatio(1.0), 1.0, snapshot)
+            .build()
+        )
+
+        assert order.denial == (
+            "Order of 4 BTC/USDT:USDT at 1 is worth 4, under the minimum order value of 5"
+        )
+
+    def test_a_triggered_market_entry_is_measured_at_its_trigger_price(
+        self, coarse_account
+    ):
+        order = coarse_account.long_entry(BTC_USDT, 4.0).trigger(1.0).build()
+
+        assert order.denial == (
+            "Order of 4 BTC/USDT:USDT at 1 is worth 4, under the minimum order value of 5"
+        )
+
+    def test_a_market_entry_given_its_quantity_is_held_to_the_step_alone(
+        self, coarse_account
+    ):
+        order = coarse_account.long_entry(BTC_USDT, 4.0).build()
+
+        assert order.denial is None
+
+    def test_a_reduce_only_exit_under_the_minimum_order_value(self, coarse_account):
+        order = (
+            coarse_account.long_exit(BTC_USDT, 4.0, reduce_only=True).limit(1.0).build()
+        )
+
+        assert order.denial is None
+
+    async def test_a_symbol_the_venue_lists_no_contract_for(self, make_venue):
+        exchange = make_venue()
+        exchange.get_instrument.side_effect = SymbolNotListedError(
+            "Venue lists no perpetual for BTC/USDT:USDT"
+        )
+        account = FuturesAccount(exchange)
+        await account._read_instruments([BTC_USDT])
+
+        order = account.long_entry(BTC_USDT, 1.0).build()
+
+        assert order.denial == "Venue lists no perpetual for BTC/USDT:USDT"
+
+    def test_a_symbol_the_account_never_declared(self, coarse_account):
+        with pytest.raises(StrategyCriticalError, match="without declaring it"):
+            coarse_account.long_entry(AUD_CAD, 1.0).build()

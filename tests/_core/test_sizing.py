@@ -1,12 +1,11 @@
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import Mock
 
 import pytest
 
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.exceptions import StrategyCriticalError
-from robottraderslab.exchanges import Balance, FuturesExchangeProtocol
+from robottraderslab.exchanges import Balance
 from robottraderslab.strategies import (
     AccountSnapshot,
     AccountSnapshots,
@@ -50,10 +49,12 @@ class _ProfileLessStrategy:
 
 
 @pytest.fixture
-def account() -> FuturesAccount:
-    exchange = Mock(spec=FuturesExchangeProtocol)
+async def account(make_venue) -> FuturesAccount:
+    exchange = make_venue()
     exchange.placement_reserve_rate = 0.0
-    return FuturesAccount(exchange)
+    account = FuturesAccount(exchange)
+    await account._read_instruments([BTC_USDT])
+    return account
 
 
 def _snapshots(account: FuturesAccount) -> AccountSnapshots:

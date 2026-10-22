@@ -38,6 +38,8 @@ class BookedFills:
         """Initialise the held fills.
 
         Args:
+            accounts: The accounts whose executions the fills settle against.
+            since: Open of the earliest candle the cycle closed.
             settling: Whether a fill subscriber is configured; with none, no
                 read is made.
             max_attempts: Total retry attempts for transient errors, per read.
