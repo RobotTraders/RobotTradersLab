@@ -8,6 +8,7 @@ import pytest
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.backtester.backtester import Backtester
 from robottraderslab.backtester.simulator import CacheFillRecorder
+from robottraderslab.futures import FuturesAccount
 from robottraderslab.ohlcv_provider import CSVOHLCVProvider
 from robottraderslab.strategies import (
     AccountSnapshots,
@@ -68,10 +69,21 @@ class CSVOHLCVStrategyFixture:
 class StrategyFixture(CSVOHLCVStrategyFixture, StrategyProtocol):
     market_type = "futures"
 
-    def __init__(self, csv: io.StringIO, symbol: Symbol, handler: Callable):
+    def __init__(
+        self,
+        csv: io.StringIO,
+        symbol: Symbol,
+        handler: Callable,
+        account: FuturesAccount,
+    ):
         super().__init__(csv, symbol)
         self.handler = handler
         self.count = 0
+        self._account = account
+
+    async def setup(self, requirements: StrategyRequirements) -> None:
+        await super().setup(requirements)
+        requirements.account.add(self._account, symbols=[self._symbol])
 
     def book_trading_actions(
         self,
@@ -86,9 +98,9 @@ class StrategyFixture(CSVOHLCVStrategyFixture, StrategyProtocol):
 
 
 @pytest.fixture
-def make_strategy():
+def make_strategy(account):
     def factory(csv: io.StringIO, symbol: Symbol, handler: Callable) -> StrategyFixture:
-        return StrategyFixture(csv, symbol, handler)
+        return StrategyFixture(csv, symbol, handler, account)
 
     return factory
 

@@ -120,6 +120,7 @@ def create_strategy_place_market_order(
 
             async def setup(self, requirements):
                 requirements.ohlcv.add(symbol, "1d")
+                requirements.account.add(account, symbols=[symbol])
 
             def generate_trading_signals(self, ohlcvs: OHLCVs) -> None:
                 pass
@@ -709,3 +710,52 @@ class TestEquityCurveBounds:
             pd.Timestamp("2024-01-02 00:00", tz="UTC"),
             pd.Timestamp("2024-01-02 00:15", tz="UTC"),
         ]
+
+
+def test_an_order_on_a_symbol_the_account_did_not_declare_stops_the_run(
+    simulation_engine, fill_recorder, account
+):
+    symbol = Symbol.create("BTC/USDT:USDT")
+
+    class Strategy(StrategyProtocol):
+        market_type = "futures"
+
+        async def setup(self, requirements):
+            requirements.ohlcv.add(symbol, "1d")
+            requirements.account.add(account, positions=True)
+
+        def generate_trading_signals(self, ohlcvs: OHLCVs) -> None:
+            pass
+
+        def book_trading_actions(
+            self,
+            ohlcvs: OHLCVs,
+            _snapshots: AccountSnapshots,
+            _timestamp: datetime,
+            bookkeeper: BookKeeper,
+            _triggered_timeframes: set[TimeFrame],
+        ) -> None:
+            bookkeeper.add(account.long_entry(symbol, 1.0).build())
+
+    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+    ohlcv_provider.fetch_ohlcv.return_value = pd.DataFrame(
+        {
+            "open": [100.0],
+            "high": [110.0],
+            "low": [90.0],
+            "close": [105.0],
+            "volume": [1000],
+        },
+        index=[pd.Timestamp("2024-01-01", tz="UTC")],
+    )
+    backtester = Backtester(
+        Strategy(),
+        simulation_engine,
+        ohlcv_provider,
+        fill_recorder,
+        "2024-01-01",
+        "2024-01-01",
+    )
+
+    with pytest.raises(StrategyCriticalError, match="without declaring it"):
+        asyncio.run(backtester.run())

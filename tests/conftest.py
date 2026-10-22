@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterator
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import matplotlib
 import pandas as pd
@@ -13,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from robottraderslab._core.dynamic_class_loading import _resolve_entry_point
+from robottraderslab.exchanges import FuturesExchangeProtocol, Instrument
 
 matplotlib.use("Agg")
 
@@ -133,3 +135,21 @@ def read_payload(
         return embedded_payload(document.read_text(encoding="utf-8"))
 
     return read
+
+
+@pytest.fixture
+def make_venue() -> Callable[..., Mock]:
+    def make(
+        quantity_step: float = 1e-8, minimum_order_value: float | None = None
+    ) -> Mock:
+        venue = Mock(spec=FuturesExchangeProtocol)
+        venue.get_instrument.return_value = Instrument(
+            quantity_step=quantity_step,
+            minimum_order_value=minimum_order_value,
+            maximum_leverage=None,
+            maximum_order_quantity=None,
+            maximum_market_order_quantity=None,
+        )
+        return venue
+
+    return make

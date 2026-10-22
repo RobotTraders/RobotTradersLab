@@ -2,7 +2,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core import PlacementReserve
-from robottraderslab.bootstrap import load_single_account
+from robottraderslab.bootstrap import load_single_account_with_exchange
 from robottraderslab.exchanges import Balance
 from robottraderslab.strategies import AccountSnapshot
 from robottraderslab.strategies.futures import TotalBalanceRatio
@@ -26,7 +26,9 @@ SIMULATOR_CONFIG = {
 
 
 async def test_a_live_simulator_account_sizes_with_the_reserve_set_aside():
-    account = await load_single_account(SIMULATOR_CONFIG, {})
+    exchange, account = await load_single_account_with_exchange(SIMULATOR_CONFIG, {})
+    exchange.simulation_engine.record_prices({BTC_USDT: PRICE})
+    await account._read_instruments([BTC_USDT])
     snapshot = AccountSnapshot(
         account_name=account.name,
         balances={"USDT": Balance(locked=0.0, total=BALANCE)},

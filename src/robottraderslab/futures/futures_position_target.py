@@ -121,10 +121,18 @@ class FuturesPositionTarget:
         settings = overrides.exit if reduce_only else overrides.entry
         if difference > 0:
             return self._account._create_buy_order(
-                self._symbol, difference, settings, reduce_only=reduce_only
+                self._symbol,
+                difference,
+                settings,
+                reduce_only=reduce_only,
+                reference_price=current_price,
             )
         return self._account._create_sell_order(
-            self._symbol, -difference, settings, reduce_only=reduce_only
+            self._symbol,
+            -difference,
+            settings,
+            reduce_only=reduce_only,
+            reference_price=current_price,
         )
 
 

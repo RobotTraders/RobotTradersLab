@@ -90,12 +90,12 @@ class ExchangePositionTracker:
         execution already folded is never walked again.
 
         Args:
-            reported_since: The open of the candle the cycle is acting on.
-            reported_until: Its close. A quantity no tracking id owns is
-                reported at WARNING when a fill of that candle moved it, and
-                at INFO while it stands, so the engine carries nothing
-                between cycles; a fill landing after the close is that
-                candle's successor's to report.
+            reported_since: The open of the earliest candle the cycle closed.
+            reported_until: The close of the candles the cycle closed. A
+                quantity no tracking id owns is reported at WARNING when a
+                fill of those candles moved it, and at INFO while it stands,
+                so the engine carries nothing between cycles; a fill landing
+                after the close is the next cycle's to report.
 
         Returns:
             Whether a symbol is left the fold cannot account for, the

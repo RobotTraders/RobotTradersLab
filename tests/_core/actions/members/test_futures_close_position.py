@@ -1,12 +1,13 @@
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from unittest.mock import Mock
 
 import pytest
 
 from robottraderslab import Symbol
+from robottraderslab.exceptions import ExchangeRecoverableError
 from robottraderslab.exchanges import (
-    FuturesExchangeProtocol,
     OrderSide,
     PlacedOrder,
     PositionSide,
@@ -35,13 +36,16 @@ def _held(side: PositionSide, quantity: float) -> dict[Symbol, PositionSnapshot]
     }
 
 
-@pytest.fixture
-def venue() -> Mock:
-    venue = Mock(spec=FuturesExchangeProtocol)
+def _holding(venue: Mock) -> Mock:
     venue.get_open_positions.return_value = _held(PositionSide.LONG, 2.0)
     venue.place_market_order.return_value = PlacedOrder(order_id="close-1")
     venue.place_limit_order.return_value = PlacedOrder(order_id="close-1")
     return venue
+
+
+@pytest.fixture
+def venue(make_venue: Callable[..., Mock]) -> Mock:
+    return _holding(make_venue(quantity_step=0.001))
 
 
 async def test_closes_at_market_what_the_venue_holds_when_it_runs(venue):
@@ -68,6 +72,52 @@ async def test_a_closing_ratio_closes_that_share_of_the_held_position(venue):
     await close.execute()
 
     assert venue.place_market_order.await_args.kwargs["quantity"] == 1.0
+
+
+async def test_a_share_is_cut_to_the_step(venue):
+    close = ClosePositionAction(exchange=venue, symbol=BTC_USDT, closing_ratio=0.1667)
+
+    await close.execute()
+
+    assert venue.place_market_order.await_args.kwargs["quantity"] == 0.333
+
+
+async def test_a_share_under_one_step(venue):
+    close = ClosePositionAction(exchange=venue, symbol=BTC_USDT, closing_ratio=0.0001)
+
+    with pytest.raises(ExchangeRecoverableError, match="under one quantity step"):
+        await close.execute()
+
+    venue.place_market_order.assert_not_awaited()
+
+
+async def test_a_share_leaving_a_remainder_under_the_minimum(make_venue):
+    venue = _holding(make_venue(quantity_step=0.001, minimum_order_value=150.0))
+    close = ClosePositionAction(exchange=venue, symbol=BTC_USDT, closing_ratio=0.5)
+
+    await close.execute()
+
+    assert venue.place_market_order.await_args.kwargs["quantity"] == 2.0
+
+
+async def test_a_share_leaving_a_remainder_at_the_minimum(make_venue):
+    venue = _holding(make_venue(quantity_step=0.001, minimum_order_value=100.0))
+    close = ClosePositionAction(exchange=venue, symbol=BTC_USDT, closing_ratio=0.5)
+
+    await close.execute()
+
+    assert venue.place_market_order.await_args.kwargs["quantity"] == 1.0
+
+
+async def test_a_limit_share_values_its_remainder_at_the_limit_price(make_venue):
+    venue = _holding(make_venue(quantity_step=0.001, minimum_order_value=150.0))
+    close = ClosePositionAction(
+        exchange=venue, symbol=BTC_USDT, closing_ratio=0.5, limit_price=200.0
+    )
+
+    await close.execute()
+
+    assert venue.place_limit_order.await_args.kwargs["quantity"] == 1.0
 
 
 async def test_a_short_is_closed_with_a_buy(venue):

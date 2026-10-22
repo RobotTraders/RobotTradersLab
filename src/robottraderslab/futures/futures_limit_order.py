@@ -17,6 +17,7 @@ from robottraderslab._core import (
     TriggerType,
     VenueParams,
 )
+from robottraderslab.exceptions import ExchangeRecoverableError
 
 from .futures_exchange_protocol import FuturesExchangeProtocol
 
@@ -25,6 +26,10 @@ from .futures_exchange_protocol import FuturesExchangeProtocol
 class FuturesLimitOrderAction(BaseExchangeAction):
     """Rests on the book, filling only at the given price or better, placed
     once the trigger price is reached when one is set.
+
+    Attributes:
+        denial: Why the venue's trading rules refuse the order, None for one
+            they accept.
     """
 
     kind: ClassVar[OrderType] = OrderType.LIMIT
@@ -44,8 +49,11 @@ class FuturesLimitOrderAction(BaseExchangeAction):
     extra_fields: dict[str, Any] | None = None
     params: VenueParams = NO_VENUE_PARAMS
     on_filled: OnFillRead | None = None
+    denial: str | None = None
 
     async def execute(self) -> ActionResult:
+        if self.denial is not None:
+            raise ExchangeRecoverableError(self.denial)
         placed_order = await self.exchange.place_limit_order(
             symbol=self.symbol,
             side=self.side,

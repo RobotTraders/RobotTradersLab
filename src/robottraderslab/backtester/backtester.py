@@ -20,6 +20,7 @@ from robottraderslab._core import (
     fetch_account_snapshots,
     hold_margin_targets,
     log_strategy_slots,
+    read_instruments,
     sweep_orphan_protections,
     to_seconds,
     widen_tracked_positions,
@@ -98,6 +99,7 @@ class Backtester:
         )
         ohlcvs._warn_if_data_starts_late(self._start_after)
         self._seed_last_prices(ohlcvs, requirements)
+        await read_instruments(requirements.account)
         self._simulation_engine.record_opening_equity(self._start_after)
         self._log_backtest_starting()
         self._strategy.generate_trading_signals(ohlcvs)

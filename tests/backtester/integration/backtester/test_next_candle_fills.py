@@ -50,15 +50,17 @@ type BookingHandler = Callable[[int, OHLCVs, BookKeeper], None]
 class _CSVStrategy(StrategyProtocol):
     market_type = "futures"
 
-    def __init__(self, csv: str, handler: BookingHandler):
+    def __init__(self, csv: str, handler: BookingHandler, account: FuturesAccount):
         self.ohlcv_provider = CSVOHLCVProvider(
             file=io.StringIO(csv), symbol=str(BTCUSDT_PERP), timeframe="1d"
         )
         self._handler = handler
         self._candle = 0
+        self._account = account
 
     async def setup(self, requirements: StrategyRequirements) -> None:
         requirements.ohlcv.add(BTCUSDT_PERP, "1d")
+        requirements.account.add(self._account, symbols=[BTCUSDT_PERP])
 
     def generate_trading_signals(self, ohlcvs: OHLCVs) -> None: ...
 
@@ -90,10 +92,10 @@ def account(simulated_exchange: SimulatedFuturesExchange) -> FuturesAccount:
 
 @pytest.fixture
 def run_backtest(
-    simulated_exchange: SimulatedFuturesExchange,
+    simulated_exchange: SimulatedFuturesExchange, account: FuturesAccount
 ) -> Callable[[str, BookingHandler], pd.DataFrame]:
     def runner(csv: str, handler: BookingHandler) -> pd.DataFrame:
-        strategy = _CSVStrategy(csv, handler)
+        strategy = _CSVStrategy(csv, handler, account)
         backtester = Backtester(
             strategy,
             simulated_exchange.simulation_engine,

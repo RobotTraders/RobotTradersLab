@@ -14,6 +14,7 @@ from robottraderslab.backtester.simulator import (
     fee_model_for,
 )
 from robottraderslab.exchanges import OrderProtocol, PositionSnapshot
+from robottraderslab.futures import FuturesAccount
 
 
 class SimulationFixture:
@@ -115,3 +116,14 @@ def sim_without_recording(
 def sim(sim_without_recording: SimulationFixture) -> SimulationFixture:
     sim_without_recording.simulation_engine.enable_execution_recording()
     return sim_without_recording
+
+
+@pytest.fixture
+async def declared_account(sim: SimulationFixture, btc_usdt_perp) -> FuturesAccount:
+    """An account holding the simulator's trading rules for the symbol, which
+    the simulator reports once it has a price for it.
+    """
+    sim.simulation_engine.record_prices({btc_usdt_perp: 100.0})
+    account = FuturesAccount(sim.exchange)
+    await account._read_instruments([btc_usdt_perp])
+    return account

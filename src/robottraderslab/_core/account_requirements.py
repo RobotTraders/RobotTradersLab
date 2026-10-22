@@ -108,6 +108,12 @@ class AccountProtocol(NamedAccount, Protocol):
         """
         ...
 
+    async def _read_instruments(self, symbols: Iterable[Symbol]) -> None:
+        """Every order the account builds is held to the rules read here. A
+        symbol the venue lists no contract for is held as unlisted.
+        """
+        ...
+
     async def _snapshot(
         self,
         requirement: "AccountRequirement",
@@ -217,7 +223,9 @@ class AccountRequirements:
         Args:
             account: Account the state is read from.
             symbols: Symbols this account trades. Per-symbol state covers
-                these and no others.
+                these and no others, and the account holds their trading
+                rules; an order on any other symbol is a strategy error that
+                stops the run.
             positions: Unlock `snapshot.position(symbol)`.
             open_orders: Unlock `snapshot.open_orders(symbol)`,
                 `snapshot.stop_loss_orders(symbol)` and

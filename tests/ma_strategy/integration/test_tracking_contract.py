@@ -53,7 +53,7 @@ _MARGIN_CURRENCY = "USDT"
 _NO_RESERVE = PlacementReserve(margin_markup=0.0, fee_markup=0.0, notional_reserve=0.0)
 _TRACKER_LOGGER = exchange_position_tracker.__name__
 
-_ALPHA_LONG_QUANTITY = {"cost": 24.01442308, "exchange": 24.01444709}
+_ALPHA_LONG_QUANTITY = {"cost": 24.01442307, "exchange": 24.01444709}
 _BETA_LONG_QUANTITY = {"cost": 16.43092105, "exchange": 16.43093748}
 _QUANTITY_AFTER_RE_ENTRY = {"cost": 21.66323708, "exchange": 21.66326338}
 _BTC_2024_FILLS = 48

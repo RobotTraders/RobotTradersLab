@@ -28,9 +28,9 @@ async def widen_tracked_positions(
         executions_since: Where the candle's own read starts. The second
             read never starts later, so a strategy whose lookback already
             reaches past the attribution span keeps every fill it had.
-        reported_since: The open of the candle the cycle is acting on.
-        reported_until: Its close. Together they decide whether a quantity
-            no tracking id owns is news.
+        reported_since: The open of the earliest candle the cycle closed.
+        reported_until: The close of the candles the cycle closed. Together
+            they decide whether a quantity no tracking id owns is news.
         max_attempts: Total retry attempts for transient errors, per read.
         base_delay: Base retry delay in seconds (doubled on each retry).
     """

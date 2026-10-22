@@ -1,5 +1,6 @@
 import asyncio
-from unittest.mock import AsyncMock, Mock
+from collections.abc import Callable
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 
@@ -52,13 +53,15 @@ def market_order() -> FuturesMarketOrderAction:
 
 class TestBatchAction:
     @pytest.fixture(autouse=True)
-    def _setup(
+    async def _setup(
         self,
         limit_order: FuturesLimitOrderAction,
         market_order: FuturesMarketOrderAction,
+        make_venue: Callable[..., Mock],
     ) -> None:
-        self.exchange = Mock(spec=FuturesExchangeProtocol)
+        self.exchange = make_venue()
         self.account = FuturesAccount(self.exchange, name="test")
+        await self.account._read_instruments([BTC_USDT])
         self.limit_order = limit_order
         self.market_order = market_order
         self.batch = self.account.place_orders([limit_order, market_order])
@@ -156,6 +159,60 @@ class TestBatchAction:
         first, second = batch_result.orders
         assert first.placement.reason is None
         assert second.placement.reason == "impulse long exit"
+
+    async def test_a_denied_order_is_left_out_of_the_batch(self):
+        denied = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="Order quantity 0.4 of BTC/USDT:USDT is under one quantity step",
+        )
+        batch = self.account.place_orders([self.limit_order, denied])
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            return_value=[PlacedOrder(order_id="1")],
+        )
+
+        action_result = await batch.execute()
+
+        (requests,) = self.exchange.place_orders.await_args.args
+        assert [request.client_order_id for request in requests] == [
+            self.limit_order.client_order_id
+        ]
+        assert [outcome.placed_order.order_id for outcome in action_result.orders] == [
+            "1"
+        ]
+
+    async def test_a_denied_order_is_reported(self, caplog):
+        denied = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="Order quantity 0.4 of BTC/USDT:USDT is under one quantity step",
+        )
+
+        await self.account.place_orders([denied]).execute()
+
+        assert (
+            "Order left out of its batch (BTC/USDT:USDT): Order quantity 0.4 of "
+            "BTC/USDT:USDT is under one quantity step"
+        ) in caplog.text
+
+    async def test_a_batch_whose_every_order_is_denied(self):
+        denied = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="under one quantity step",
+        )
+
+        action_result = await self.account.place_orders([denied]).execute()
+
+        self.exchange.place_orders.assert_not_awaited()
+        assert action_result.orders == ()
 
     async def test_order_the_venue_rejected(self):
         self.exchange.place_orders = AsyncMock(
@@ -352,13 +409,15 @@ class TestBatchWaiting:
 
 class TestModifyAction:
     @pytest.fixture(autouse=True)
-    def _setup(
+    async def _setup(
         self,
         limit_order: FuturesLimitOrderAction,
         market_order: FuturesMarketOrderAction,
+        make_venue: Callable[..., Mock],
     ) -> None:
-        self.exchange = Mock(spec=FuturesExchangeProtocol)
+        self.exchange = make_venue()
         self.account = FuturesAccount(self.exchange, name="test")
+        await self.account._read_instruments([BTC_USDT])
         self.limit_order = limit_order
         self.modify = self.account.modify_orders(
             [
@@ -394,6 +453,79 @@ class TestModifyAction:
         assert second.on_filled is None
         assert first.placement.kind == "limit"
         assert second.placement.kind == "market"
+
+    async def test_a_denied_replacement_cancels_its_resting_order(self):
+        denied = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="under one quantity step",
+        )
+        modify = self.account.modify_orders(
+            [
+                OrderModification(order_id="a", order=self.limit_order),
+                OrderModification(order_id="b", order=denied),
+            ]
+        )
+        self.exchange.modify_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.modify_orders,
+            return_value=[PlacedOrder(order_id="a")],
+        )
+
+        await modify.execute()
+
+        self.exchange.cancel_order_by_id.assert_awaited_once_with(BTC_USDT, "b")
+        (requests,) = self.exchange.modify_orders.await_args.args
+        assert [request.order_id for request in requests] == ["a"]
+
+    async def test_denied_replacements_are_cancelled_symbol_by_symbol(self):
+        eth_usdt = Symbol.create("ETH/USDT:USDT")
+        denied_btc = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="under one quantity step",
+        )
+        denied_eth = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=eth_usdt,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="under one quantity step",
+        )
+        modify = self.account.modify_orders(
+            [
+                OrderModification(order_id="b", order=denied_btc),
+                OrderModification(order_id="e", order=denied_eth),
+            ]
+        )
+
+        await modify.execute()
+
+        assert self.exchange.cancel_order_by_id.await_args_list == [
+            call(BTC_USDT, "b"),
+            call(eth_usdt, "e"),
+        ]
+
+    async def test_a_modification_whose_every_replacement_is_denied(self):
+        denied = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            denial="under one quantity step",
+        )
+        modify = self.account.modify_orders(
+            [OrderModification(order_id="b", order=denied)]
+        )
+
+        action_result = await modify.execute()
+
+        self.exchange.cancel_order_by_id.assert_awaited_once_with(BTC_USDT, "b")
+        self.exchange.modify_orders.assert_not_awaited()
+        assert action_result.orders == ()
 
     async def test_modification_the_venue_rejected(self):
         self.exchange.modify_orders = AsyncMock(

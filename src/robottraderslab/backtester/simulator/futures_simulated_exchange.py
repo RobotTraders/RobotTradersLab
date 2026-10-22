@@ -55,6 +55,14 @@ from .quantities import to_floored_step_count
 
 logger = logging.getLogger(__name__)
 
+_INSTRUMENT = Instrument(
+    quantity_step=to_quantity(1),
+    minimum_order_value=None,
+    maximum_leverage=None,
+    maximum_order_quantity=None,
+    maximum_market_order_quantity=None,
+)
+
 
 class SimulatedFuturesExchange(FuturesExchangeProtocol):
     """Delegates every operation to the simulation engine driving it.
@@ -145,14 +153,10 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         return self.simulation_engine.open_positions
 
     async def get_instrument(self, symbol: Symbol) -> Instrument:
-        self.simulation_engine.require_listed(symbol)
-        return Instrument(
-            quantity_step=to_quantity(1),
-            minimum_order_value=None,
-            maximum_leverage=None,
-            maximum_order_quantity=None,
-            maximum_market_order_quantity=None,
-        )
+        """Every symbol trades under the same rules, so a symbol with no candle
+        seen has them too.
+        """
+        return _INSTRUMENT
 
     async def get_quote(self, symbol: Symbol) -> Quote:
         """A candle holds no book, so its close is both the bid and the ask."""

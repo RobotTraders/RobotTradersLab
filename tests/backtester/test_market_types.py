@@ -31,6 +31,12 @@ def _market(fee_mode: FeeMode) -> SimulatedMarket:
     )
 
 
+async def _declared(market: SimulatedMarket) -> SimulatedMarket:
+    market.simulator.simulation_engine.record_prices({BTC_USDT: PRICE})
+    await market.account._read_instruments([BTC_USDT])
+    return market
+
+
 def _flat_snapshot() -> AccountSnapshot:
     return AccountSnapshot(
         account_name="simulated",
@@ -45,8 +51,8 @@ class TestTheFeeConventionReachesTheAccount:
     simulator accepts.
     """
 
-    def test_an_exchange_backtest_sizes_with_the_fee_set_aside(self):
-        market = _market("exchange")
+    async def test_an_exchange_backtest_sizes_with_the_fee_set_aside(self):
+        market = await _declared(_market("exchange"))
 
         order = (
             market.account.long_entry(BTC_USDT)
@@ -56,8 +62,8 @@ class TestTheFeeConventionReachesTheAccount:
 
         assert order.quantity == pytest.approx(BALANCE / (PRICE * (1 + TAKER_FEE_RATE)))
 
-    def test_a_cost_backtest_sizes_on_the_whole_balance(self):
-        market = _market("cost")
+    async def test_a_cost_backtest_sizes_on_the_whole_balance(self):
+        market = await _declared(_market("cost"))
 
         order = (
             market.account.long_entry(BTC_USDT)
@@ -68,15 +74,17 @@ class TestTheFeeConventionReachesTheAccount:
         assert order.quantity == pytest.approx(BALANCE / PRICE)
 
 
-def test_a_backtest_account_takes_the_configured_order_settings():
+async def test_a_backtest_account_takes_the_configured_order_settings():
     overrides = OrderOverrides(entry=OrderSettings(time_in_force=TimeInForce.IOC))
-    market = create_futures_market(
-        initial_balance={"USDT": BALANCE},
-        maker_fee_rate=0.0002,
-        taker_fee_rate=TAKER_FEE_RATE,
-        fee_mode="exchange",
-        placement_reserve=_NO_RESERVE,
-        order_overrides=overrides,
+    market = await _declared(
+        create_futures_market(
+            initial_balance={"USDT": BALANCE},
+            maker_fee_rate=0.0002,
+            taker_fee_rate=TAKER_FEE_RATE,
+            fee_mode="exchange",
+            placement_reserve=_NO_RESERVE,
+            order_overrides=overrides,
+        )
     )
 
     order = market.account.long_entry(BTC_USDT, 1.0).limit(PRICE).build()

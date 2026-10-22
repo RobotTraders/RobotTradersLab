@@ -73,7 +73,7 @@ def account(simulated_exchange):
 class StrategyFixture(StrategyProtocol):
     market_type = "futures"
 
-    def __init__(self, csv: io.StringIO, handler: Callable):
+    def __init__(self, csv: io.StringIO, handler: Callable, account: FuturesAccount):
         self.ohlcv_provider = CSVOHLCVProvider(
             file=csv,
             symbol=str(BTCUSDT_PERP),
@@ -81,6 +81,7 @@ class StrategyFixture(StrategyProtocol):
         )
         self.handler = handler
         self.count = 0
+        self.account = account
 
     def book_trading_actions(
         self,
@@ -95,6 +96,7 @@ class StrategyFixture(StrategyProtocol):
 
     async def setup(self, requirements: StrategyRequirements) -> None:
         requirements.ohlcv.add(BTCUSDT_PERP, "1d")
+        requirements.account.add(self.account, symbols=[BTCUSDT_PERP])
 
     def generate_trading_signals(self, ohlcvs: OHLCVs) -> None:
         pass
@@ -108,13 +110,16 @@ class DescribingStrategyFixture(StrategyFixture):
         account: FuturesAccount,
         describe_fills: Callable[[Execution], str | None],
     ):
-        super().__init__(csv, handler)
-        self.account = account
+        super().__init__(csv, handler, account)
         self.describe_fills = describe_fills
 
     async def setup(self, requirements: StrategyRequirements) -> None:
-        await super().setup(requirements)
-        requirements.account.add(self.account, describe_fills=self.describe_fills)
+        requirements.ohlcv.add(BTCUSDT_PERP, "1d")
+        requirements.account.add(
+            self.account,
+            symbols=[BTCUSDT_PERP],
+            describe_fills=self.describe_fills,
+        )
 
 
 class TestReasonFlow:
@@ -132,7 +137,7 @@ class TestReasonFlow:
         self.fill_recorder: CacheFillRecorder = fill_recorder
 
     def _create_backtester(self, csv, handler) -> Backtester:
-        strategy = StrategyFixture(csv, handler)
+        strategy = StrategyFixture(csv, handler, self.account)
         return Backtester(
             strategy,
             self.simulation_engine,
@@ -394,10 +399,16 @@ class TestReasonFlow:
                 await super().setup(requirements)
                 first = FuturesAccount(simulated_exchange, name="first")
                 second = FuturesAccount(simulated_exchange, name="second")
-                requirements.account.add(first, describe_fills=lambda fill: "one")
-                requirements.account.add(second, describe_fills=lambda fill: "two")
+                requirements.account.add(
+                    first, symbols=[BTCUSDT_PERP], describe_fills=lambda fill: "one"
+                )
+                requirements.account.add(
+                    second, symbols=[BTCUSDT_PERP], describe_fills=lambda fill: "two"
+                )
 
-        strategy = TwoDescribersStrategy(csv_3_daily_prices, lambda *args: None)
+        strategy = TwoDescribersStrategy(
+            csv_3_daily_prices, lambda *args: None, self.account
+        )
         backtester = Backtester(
             strategy,
             self.simulation_engine,

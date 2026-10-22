@@ -1,22 +1,27 @@
+from collections.abc import Callable
 from unittest.mock import Mock
 
 import pytest
 
-from robottraderslab.exchanges import FuturesExchangeProtocol
+from robottraderslab import Symbol
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.strategies import TradingMode, TradingSystem
 
+BTC_USDT = Symbol.create("BTC/USDT:USDT")
+
 
 @pytest.fixture
-def mock_exchange() -> Mock:
-    exchange = Mock(spec=FuturesExchangeProtocol)
+def mock_exchange(make_venue: Callable[..., Mock]) -> Mock:
+    exchange = make_venue()
     exchange.placement_reserve_rate = 0.0
     return exchange
 
 
 @pytest.fixture
-def mock_account(mock_exchange: Mock) -> FuturesAccount:
-    return FuturesAccount(exchange=mock_exchange)
+async def mock_account(mock_exchange: Mock) -> FuturesAccount:
+    account = FuturesAccount(exchange=mock_exchange)
+    await account._read_instruments([BTC_USDT])
+    return account
 
 
 @pytest.fixture
