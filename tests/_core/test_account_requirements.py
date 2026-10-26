@@ -14,7 +14,7 @@ from robottraderslab._core import (
     MarginSettings,
     fetch_account_snapshots,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.strategies.futures import (
     EquityRatio,
     Margin,
@@ -200,14 +200,14 @@ class TestAccountNaming:
         requirements = AccountRequirements()
         requirements.add(account, positions=True)
 
-        with pytest.raises(StrategyCriticalError, match="already declared"):
+        with pytest.raises(BotCriticalError, match="already declared"):
             requirements.add(account, balances=True)
 
     def test_two_accounts_sharing_a_name_are_rejected(self):
         requirements = AccountRequirements()
         requirements.add(_account_named("bitget"), positions=True)
 
-        with pytest.raises(StrategyCriticalError, match="distinct names"):
+        with pytest.raises(BotCriticalError, match="distinct names"):
             requirements.add(_account_named("bitget"), balances=True)
 
 

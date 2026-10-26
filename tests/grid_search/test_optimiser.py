@@ -7,7 +7,7 @@ import pytest
 
 from robottraderslab import BacktestOutputs
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search.grid_point import GridPoint
 from robottraderslab.grid_search.optimisation_result import OptimisationResult
 from robottraderslab.grid_search.optimiser import (
@@ -23,6 +23,7 @@ class TestGridSearchOptimiser:
     def mock_bot_config(self) -> BotConfig:
         return BotConfig.model_validate(
             {
+                "name": "test-bot",
                 "strategy": {
                     "strategy_class": "impulse",
                     "profiles": [
@@ -149,9 +150,9 @@ class TestGridSearchOptimiser:
         with (
             patch(
                 "robottraderslab.grid_search.optimiser.run_backtest",
-                side_effect=StrategyCriticalError("no candles declared"),
+                side_effect=BotCriticalError("no candles declared"),
             ),
-            pytest.raises(StrategyCriticalError, match="no candles declared"),
+            pytest.raises(BotCriticalError, match="no candles declared"),
         ):
             GridSearchOptimiser(mock_bot_config).run()
 
@@ -207,6 +208,7 @@ class TestGridSearchOptimiser:
                 "end_date": "2024-01-02",
                 "ohlcv_provider": {},
             },
+            "name": "test-bot",
             "strategy": {
                 "strategy_class": "impulse",
                 "profiles": [
@@ -243,6 +245,7 @@ class TestGridSearchOptimiser:
                 "end_date": "2024-01-02",
                 "ohlcv_provider": {},
             },
+            "name": "test-bot",
             "strategy": {
                 "strategy_class": "impulse",
                 "profiles": [
@@ -328,6 +331,7 @@ class TestDottedPathFeature:
     def test_sets_values_in_all_list_items(self, mock_result):
         bot_config = BotConfig.model_validate(
             {
+                "name": "test-bot",
                 "strategy": {
                     "strategy_class": "impulse",
                     "profiles": [
@@ -400,6 +404,7 @@ class TestDottedPathFeature:
                 "end_date": "2024-01-02",
                 "ohlcv_provider": {},
             },
+            "name": "test-bot",
             "strategy": {
                 "strategy_class": "envelope",
                 "profiles": [
@@ -482,12 +487,13 @@ class TestDottedPathFeature:
     ):
         grid_point = GridPoint(parameters={parameter_path: 0.05})
 
-        with pytest.raises(StrategyCriticalError, match=re.escape(parameter_path)):
+        with pytest.raises(BotCriticalError, match=re.escape(parameter_path)):
             _apply_grid_point_to_config(envelope_config_dict, grid_point)
 
     def test_works_with_deeply_nested_structures(self, mock_result):
         bot_config = BotConfig.model_validate(
             {
+                "name": "test-bot",
                 "strategy": {"strategy_class": "impulse", "profiles": []},
                 "backtest": {
                     "initial_balance": {"USDT": 1000.0},
@@ -570,6 +576,7 @@ class TestMeasurePoint:
                 "end_date": "2024-01-02",
                 "ohlcv_provider": {},
             },
+            "name": "test-bot",
             "strategy": {
                 "strategy_class": "impulse",
                 "profiles": [
@@ -627,9 +634,9 @@ class TestMeasurePoint:
         with (
             patch(
                 "robottraderslab.grid_search.optimiser.run_backtest",
-                side_effect=StrategyCriticalError("no candles declared"),
+                side_effect=BotCriticalError("no candles declared"),
             ),
-            pytest.raises(StrategyCriticalError, match="no candles declared"),
+            pytest.raises(BotCriticalError, match="no candles declared"),
         ):
             _measure_point(config_dict, grid_point)
 
@@ -641,7 +648,7 @@ class TestMeasurePoint:
         with ProcessPoolExecutor(max_workers=1) as workers:
             measured = workers.submit(_measure_point, config_dict, unknown_setting)
 
-            with pytest.raises(StrategyCriticalError, match="no_such_setting"):
+            with pytest.raises(BotCriticalError, match="no_such_setting"):
                 measured.result()
 
     def test_deep_copies_config_dict(self, config_dict, grid_point):
@@ -660,6 +667,7 @@ class TestReadingTheSweptValue:
     @pytest.fixture
     def config_dict(self) -> dict[str, Any]:
         return {
+            "name": "test-bot",
             "strategy": {
                 "strategy_class": "impulse",
                 "profiles": [
@@ -684,17 +692,17 @@ class TestReadingTheSweptValue:
         assert _read_nested_value(config_dict, "strategy.profiles.1.bands.0") == 0.04
 
     def test_a_path_landing_on_a_table_is_refused(self, config_dict):
-        with pytest.raises(StrategyCriticalError, match="holds no single value"):
+        with pytest.raises(BotCriticalError, match="holds no single value"):
             _read_nested_value(config_dict, "strategy.profiles")
 
     def test_a_path_fanning_out_over_an_empty_list_is_refused(self):
-        with pytest.raises(StrategyCriticalError, match="empty list"):
+        with pytest.raises(BotCriticalError, match="empty list"):
             _read_nested_value(
                 {"strategy": {"profiles": []}}, "strategy.profiles.trix_length"
             )
 
     def test_an_unset_setting_is_refused(self):
-        with pytest.raises(StrategyCriticalError, match="leaves unset"):
+        with pytest.raises(BotCriticalError, match="leaves unset"):
             _read_nested_value({"strategy": {"tag": None}}, "strategy.tag")
 
     @pytest.mark.parametrize(
@@ -706,5 +714,5 @@ class TestReadingTheSweptValue:
         ],
     )
     def test_a_path_matching_nothing_is_refused(self, config_dict, path, refusal):
-        with pytest.raises(StrategyCriticalError, match=refusal):
+        with pytest.raises(BotCriticalError, match=refusal):
             _read_nested_value(config_dict, path)

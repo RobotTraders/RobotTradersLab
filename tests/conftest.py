@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
+from robottraderslab._core.actions.members import base_action
 from robottraderslab._core.dynamic_class_loading import _resolve_entry_point
 from robottraderslab.exchanges import FuturesExchangeProtocol, Instrument
 
@@ -24,6 +25,17 @@ _PLUGIN_MODULE = "registered_ohlcv_adapter_plugin"
 _STUB_EXCHANGE = "stub_exchange"
 
 type _AdapterRegistration = Callable[..., None]
+
+
+@pytest.fixture(autouse=True)
+def _restore_process_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(base_action, "_order_id_prefix", base_action._order_id_prefix)
+    monkeypatch.setattr(
+        base_action, "_process_bot_bytes", base_action._process_bot_bytes
+    )
+    monkeypatch.setattr(
+        base_action, "_process_bot_segment", base_action._process_bot_segment
+    )
 
 
 class StubOhlcvAdapter:

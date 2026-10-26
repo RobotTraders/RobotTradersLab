@@ -4,7 +4,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core import OrderOverrides, OrderSettings
-from robottraderslab.exceptions import StrategyCriticalError, SymbolNotListedError
+from robottraderslab.exceptions import BotCriticalError, SymbolNotListedError
 from robottraderslab.exchanges import (
     Balance,
     Currency,
@@ -199,6 +199,10 @@ class TestPositionClose:
         with pytest.raises(ValueError, match="Tag cannot be empty"):
             account.close_position(BTC_USDT).tag(" ")
 
+    def test_an_engine_tag_on_a_close(self, account):
+        with pytest.raises(BotCriticalError, match="`flatten`"):
+            account.close_position(BTC_USDT).tag("flatten")
+
     def test_extra_fields_accumulate_on_the_close(self, account):
         close = (
             account.close_position(BTC_USDT)
@@ -253,7 +257,7 @@ class TestOrderValidation:
     """Test validation of order parameters."""
 
     def test_amount_is_not_specified(self, account):
-        with pytest.raises(StrategyCriticalError, match="has no size"):
+        with pytest.raises(BotCriticalError, match="has no size"):
             account.long_entry(BTC_USDT).build()
 
     def test_long_entry_validates_amount_gt_0(self, account):
@@ -462,7 +466,7 @@ class TestTimeInForce:
         assert limit_order.time_in_force is time_in_force
 
     def test_triggered_order_cannot_wait(self, account):
-        with pytest.raises(StrategyCriticalError, match="on a triggered order"):
+        with pytest.raises(BotCriticalError, match="on a triggered order"):
             (
                 account.long_entry(BTC_USDT, 1.0)
                 .limit(100.0, time_in_force=TimeInForce.POST_ONLY)
@@ -662,6 +666,13 @@ class TestTag:
     def test_rejects_empty_tag(self, account):
         with pytest.raises(ValueError, match="Tag cannot be empty"):
             account.long_entry(BTC_USDT, 1.0).tag("")
+
+    @pytest.mark.parametrize(
+        "engine_tag", ["sl", "tp", "sl-reached", "tp-reached", "flatten"]
+    )
+    def test_an_engine_tag_on_an_order(self, account, engine_tag):
+        with pytest.raises(BotCriticalError, match=f"`{engine_tag}`"):
+            account.long_entry(BTC_USDT, 1.0).tag(engine_tag)
 
 
 class TestSymbolValidation:
@@ -1011,5 +1022,5 @@ class TestTradingRules:
         assert order.denial == "Venue lists no perpetual for BTC/USDT:USDT"
 
     def test_a_symbol_the_account_never_declared(self, coarse_account):
-        with pytest.raises(StrategyCriticalError, match="without declaring it"):
+        with pytest.raises(BotCriticalError, match="without declaring it"):
             coarse_account.long_entry(AUD_CAD, 1.0).build()

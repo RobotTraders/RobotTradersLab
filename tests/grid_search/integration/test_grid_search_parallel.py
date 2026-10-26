@@ -1,10 +1,12 @@
 import pytest
 
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search import GridSearchResults, run_grid_search
 
 TOML_CONFIG = """\
+name = "test-bot"
+
 [backtest]
 initial_balance = { USDT = 10000.0 }
 maker_fee_rate = 0.001
@@ -96,7 +98,7 @@ def test_an_undeclared_setting_stops_the_sweep_before_any_point_is_measured(capl
         )
     )
 
-    with pytest.raises(StrategyCriticalError, match="no_such_setting"):
+    with pytest.raises(BotCriticalError, match="no_such_setting"):
         run_grid_search(bot_config)
 
     assert not [record for record in caplog.records if "Grid point" in record.message]
@@ -110,5 +112,5 @@ def test_a_critical_stops_the_parallel_sweep():
         )
     )
 
-    with pytest.raises(StrategyCriticalError, match="no_such_setting"):
+    with pytest.raises(BotCriticalError, match="no_such_setting"):
         run_grid_search(bot_config)

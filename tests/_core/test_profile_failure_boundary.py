@@ -2,10 +2,10 @@ import pytest
 
 from robottraderslab._core.profile_failure_boundary import profile_failure_boundary
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
     MissingOhlcvDataError,
-    StrategyCriticalError,
 )
 from robottraderslab.strategies import TradingMode
 
@@ -32,10 +32,10 @@ class TestLiveMode:
             with _boundary(TradingMode.LIVE):
                 raise ExchangeCriticalError("auth failed")
 
-    def test_strategy_critical_error(self):
-        with pytest.raises(StrategyCriticalError):
+    def test_bot_critical_error(self):
+        with pytest.raises(BotCriticalError):
             with _boundary(TradingMode.LIVE):
-                raise StrategyCriticalError("bad config")
+                raise BotCriticalError("bad config")
 
 
 class TestBacktestMode:

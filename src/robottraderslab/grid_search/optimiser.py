@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from robottraderslab.backtester import run_backtest
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .grid_point import GridPoint
 from .optimisation_config import OptimisationConfig
@@ -104,10 +104,10 @@ def _generate_grid(parameters: list[Parameter]) -> list[GridPoint]:
         List of GridPoint objects, one for each combination.
 
     Raises:
-        StrategyCriticalError: If the config declares any other count.
+        BotCriticalError: If the config declares any other count.
     """
     if len(parameters) != REQUIRED_PARAMETER_COUNT:
-        raise StrategyCriticalError(_wrong_count(len(parameters)))
+        raise BotCriticalError(_wrong_count(len(parameters)))
 
     param1, param2 = parameters
 
@@ -189,7 +189,7 @@ def _set_nested_value(
     """A path is checked against the config before any point is measured on it.
 
     Raises:
-        StrategyCriticalError: If a segment names nothing the config declares.
+        BotCriticalError: If a segment names nothing the config declares.
     """
     _assign(config_dict, path.split("."), value, path)
 
@@ -242,17 +242,17 @@ def _read_nested_value(config_dict: dict[str, Any], path: str) -> ParameterValue
     does not spell out stops the sweep before a backtest runs.
 
     Raises:
-        StrategyCriticalError: If a segment names nothing the config declares,
+        BotCriticalError: If a segment names nothing the config declares,
             or the path lands on a table, a list or an unset value.
     """
     value = _read(config_dict, path.split("."), path)
     if isinstance(value, dict | list):
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Optimisation parameter `{path}` names a table or a list, which "
             f"holds no single value to sweep"
         )
     if value is None:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Optimisation parameter `{path}` names a setting the config leaves "
             f"unset, so its type cannot be read"
         )
@@ -282,29 +282,29 @@ def _read(target: Any, segments: list[str], path: str) -> Any:
 
 def _first_of(target: list[Any], path: str) -> Any:
     if not target:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Optimisation parameter `{path}` fans out over an empty list, "
             f"which holds nothing to sweep"
         )
     return target[0]
 
 
-def _undeclared(path: str, segment: str) -> StrategyCriticalError:
-    return StrategyCriticalError(
+def _undeclared(path: str, segment: str) -> BotCriticalError:
+    return BotCriticalError(
         f"Optimisation parameter `{path}` names `{segment}`, which the "
         f"config does not declare"
     )
 
 
-def _past_the_end(path: str, index: int, length: int) -> StrategyCriticalError:
-    return StrategyCriticalError(
+def _past_the_end(path: str, index: int, length: int) -> BotCriticalError:
+    return BotCriticalError(
         f"Optimisation parameter `{path}` names element {index} of a list "
         f"holding {length}"
     )
 
 
-def _under_a_single_value(path: str, segment: str) -> StrategyCriticalError:
-    return StrategyCriticalError(
+def _under_a_single_value(path: str, segment: str) -> BotCriticalError:
+    return BotCriticalError(
         f"Optimisation parameter `{path}` reaches `{segment}` under a "
         f"single value, which holds nothing to address"
     )
@@ -314,10 +314,10 @@ def _require_optimisation_config(bot_config: BotConfig) -> dict[str, Any]:
     """Read the section a sweep cannot run without.
 
     Raises:
-        StrategyCriticalError: If the bot declares no `[optimisation]` section.
+        BotCriticalError: If the bot declares no `[optimisation]` section.
     """
     if bot_config.optimisation is None:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             "`[optimisation]` section is required to run a grid search"
         )
     return bot_config.optimisation

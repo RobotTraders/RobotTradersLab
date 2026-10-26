@@ -3,7 +3,7 @@ import logging
 from typing import Any
 
 from robottraderslab._core import NO_ORDER_OVERRIDES, OrderOverrides, TriggerType
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 from robottraderslab.exchanges import FuturesExchangeProtocol
 from robottraderslab.futures import FuturesAccount
 
@@ -34,7 +34,7 @@ async def load_accounts(
     accounts: dict[str, FuturesAccount] = {}
     for name, _, account in named_accounts:
         if accounts.setdefault(name, account) is not account:
-            raise StrategyCriticalError(f"Duplicate account name: `{name}`")
+            raise BotCriticalError(f"Duplicate account name: `{name}`")
     return accounts
 
 
@@ -97,7 +97,7 @@ def _refuse_unoffered_trigger_types(
     run at its first order, so it stops the run before any.
 
     Raises:
-        StrategyCriticalError: If `[orders]` names a trigger type the venue
+        BotCriticalError: If `[orders]` names a trigger type the venue
             offers no trigger on.
     """
     configured = {
@@ -114,7 +114,7 @@ def _refuse_unoffered_trigger_types(
     ]
     if refused:
         names = ", ".join(sorted(offered - {TriggerType.DEFAULT})) or "none"
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"{exchange_name} offers no trigger on {', '.join(refused)}; "
             f"it offers {names}"
         )
@@ -128,7 +128,7 @@ def _named_config(
 
     Raises:
         ExchangeCriticalError: If the config names no exchange.
-        StrategyCriticalError: If the config names a `secret_name` that is not defined
+        BotCriticalError: If the config names a `secret_name` that is not defined
             in the secrets file.
     """
     config = dict(account_config)

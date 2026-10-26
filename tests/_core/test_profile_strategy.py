@@ -11,7 +11,7 @@ import pytest
 
 from robottraderslab import TimeFrame
 from robottraderslab._core import log_strategy_slots
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 from robottraderslab.strategies import (
     BookKeeper,
     OHLCVs,
@@ -53,7 +53,7 @@ class _TypedProfile(Profile):
 
     def __post_init__(self) -> None:
         if self.length <= 0:
-            raise StrategyCriticalError(f"length must be positive, got {self.length}")
+            raise BotCriticalError(f"length must be positive, got {self.length}")
 
 
 class _TypedStrategy(ProfileStrategy[_TypedProfile]):
@@ -330,6 +330,16 @@ class TestProfileBuild:
         assert profile.order_tag == "4h-r1"
         assert str(profile.symbol) == "BTC/USDT:USDT"
 
+    @pytest.mark.parametrize("tag", ["sl", "tp"])
+    def test_a_tag_a_bracket_id_ends_with_is_refused_at_load(self, tag):
+        section = {**SECTION, "tag": tag}
+
+        with pytest.raises(
+            BotCriticalError,
+            match=rf"profile 1 \(.*\): tag: '{tag}' ends a bracket's client order id",
+        ):
+            _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
+
     def test_defaults_when_a_section_leaves_a_field_out(self):
         strategy = _create(_TypedStrategy, [SECTION], TradingMode.BACKTEST, lookback=5)
 
@@ -343,7 +353,7 @@ class TestProfileBuild:
         section = {**SECTION, "pace": "slo"}
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"profile 1 \(BTC/USDT:USDT 4h\): pace: Input should be 'fast' or 'slow'",
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
@@ -352,13 +362,13 @@ class TestProfileBuild:
         section = {**SECTION, "lenght": 30}
 
         with pytest.raises(
-            StrategyCriticalError, match=r"profile 1 \(.*\): lenght: unknown key"
+            BotCriticalError, match=r"profile 1 \(.*\): lenght: unknown key"
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
 
     def test_a_required_field_left_out(self):
         with pytest.raises(
-            StrategyCriticalError, match=r"profile 2 \(4h\): symbol: Field required"
+            BotCriticalError, match=r"profile 2 \(4h\): symbol: Field required"
         ):
             _create(
                 _TypedStrategy,
@@ -371,7 +381,7 @@ class TestProfileBuild:
         section = {**SECTION, "length": 0}
 
         with pytest.raises(
-            StrategyCriticalError, match=r"profile 1 \(.*\): length must be positive"
+            BotCriticalError, match=r"profile 1 \(.*\): length must be positive"
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
 
@@ -379,7 +389,7 @@ class TestProfileBuild:
         section = {**SECTION, "symbol": "BTCUSDT"}
 
         with pytest.raises(
-            StrategyCriticalError, match="symbol: Invalid symbol format: BTCUSDT"
+            BotCriticalError, match="symbol: Invalid symbol format: BTCUSDT"
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
 
@@ -388,7 +398,7 @@ class TestProfileBuild:
         section = {**SECTION, "tag": tag}
 
         with pytest.raises(
-            StrategyCriticalError, match=f"tag: '{re.escape(tag)}' cannot contain"
+            BotCriticalError, match=f"tag: '{re.escape(tag)}' cannot contain"
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
 
@@ -396,7 +406,7 @@ class TestProfileBuild:
         section = {**SECTION, "tag": "abcdefghi"}
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"profile 1 \(.*\): tag: 'abcdefghi' is 9 bytes, over the 8-byte",
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
@@ -422,7 +432,7 @@ class TestSettings:
 
     def test_a_value_the_attribute_type_refuses(self):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"\[strategy\] key entry_order: Input should be 'trigger' or 'limit'",
         ):
             _create(
@@ -435,7 +445,7 @@ class TestSettings:
 
     def test_a_key_naming_no_attribute(self):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"unknown \[strategy\] key lookbak; it declares entry_order, lookback",
         ):
             _create(
@@ -444,19 +454,19 @@ class TestSettings:
 
     def test_a_key_on_a_strategy_declaring_none(self):
         with pytest.raises(
-            StrategyCriticalError, match=r"unknown \[strategy\] key fast_length$"
+            BotCriticalError, match=r"unknown \[strategy\] key fast_length$"
         ):
             _create(_BareStrategy, PROFILES, TradingMode.BACKTEST, fast_length=20)
 
     def test_an_attribute_without_a_default_left_out(self):
         with pytest.raises(
-            StrategyCriticalError, match=r"\[strategy\] key lookback is required"
+            BotCriticalError, match=r"\[strategy\] key lookback is required"
         ):
             _create(_TypedStrategy, [SECTION], TradingMode.BACKTEST)
 
     def test_a_class_variable_is_no_setting(self):
         with pytest.raises(
-            StrategyCriticalError, match=r"unknown \[strategy\] key market_type"
+            BotCriticalError, match=r"unknown \[strategy\] key market_type"
         ):
             _create(
                 _TypedStrategy,
@@ -511,7 +521,7 @@ class TestProfileSizing:
 
     def test_a_profile_naming_no_rule(self):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"profile 1 \(BTC/USDT:USDT 4h\): names no sizing rule; add one of "
             r"available_balance_ratio, equity_ratio, margin, my_kelly, my_risk_ratio",
         ):
@@ -521,7 +531,7 @@ class TestProfileSizing:
         section = {**SECTION, "total_balance_ratio": 0.15, "notional": 200}
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"profile 1 \(BTC/USDT:USDT 4h\): names several sizing rules, "
             r"total_balance_ratio, notional",
         ):
@@ -531,7 +541,7 @@ class TestProfileSizing:
         section = {**SECTION, "total_balance_ratio": 1.5}
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"profile 1 \(.*\): total_balance_ratio: `ratio` must be above 0.0",
         ):
             _create(_SizedStrategy, [section], TradingMode.BACKTEST)
@@ -540,7 +550,7 @@ class TestProfileSizing:
         section = {**SECTION, "margin": 0}
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"profile 1 \(BTC/USDT:USDT 4h\): margin: `margin` must be greater than 0",
         ):
             _create(_SizedStrategy, [section], TradingMode.BACKTEST)
@@ -549,7 +559,7 @@ class TestProfileSizing:
         section = {**SECTION, "risk_ratio": {"ratio": 0.02, "off": "equity"}}
 
         with pytest.raises(
-            StrategyCriticalError, match=r"risk_ratio: .*unexpected keyword argument"
+            BotCriticalError, match=r"risk_ratio: .*unexpected keyword argument"
         ):
             _create(_SizedStrategy, [section], TradingMode.BACKTEST)
 
@@ -563,7 +573,7 @@ class TestProfileSizing:
         section = {**SECTION, "notional": 200}
 
         with pytest.raises(
-            StrategyCriticalError, match=r"profile 1 \(.*\): notional: unknown key"
+            BotCriticalError, match=r"profile 1 \(.*\): notional: unknown key"
         ):
             _create(_TypedStrategy, [section], TradingMode.BACKTEST, lookback=5)
 
@@ -578,7 +588,7 @@ class TestStrategySizing:
 
     def test_a_strategy_naming_no_rule(self):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"_StrategySizedOnce: \[strategy\] names no sizing rule",
         ):
             _create(_StrategySizedOnce, [SECTION], TradingMode.BACKTEST)
@@ -652,9 +662,7 @@ class TestProfileChecks:
                 self._profiles = PROFILES
                 self._trading_mode = TradingMode.BACKTEST
 
-        with pytest.raises(
-            StrategyCriticalError, match=r"must call super\(\)\.__init__"
-        ):
+        with pytest.raises(BotCriticalError, match=r"must call super\(\)\.__init__"):
             _Unset().generate_trading_signals(object())
 
     def test_a_profile_lacking_a_field(self):
@@ -662,7 +670,7 @@ class TestProfileChecks:
             _NoTimeframeStrategy, [{"profile_id": "alpha"}], TradingMode.BACKTEST
         )
 
-        with pytest.raises(StrategyCriticalError, match="lacks timeframe"):
+        with pytest.raises(BotCriticalError, match="lacks timeframe"):
             strategy.generate_trading_signals(object())
 
     def test_profiles_sharing_a_profile_id(self):
@@ -672,7 +680,7 @@ class TestProfileChecks:
         ]
         strategy = _create(_BareStrategy, profiles, TradingMode.BACKTEST)
 
-        with pytest.raises(StrategyCriticalError, match="share a profile_id: alpha"):
+        with pytest.raises(BotCriticalError, match="share a profile_id: alpha"):
             strategy.generate_trading_signals(object())
 
 
@@ -728,7 +736,7 @@ class TestSlotLogging:
                 self._account = object()
 
         with caplog.at_level(logging.INFO):
-            with pytest.raises(StrategyCriticalError, match=r"super\(\)\.__init__"):
+            with pytest.raises(BotCriticalError, match=r"super\(\)\.__init__"):
                 log_strategy_slots(_Unset())
 
         assert caplog.messages == []

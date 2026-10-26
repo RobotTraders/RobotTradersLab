@@ -2,7 +2,7 @@ from typing import NoReturn, Protocol
 
 from .balance import Balance
 from .currency import Currency
-from .exceptions import StrategyCriticalError
+from .exceptions import BotCriticalError
 from .margin import MarginSettings
 from .order import (
     RESTING_ENTRY_KINDS,
@@ -28,7 +28,7 @@ class AccountSnapshot:
     the strategy books on it.
 
     Every accessor is a pure in-memory read. Only declared fields are
-    populated, and reading an undeclared one raises `StrategyCriticalError`,
+    populated, and reading an undeclared one raises `BotCriticalError`,
     so no read ever leaves the declared burst.
     """
 
@@ -77,12 +77,12 @@ class AccountSnapshot:
         of the declared symbols.
 
         Raises:
-            StrategyCriticalError: If balances were not declared, or no
+            BotCriticalError: If balances were not declared, or no
                 declared symbol carries the currency as its margin.
         """
         balances = self._declared(self._balances, "balances=True")
         if currency not in balances:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"The balance in {currency} was not read for account "
                 f"'{self._account_name}': a balance is read for the margin "
                 "currency of each declared symbol; include a symbol carrying it "
@@ -103,7 +103,7 @@ class AccountSnapshot:
         """
         equities = self._declared(self._equities, f"equity=[{currency!r}]")
         if currency not in equities:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"Equity in {currency} was not declared for account "
                 f"'{self._account_name}'; add it in setup() with "
                 f"requirements.account.add(account, equity=[{currency!r}])."
@@ -118,7 +118,7 @@ class AccountSnapshot:
         """Return the margin mode and leverage active on the symbol."""
         settings = self._declared(self._margin_settings, "margin_settings=True")
         if symbol not in settings:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"Margin settings for {symbol} were not declared for account "
                 f"'{self._account_name}'; include the symbol in setup() with "
                 "requirements.account.add(account, symbols=[...], margin_settings=True)."
@@ -143,7 +143,7 @@ class AccountSnapshot:
         in another currency than its margin.
 
         Raises:
-            StrategyCriticalError: If the symbol is quoted in another currency
+            BotCriticalError: If the symbol is quoted in another currency
                 than its margin and balances were not declared, or the symbol
                 was not.
         """
@@ -151,7 +151,7 @@ class AccountSnapshot:
             return 1.0
         rates = self._declared(self._conversion_rates, "balances=True")
         if symbol not in rates:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"A conversion rate for {symbol} was not read for account "
                 f"'{self._account_name}'; include the symbol in setup() with "
                 "requirements.account.add(account, symbols=[...], balances=True)."
@@ -181,6 +181,18 @@ class AccountSnapshot:
         beside the position's.
         """
         return self._resting_protections(OrderType.TAKE_PROFIT, symbol)
+
+    def _account_executions(self) -> list[Execution]:
+        """Whatever the engine read for the account, every symbol the venue
+        answered for included.
+        """
+        return self._executions or []
+
+    def _account_open_orders(self) -> list[OrderProtocol]:
+        return self._declared(self._open_orders, "open_orders=True")
+
+    def _account_positions(self) -> dict[Symbol, PositionSnapshot]:
+        return self._declared(self._positions, "positions=True")
 
     def _has_margin_settings(self, symbol: Symbol) -> bool:
         """A symbol the connector left out of the read, a contract the venue does
@@ -252,7 +264,7 @@ class AccountSnapshot:
         return [order for order in self.open_orders(symbol) if order.kind == kind]
 
     def _undeclared(self, declaration: str) -> NoReturn:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"The strategy read account state it did not declare for account "
             f"'{self._account_name}'; add it in setup() with "
             f"requirements.account.add(account, {declaration})."
@@ -286,11 +298,11 @@ class AccountSnapshots:
         """Return the snapshot taken for the account.
 
         Raises:
-            StrategyCriticalError: If the account declared no state to snapshot.
+            BotCriticalError: If the account declared no state to snapshot.
         """
         snapshot = self._by_account_name.get(account.name)
         if snapshot is None:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"No account state was declared for account '{account.name}'; "
                 "declare it in setup() with requirements.account.add(account, ...)."
             )

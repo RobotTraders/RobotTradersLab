@@ -6,6 +6,7 @@ from typing import Any
 
 from robottraderslab._core import (
     BASE_DELAY_SECONDS,
+    FLATTEN_TAG,
     MAX_ATTEMPTS,
     NO_ORDER_OVERRIDES,
     AccountRequirement,
@@ -28,13 +29,13 @@ from robottraderslab._core import (
     validate_price,
     validate_ratio,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .futures_cancel_order import CancelOrderByIdAction
 from .futures_cancel_orders import CancelOrdersForSymbolAction
 from .futures_capabilities import FuturesCapabilities
 from .futures_close_builder import FuturesCloseBuilder
-from .futures_close_position import validate_closing_ratio
+from .futures_close_position import ClosePositionAction, validate_closing_ratio
 from .futures_exchange_protocol import FuturesExchangeProtocol
 from .futures_order_batch import (
     BatchableOrder,
@@ -265,7 +266,7 @@ class FuturesAccount:
                 account finishes with its `build()`.
 
         Raises:
-            StrategyCriticalError: If the builder's `build()` refuses the order.
+            BotCriticalError: If the builder's `build()` refuses the order.
         """
         return self.modify_orders([OrderModification(order_id=order_id, order=order)])
 
@@ -284,7 +285,7 @@ class FuturesAccount:
 
         Raises:
             ValueError: If no modifications are given.
-            StrategyCriticalError: If a builder's `build()` refuses its order.
+            BotCriticalError: If a builder's `build()` refuses its order.
         """
         replacements = [
             OrderReplacement(
@@ -374,7 +375,7 @@ class FuturesAccount:
 
         Raises:
             ValueError: If no orders are given.
-            StrategyCriticalError: If a builder's `build()` refuses its order.
+            BotCriticalError: If a builder's `build()` refuses its order.
         """
         built = [finished(order) for order in orders]
         if not built:
@@ -504,6 +505,11 @@ class FuturesAccount:
         )
         return attribute_fill_effects(executions, positions)
 
+    def _close_removed_position(self, symbol: Symbol) -> ClosePositionAction:
+        return ClosePositionAction(
+            exchange=self._exchange, symbol=symbol, tag=FLATTEN_TAG
+        )
+
     def _create_buy_order(
         self,
         symbol: Symbol,
@@ -620,7 +626,7 @@ class FuturesAccount:
             unlisted = self._unlisted.get(symbol)
             if unlisted is not None:
                 raise SymbolNotListedError(unlisted) from None
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"{self.name} trades {symbol} without declaring it: name the "
                 "symbol in requirements.account.add(symbols=...) so the engine "
                 "reads its trading rules and state."

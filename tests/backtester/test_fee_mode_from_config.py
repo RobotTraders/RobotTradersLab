@@ -5,6 +5,8 @@ from robottraderslab.backtester import run_backtest
 from robottraderslab.bootstrap import BotConfig
 
 _CONFIG = """\
+name = "test-bot"
+
 [backtest]
 initial_balance = {{ USDT = 10000.0 }}
 maker_fee_rate = 0.001

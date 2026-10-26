@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from robottraderslab._core import run_async
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 
 async def _loop_identity() -> asyncio.AbstractEventLoop:
@@ -15,7 +15,7 @@ async def _refuses() -> None:
 
 
 async def _stops() -> None:
-    raise StrategyCriticalError("what the caller actually needs to read")
+    raise BotCriticalError("what the caller actually needs to read")
 
 
 class TestRunAsync:
@@ -40,9 +40,9 @@ class TestRunAsync:
         assert failure.value.__context__ is None
 
     def test_a_coroutine_that_raises_a_critical(self):
-        with pytest.raises(StrategyCriticalError, match="what the caller actually"):
+        with pytest.raises(BotCriticalError, match="what the caller actually"):
             run_async(_stops())
 
     async def test_a_coroutine_that_raises_a_critical_from_a_running_loop(self):
-        with pytest.raises(StrategyCriticalError, match="what the caller actually"):
+        with pytest.raises(BotCriticalError, match="what the caller actually"):
             run_async(_stops())

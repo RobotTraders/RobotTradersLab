@@ -32,7 +32,7 @@ class BookKeeper:
         Raises:
             ActionAlreadyExistsError: If the action is already booked.
             ActionNotFoundError: If `after` names an action that is not booked.
-            StrategyCriticalError: If the builder's `build()` refuses the order.
+            BotCriticalError: If the builder's `build()` refuses the order.
         """
         action = finished(action)
         if action.id in self._actions:

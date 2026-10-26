@@ -47,7 +47,7 @@ async def execute_trading_actions(
 
     Raises:
         ExchangeCriticalError: If the venue is unusable.
-        StrategyCriticalError: If an action names a symbol the venue cannot
+        BotCriticalError: If an action names a symbol the venue cannot
             trade.
     """
     execution_callbacks = list(on_order_filled)
@@ -83,7 +83,7 @@ async def execute_setting(
 
     Raises:
         ExchangeCriticalError: If the venue is unusable.
-        StrategyCriticalError: If the action names a symbol the venue cannot
+        BotCriticalError: If the action names a symbol the venue cannot
             trade.
     """
     return await _attempt(action, max_attempts, base_delay) is not None

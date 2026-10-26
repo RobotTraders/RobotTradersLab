@@ -90,7 +90,9 @@ async def test_a_window_recording_a_lower_cap_of_the_same_window_leaves_what_ano
     assert claims == 4
 
 
-async def test_an_unreachable_state_never_blocks(caplog, virtual_sleeps):
+async def test_an_unreachable_state_never_blocks(
+    caplog, make_unshared_report_levels, virtual_sleeps
+):
     state_file_path(SCOPE).parent.mkdir(parents=True, exist_ok=True)
     state_file_path(SCOPE).mkdir()
     window = _make_window()
@@ -100,7 +102,7 @@ async def test_an_unreachable_state_never_blocks(caplog, virtual_sleeps):
             await window.wait(KEY)
 
     virtual_sleeps.assert_not_called()
-    assert caplog.text.count("not shared between processes") == 1
+    assert make_unshared_report_levels() == ["ERROR"]
 
 
 async def test_a_window_started_later_paces_from_the_last_announcement(

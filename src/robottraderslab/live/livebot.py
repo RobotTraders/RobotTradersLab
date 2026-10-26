@@ -24,6 +24,7 @@ from robottraderslab._core import (
     assemble_available_ohlcvs_from_requirements,
     candle_closes_at,
     candle_windows,
+    clean_removed_profiles,
     confirm_booked_protections,
     execute_trading_actions,
     fetch_account_snapshots,
@@ -35,9 +36,9 @@ from robottraderslab._core import (
     widen_tracked_positions,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
-    StrategyCriticalError,
 )
 from robottraderslab.strategies import (
     AccountSnapshots,
@@ -64,6 +65,7 @@ class LiveBot:
         on_placement: Iterable[OnOrderPlaced] = (),
         max_attempts: int = MAX_ATTEMPTS,
         base_delay: float = BASE_DELAY_SECONDS,
+        clean_removed_profiles: bool = True,
         requirements_factory: Callable[[], StrategyRequirements] = StrategyRequirements,
     ):
         """Initialise a multi-timeframe live trading bot.
@@ -76,6 +78,8 @@ class LiveBot:
             on_placement: Notified once for each order the venue accepted.
             max_attempts: Total retry attempts for transient errors.
             base_delay: Base delay in seconds (doubled on each retry).
+            clean_removed_profiles: Off, each cycle names what it would have
+                cleaned and leaves it.
             requirements_factory: Builds the requirements `setup` declares
                 into, fresh for each cycle.
         """
@@ -87,6 +91,7 @@ class LiveBot:
         self._on_placement = list(on_placement)
         self._max_attempts = max_attempts
         self._base_delay = base_delay
+        self._clean_removed_profiles = clean_removed_profiles
 
     async def run(self) -> None:
         """Run one complete trading cycle."""
@@ -277,6 +282,9 @@ class LiveBot:
         """Process a single timestamp across all triggered timeframes."""
         bookkeeper = BookKeeper()
 
+        await self._book_removed_profile_cleanup(
+            requirements, account_snapshots, bookkeeper
+        )
         try:
             self._strategy.book_trading_actions(
                 ohlcvs,
@@ -308,6 +316,29 @@ class LiveBot:
         if post_execution_callbacks:
             await _invoke_callbacks(post_execution_callbacks)
         return bookkeeper.list_actions()
+
+    async def _book_removed_profile_cleanup(
+        self,
+        requirements: StrategyRequirements,
+        account_snapshots: AccountSnapshots,
+        bookkeeper: BookKeeper,
+    ) -> None:
+        """The cleanup is no part of the strategy's own booking, so a failure
+        of its reads costs the cleanup of this cycle and nothing else.
+        """
+        try:
+            await clean_removed_profiles(
+                requirements.account,
+                account_snapshots,
+                bookkeeper,
+                clean=self._clean_removed_profiles,
+                max_attempts=self._max_attempts,
+                base_delay=self._base_delay,
+            )
+        except ExchangeRecoverableError as e:
+            logger.warning(f"Cleanup of removed profiles skipped: {e}")
+        except Exception as e:
+            logger.error(f"Internal error cleaning removed profiles, skipped: {e}")
 
     async def _notify_entry_fills(
         self,
@@ -460,7 +491,7 @@ async def _invoke_callbacks(callbacks: list[Callable[[], Awaitable[None]]]) -> N
         return_exceptions=True,
     )
     for i, result in enumerate(results):
-        if isinstance(result, (ExchangeCriticalError, StrategyCriticalError)):
+        if isinstance(result, (ExchangeCriticalError, BotCriticalError)):
             raise result
         elif isinstance(result, ExchangeRecoverableError):
             logger.warning(f"Exchange rejected operation in callback {i}: {result}")

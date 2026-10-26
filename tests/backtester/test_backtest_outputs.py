@@ -27,6 +27,7 @@ ETH_USDT_PERP = Symbol.create("ETH/USDT:USDT")
 ZERO_POINT_ONE_BTC_IN_STEPS = 10_000_000
 
 REPORT_PREAMBLE = """
+name = "test-bot"
 [strategy]
 strategy_class = "impulse"
 
@@ -34,6 +35,7 @@ strategy_class = "impulse"
 """
 
 PROFILE_CONFIG_TOML = """
+name = "test-bot"
 [strategy]
 strategy_class = "impulse"
 
@@ -930,6 +932,8 @@ class TestCreateAnalyser:
 
         assert analyser.get_summary_metrics() == SummaryMetrics(
             sharpe_ratio=0.0,
+            sortino_ratio=0.0,
+            calmar_ratio=0.0,
             roi=0.0,
             max_drawdown=0.0,
             win_rate=0.0,
@@ -1201,21 +1205,19 @@ class TestSavedRunFolder:
         self,
         outputs,
         bot_config,
-        monkeypatch: pytest.MonkeyPatch,
+        ohlcv_provider,
         caplog: pytest.LogCaptureFixture,
     ):
-        monkeypatch.setattr(
-            "robottraderslab.analyser.analyser.load_lightweight_chart_indicators",
-            Mock(side_effect=RuntimeError("boom")),
-        )
+        ohlcv_provider.fetch_ohlcv.side_effect = RuntimeError("boom")
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.ERROR):
             outputs.create_analyser()
 
         run_folder = self._run_folder(bot_config)
         assert (run_folder / "impulse-bot-example.toml").exists()
         assert (run_folder / "report.txt").exists()
         assert not list(run_folder.glob("*.html"))
+        assert [record.levelno for record in caplog.records] == [logging.ERROR]
         assert "No chart page written" in caplog.text
 
     def test_a_run_that_closed_no_trade_saves_no_run_folder(self, outputs, bot_config):

@@ -8,7 +8,7 @@ from robottraderslab._core.actions.exceptions import (
     ActionAlreadyExistsError,
     ActionNotFoundError,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.strategies import BookKeeper
 
 BTC_USDT = Symbol.create("BTC/USDT:USDT")
@@ -77,7 +77,7 @@ def test_add_books_the_order_a_builder_builds(bookkeeper, account):
 
 
 def test_unsized_builder_handed_to_the_bookkeeper(bookkeeper, account):
-    with pytest.raises(StrategyCriticalError, match="The order has no size"):
+    with pytest.raises(BotCriticalError, match="The order has no size"):
         bookkeeper.add(account.long_entry(BTC_USDT))
 
     assert bookkeeper.list_actions() == []

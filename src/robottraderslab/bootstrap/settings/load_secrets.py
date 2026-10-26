@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 type SecretsByName = dict[str, dict[str, Any]]
 
@@ -42,7 +42,7 @@ def load_secrets(secrets_file: str | Path | None) -> SecretsByName:
     for secret in raw_secrets["secrets"]:
         name = secret.get("name")
         if not name:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 "Secret without a name found (missing or empty). "
                 "Please ensure all secrets have a unique `name` field."
             )
@@ -54,7 +54,7 @@ def load_secrets(secrets_file: str | Path | None) -> SecretsByName:
             if key != "name"
         }
         if secrets_by_name.setdefault(name, secret_copy) is not secret_copy:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"Duplicate secret name found: `{name}`. "
                 "Please ensure all secrets have a unique `name` field."
             )
@@ -89,7 +89,7 @@ def resolve_secret_references(
         configs: Mapping of block name to its raw config.
 
     Raises:
-        StrategyCriticalError: If a block references a secret name that is not defined.
+        BotCriticalError: If a block references a secret name that is not defined.
     """
     return {
         name: _merge_referenced_secret(name, config, secrets_by_name)
@@ -105,7 +105,7 @@ def _merge_referenced_secret(
         return dict(config)
 
     if secret_name not in secrets_by_name:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"`{name}` references secret `{secret_name}`, "
             "which is not defined in the secrets file."
         )

@@ -9,9 +9,10 @@ import pytest
 import robottraderslab.backtester.command
 from robottraderslab.backtester.command import main
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 
 DECLARED = {
+    "name": "test-bot",
     "strategy": {"strategy_class": "fake-strategy-99"},
     "backtest": {
         "initial_balance": {"USDT": 1000},
@@ -93,9 +94,9 @@ def test_run_backtest_is_called_with_the_loaded_config(bot_config, run_backtest)
 
 
 def test_a_config_file_that_cannot_be_read(read_bot_config, run_backtest):
-    read_bot_config.side_effect = StrategyCriticalError("no config file at `nope`")
+    read_bot_config.side_effect = BotCriticalError("no config file at `nope`")
 
-    with pytest.raises(StrategyCriticalError, match="no config file"):
+    with pytest.raises(BotCriticalError, match="no config file"):
         _run()
 
     run_backtest.assert_not_called()
@@ -167,7 +168,7 @@ def test_no_chart_is_drawn_when_asked(run_backtest):
 @pytest.mark.parametrize(
     "failure",
     [
-        StrategyCriticalError("no indicators"),
+        BotCriticalError("no indicators"),
         ExchangeCriticalError("no market data"),
         RuntimeError("renderer crashed"),
     ],

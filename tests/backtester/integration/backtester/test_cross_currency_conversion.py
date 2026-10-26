@@ -13,7 +13,7 @@ from robottraderslab.backtester.simulator import (
     SimulatedFuturesExchange,
     fee_model_for,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.ohlcv_provider import MockOHLCVProvider
 from robottraderslab.strategies import (
@@ -159,5 +159,5 @@ async def test_no_conversion_data_available():
     provider.fetch_ohlcv.side_effect = RuntimeError("symbol not supported")
     backtester = make_backtester(PassiveStrategy(AUD_CAD_PERP), engine, provider)
 
-    with pytest.raises(StrategyCriticalError, match="No conversion data"):
+    with pytest.raises(BotCriticalError, match="No conversion data"):
         await backtester.run()

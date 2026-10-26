@@ -6,14 +6,14 @@ import pytest
 
 import robottraderslab.live.report.command
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.live.report.command import main
 
 
 @pytest.fixture
 def bot_config() -> BotConfig:
     return BotConfig.model_validate(
-        {"strategy": {"strategy_class": "fake-strategy-99"}}
+        {"name": "test-bot", "strategy": {"strategy_class": "fake-strategy-99"}}
     )
 
 
@@ -47,9 +47,9 @@ def test_the_report_covers_the_requested_window(bot_config, run_report):
 
 
 def test_a_config_file_that_cannot_be_read(read_bot_config, run_report):
-    read_bot_config.side_effect = StrategyCriticalError("There is no config file")
+    read_bot_config.side_effect = BotCriticalError("There is no config file")
 
-    with pytest.raises(StrategyCriticalError, match="There is no config file"):
+    with pytest.raises(BotCriticalError, match="There is no config file"):
         main(config=Path("missing.toml"), days=90)
 
     run_report.assert_not_called()

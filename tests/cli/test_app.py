@@ -17,9 +17,9 @@ from robottraderslab._core import (
 )
 from robottraderslab.cli import app, main
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeTransientError,
-    StrategyCriticalError,
 )
 from robottraderslab.scaffold import ExampleError
 
@@ -115,11 +115,22 @@ BOUNDARY_REPORTS = [
     (
         ExchangeCriticalError("the venue rejected the credentials"),
         "Critical exchange error",
+        logging.CRITICAL,
         EX_CONFIG,
     ),
-    (StrategyCriticalError("no such strategy"), "Critical strategy error", EX_CONFIG),
-    (ExchangeTransientError("the venue timed out"), "Venue error", EX_TEMPFAIL),
-    (RuntimeError("unexpected failure"), "Fatal error", 1),
+    (
+        BotCriticalError("no such strategy"),
+        "Critical bot error",
+        logging.CRITICAL,
+        EX_CONFIG,
+    ),
+    (
+        ExchangeTransientError("the venue timed out"),
+        "Venue error",
+        logging.ERROR,
+        EX_TEMPFAIL,
+    ),
+    (RuntimeError("unexpected failure"), "Fatal error", logging.ERROR, 1),
 ]
 
 WORKSPACE_COMMANDS = [
@@ -452,9 +463,11 @@ def test_unknown_command(cli):
     assert attempted.exit_code == 2
 
 
-@pytest.mark.parametrize(("failure", "reported", "exit_code"), BOUNDARY_REPORTS)
+@pytest.mark.parametrize(
+    ("failure", "reported", "level", "exit_code"), BOUNDARY_REPORTS
+)
 def test_what_stops_the_engine_is_recorded(
-    failure, reported, exit_code, monkeypatch, caplog, replace_command
+    failure, reported, level, exit_code, monkeypatch, caplog, replace_command
 ):
     replace_command("live", _raising(failure))
     monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
@@ -464,6 +477,7 @@ def test_what_stops_the_engine_is_recorded(
         main()
 
     assert exc_info.value.code == exit_code
+    assert [record.levelno for record in caplog.records] == [level]
     assert reported in caplog.text
     assert str(failure) in caplog.text
 
@@ -506,7 +520,7 @@ def test_logging_is_flushed_after_a_command_completes(monkeypatch, replace_comma
 def test_the_terminal_gets_one_sentence_naming_the_cause(
     monkeypatch, capsys, replace_command
 ):
-    failure = StrategyCriticalError(
+    failure = BotCriticalError(
         "cannot load the configured notifiers: no plugin named 'discrod'"
     )
     replace_command("live", _raising(failure))

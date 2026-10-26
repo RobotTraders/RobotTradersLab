@@ -9,9 +9,9 @@ import pytz
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab._core import DataError, DownloadError
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeTransientError,
-    StrategyCriticalError,
 )
 from robottraderslab.exchanges import OhlcvAdapterProtocol, OhlcvData, no_candles
 from robottraderslab.ohlcv_provider.exceptions import PartialDownloadError
@@ -354,9 +354,9 @@ class TestFetchMissingDataErrorHandling:
         "failure",
         [
             ExchangeCriticalError("key revoked"),
-            StrategyCriticalError("key revoked"),
+            BotCriticalError("key revoked"),
         ],
-        ids=["exchange_critical", "strategy_critical"],
+        ids=["exchange_critical", "bot_critical"],
     )
     async def test_a_critical_error_propagates_untouched(
         self, mock_adapter, sample_symbol, sample_timeframe, failure

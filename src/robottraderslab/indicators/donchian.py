@@ -22,7 +22,7 @@ def donchian_midline(
     leaves empty over a weekend or a holiday hold neither extreme.
 
     Raises:
-        StrategyCriticalError: If the series holds fewer published candles than
+        BotCriticalError: If the series holds fewer published candles than
             `period`.
     """
     published = published_candles(high, low)

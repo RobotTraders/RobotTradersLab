@@ -80,11 +80,39 @@ class TestGridSearchResults:
         ]
         assert loaded.dataframe["error"].isna().tolist() == [True, False]
 
-    def test_a_file_that_to_csv_did_not_write_names_itself(self, tmp_path):
-        foreign = tmp_path / "from_somewhere_else.csv"
-        foreign.write_text(
-            "strategy.profiles.fast_ma_length,roi\n10,0.95\n", encoding="utf-8"
+    @pytest.mark.parametrize(
+        ("content", "named"),
+        [
+            ("strategy.profiles.fast_ma_length,roi\n10,0.95\n", "`error`"),
+            (
+                "strategy.profiles.fast_ma_length,strategy.profiles.slow_ma_length,"
+                "roi,win_rate,max_drawdown,risk_reward_ratio,sharpe_ratio,"
+                "closed_trades,error\n10,20,0.95,0.5,-0.2,1.5,1.8,12,\n",
+                "`sortino_ratio`, `calmar_ratio`",
+            ),
+        ],
+    )
+    def test_a_file_lacking_a_column_to_csv_writes_names_it(
+        self, tmp_path, content, named
+    ):
+        incomplete = tmp_path / "earlier_results.csv"
+        incomplete.write_text(content, encoding="utf-8")
+
+        with pytest.raises(ValueError, match=named) as refusal:
+            GridSearchResults.from_csv(incomplete)
+
+        assert str(incomplete) in str(refusal.value)
+
+    def test_a_file_holding_one_parameter_column_names_it(self, tmp_path):
+        one_parameter = tmp_path / "one_parameter_results.csv"
+        one_parameter.write_text(
+            "strategy.profiles.fast_ma_length,roi,win_rate,max_drawdown,"
+            "risk_reward_ratio,sharpe_ratio,sortino_ratio,calmar_ratio,"
+            "closed_trades,error\n10,0.95,0.5,-0.2,1.5,1.8,2.4,3.1,12,\n",
+            encoding="utf-8",
         )
 
-        with pytest.raises(ValueError, match="from_somewhere_else.csv"):
-            GridSearchResults.from_csv(foreign)
+        with pytest.raises(ValueError, match="fast_ma_length") as refusal:
+            GridSearchResults.from_csv(one_parameter)
+
+        assert str(one_parameter) in str(refusal.value)

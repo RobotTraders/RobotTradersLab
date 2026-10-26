@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from robottraderslab._core import OHLCVProviderProtocol
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.ohlcv_provider import (
     CSVOHLCVProvider,
     ExchangeOHLCVProvider,
@@ -64,13 +64,13 @@ def require_ohlcv_provider(
             when the config was not read from one.
 
     Raises:
-        StrategyCriticalError: If the table names no source, or the named
+        BotCriticalError: If the table names no source, or the named
             source is missing a key it needs or is given one it does not take.
     """
     missing, unknown = _ohlcv_provider_key_faults(ohlcv_provider_config)
     if not missing and not unknown:
         return
-    raise StrategyCriticalError(
+    raise BotCriticalError(
         _broken_ohlcv_provider_message(section_label, config_file, missing, unknown)
     )
 

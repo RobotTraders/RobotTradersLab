@@ -4,7 +4,12 @@ from typing import Annotated
 
 from pydantic import AfterValidator, ConfigDict
 
-from .actions.members import ProfileTag, profile_tag, require_within_budget
+from .actions.members import (
+    ProfileTag,
+    profile_tag,
+    require_not_a_bracket_suffix,
+    require_within_budget,
+)
 from .position_tracker import TrackingId
 from .symbol import Symbol
 from .timeframes import TimeFrame
@@ -16,6 +21,7 @@ def _carryable(tag: str) -> str:
     if any(char in tag for char in _RESERVED_TAG_CHARACTERS):
         raise ValueError(f"'{tag}' cannot contain {list(_RESERVED_TAG_CHARACTERS)}")
     require_within_budget(tag)
+    require_not_a_bracket_suffix(tag)
     return tag
 
 
@@ -37,8 +43,8 @@ class Profile:
         timeframe: The candles the profile trades on.
         tag: What tells the profile from another on the same symbol and
             timeframe; empty when nothing has to. At most 8 bytes, without
-            `@`, `-`, `/`, `:` or a space, so it fits every venue's client
-            order id.
+            `@`, `-`, `/`, `:` or a space, and neither `sl` nor `tp`, so it fits
+            every venue's client order id and reads on no venue as a bracket's.
     """
 
     __pydantic_config__ = ConfigDict(extra="forbid")

@@ -13,9 +13,9 @@ from robottraderslab._core import (
     to_quantity,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeRecoverableError,
     NoOpenPositionError,
-    StrategyCriticalError,
 )
 from robottraderslab.exchanges import (
     Balance,
@@ -352,17 +352,22 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
     ) -> PlacedOrder:
         """
         Raises:
-            StrategyCriticalError: Always, whatever the symbol and the distance.
+            BotCriticalError: Always, whatever the symbol and the distance.
         """
-        raise StrategyCriticalError(f"{symbol}: the simulator offers no trailing stop")
+        raise BotCriticalError(f"{symbol}: the simulator offers no trailing stop")
 
     async def update_position_stop_loss(
         self,
         symbol: Symbol,
         trigger_price: float,
         trigger_type: TriggerType = TriggerType.DEFAULT,
+        client_order_id: str | None = None,
     ) -> PlacedOrder:
         """Update the stop-loss trigger price of an open position.
+
+        Args:
+            client_order_id: Not carried; the simulator sets no client order id
+                on the order it updates.
 
         Raises:
             NoOpenPositionError: If no open position exists for `symbol`.
@@ -382,8 +387,13 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         symbol: Symbol,
         trigger_price: float,
         trigger_type: TriggerType = TriggerType.DEFAULT,
+        client_order_id: str | None = None,
     ) -> PlacedOrder:
         """Update the take-profit trigger price of an open position.
+
+        Args:
+            client_order_id: Not carried; the simulator sets no client order id
+                on the order it updates.
 
         Raises:
             NoOpenPositionError: If no open position exists for `symbol`.

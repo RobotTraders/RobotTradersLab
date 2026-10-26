@@ -1,8 +1,14 @@
 import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
 
 from robottraderslab._core import (
+    EX_TEMPFAIL,
     OrderOverrides,
     auto_configure_notebook_logging,
+    hold_instance_lock,
+    name_process,
     retry_on_transient,
     run_async,
 )
@@ -18,7 +24,7 @@ from robottraderslab.bootstrap import (
     load_strategy,
     require_ohlcv_provider,
 )
-from robottraderslab.exceptions import ExchangeRecoverableError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeRecoverableError
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.strategies import TradingMode, TradingSystem
 
@@ -27,13 +33,27 @@ from .livebot import LiveBot
 logger = logging.getLogger(__name__)
 
 
+def run_alone(config: Path, run: Callable[[], int]) -> int:
+    """One instance of a config acts on its accounts at a time, since two would
+    act twice.
+    """
+    with hold_instance_lock(config) as held:
+        if not held:
+            logger.warning(
+                "%s is already trading in another process, exiting", config.name
+            )
+            return EX_TEMPFAIL
+        return run()
+
+
 def run_livebot(bot_config: BotConfig) -> None:
     """Run one live cycle: read the market, then book and execute on the venue.
 
     Raises:
-        StrategyCriticalError: If the bot declares no `[live]` section.
+        BotCriticalError: If the bot declares no `[live]` section.
     """
     auto_configure_notebook_logging()
+    name_process(bot_config.name, datetime.now(UTC))
     run_async(_run_livebot(bot_config))
 
 
@@ -57,6 +77,7 @@ async def _run_livebot(bot_config: BotConfig) -> None:
 
     strategy = load_strategy(
         bot_config.strategy.model_dump(),
+        config_file=bot_config.config_file,
         account=account,
         trading_system=TradingSystem(trading_mode=TradingMode.LIVE),
         config_dir=config_dir,
@@ -69,6 +90,7 @@ async def _run_livebot(bot_config: BotConfig) -> None:
         ohlcv_provider,
         on_fill=on_fill,
         on_placement=on_placement,
+        clean_removed_profiles=live_config.clean_removed_profiles,
         max_attempts=live_config.retry.max_attempts,
         base_delay=live_config.retry.base_delay_seconds,
     )
@@ -110,8 +132,8 @@ def require_live_config(bot_config: BotConfig) -> LiveConfig:
     """Read the section a run cannot trade without.
 
     Raises:
-        StrategyCriticalError: If the bot declares no `[live]` section.
+        BotCriticalError: If the bot declares no `[live]` section.
     """
     if bot_config.live is None:
-        raise StrategyCriticalError("`[live]` section is required to trade live")
+        raise BotCriticalError("`[live]` section is required to trade live")
     return bot_config.live

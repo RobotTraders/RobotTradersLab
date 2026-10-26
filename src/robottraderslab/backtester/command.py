@@ -7,7 +7,7 @@ from robottraderslab.bootstrap import (
     load_secrets,
     report_unavailable_notifiers,
 )
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 
 from .backtest_logging import setup_backtest_logging
 from .backtest_outputs import BacktestOutputs
@@ -26,7 +26,7 @@ def main(
     """Replay the strategy the config declares over historical candles.
 
     Raises:
-        StrategyCriticalError: If the config is unusable.
+        BotCriticalError: If the config is unusable.
         ExchangeCriticalError: If the run cannot reach what it needs.
         RuntimeError: If the run closed no trade, so there is nothing to report.
     """
@@ -69,5 +69,5 @@ def _analyse(
         return
     try:
         analyser.plot_candlesticks(indicators_name=indicators_name)
-    except (Exception, ExchangeCriticalError, StrategyCriticalError):
+    except (Exception, ExchangeCriticalError, BotCriticalError):
         logger.warning("No chart drawn for `%s`", indicators_name, exc_info=True)

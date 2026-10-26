@@ -4,15 +4,17 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .account_snapshot import AccountSnapshot
-from .actions.members import ProfileTag, tag_of
-from .exceptions import StrategyCriticalError
-from .order import Execution, OrderSide
+from .actions.members import BRACKET_SUFFIXES, ProfileTag, tag_of
+from .exceptions import BotCriticalError
+from .order import Execution, OrderSide, OrderType
 from .position import PositionSide
 from .position_tracker import TrackedPosition, TrackingId, signed_position
 from .quantity import StepCount, to_quantity, to_step_count
 from .symbol import Symbol
 
 logger = logging.getLogger(__name__)
+
+_PROTECTION_KINDS = frozenset({OrderType.STOP_LOSS, OrderType.TAKE_PROFIT})
 
 
 @dataclass(slots=True)
@@ -64,7 +66,7 @@ class ExchangePositionTracker:
             tags: The tag each declared id's own orders carry.
 
         Raises:
-            StrategyCriticalError: If tags leave a declared id untagged, or
+            BotCriticalError: If tags leave a declared id untagged, or
                 one is shared by two tracking ids on one symbol.
         """
         _require_every_id_tagged(ids_by_symbol, tags)
@@ -157,11 +159,47 @@ class ExchangePositionTracker:
             if cursor.unattributed_steps != 0:
                 _log_unattributed(symbol, cursor.unattributed_steps, read_since)
 
+    def _attribute(
+        self, symbol: Symbol, execution: Execution, before: StepCount, after: StepCount
+    ) -> TrackingId | None:
+        tracking_id = self._owner(symbol, execution)
+        if (
+            tracking_id is None
+            and is_unlabelled_protection(execution)
+            and not _passes_through_flat(before, after)
+        ):
+            return self._closed_id(symbol, after - before)
+        return tracking_id
+
     def _clear(self, symbol: Symbol, cursor: _SymbolCursor) -> None:
         for tracking_id in self._ids_by_symbol[symbol]:
             self._exposure.pop(tracking_id, None)
         cursor.external_steps = 0
         cursor.external_opened_at = None
+
+    def _closed_id(self, symbol: Symbol, signed_steps: StepCount) -> TrackingId | None:
+        """A protection reduces the position it closes and never turns it, so
+        an id holding less than the fill closes did not close it alone.
+        """
+        closable: TrackingId | None = None
+        closable_count = 0
+        matching: TrackingId | None = None
+        matching_count = 0
+        for tracking_id in self._ids_by_symbol[symbol]:
+            held = self._exposure.get(tracking_id, 0)
+            if held * signed_steps < 0:
+                closable = tracking_id
+                closable_count += 1
+                if held == -signed_steps:
+                    matching = tracking_id
+                    matching_count += 1
+        if closable_count == 1 and closable is not None:
+            if abs(self._exposure[closable]) >= abs(signed_steps):
+                return closable
+            return None
+        if matching_count == 1:
+            return matching
+        return None
 
     def _fold(
         self,
@@ -183,13 +221,18 @@ class ExchangePositionTracker:
         outside, a liquidation closing only what the declared ids held, has
         nothing outside to report.
 
+        A stop-loss or take-profit the venue fires carries no label of its
+        own, so one taking the venue's position short of flat belongs to the
+        id holding what it closes: the only one on the side it closes, or the
+        one whose exposure it equals when several hold it.
+
         Folding in whole steps, the unit a fill is never finer than, keeps
         two fills that cancel exactly from leaving any residue behind.
         """
         before = cursor.net_steps
         after = before + signed_steps
         cursor.net_steps = after
-        tracking_id = self._owner(symbol, execution)
+        tracking_id = self._attribute(symbol, execution, before, after)
         if tracking_id is not None:
             self._exposure[tracking_id] = (
                 self._exposure.get(tracking_id, 0) + signed_steps
@@ -227,7 +270,7 @@ class ExchangePositionTracker:
         self._unanchored.discard(symbol)
         self._reporting.discard(symbol)
         self._clear(symbol, cursor)
-        self._walk(symbol, cursor, _on_symbol(executions, symbol))
+        self._walk(symbol, cursor, on_symbol(executions, symbol))
         self._settle(symbol, cursor, account_snapshot)
         return cursor
 
@@ -257,9 +300,25 @@ class ExchangePositionTracker:
     ) -> None:
         new_executions = _new_since(cursor, executions)
         for execution in new_executions:
-            self._fold(symbol, cursor, execution, _signed_steps(execution))
+            self._fold(symbol, cursor, execution, signed_steps(execution))
         if new_executions:
             _advance_cursor(cursor, new_executions)
+
+
+def is_unlabelled_protection(execution: Execution) -> bool:
+    if execution.kind not in _PROTECTION_KINDS:
+        return False
+    tag = tag_of(execution.client_order_id)
+    return tag is None or tag in BRACKET_SUFFIXES
+
+
+def on_symbol(executions: Iterable[Execution], symbol: Symbol) -> list[Execution]:
+    return [execution for execution in executions if execution.symbol == symbol]
+
+
+def signed_steps(execution: Execution) -> StepCount:
+    steps = to_step_count(execution.quantity)
+    return steps if execution.side == OrderSide.BUY else -steps
 
 
 def _require_every_id_tagged(
@@ -271,7 +330,7 @@ def _require_every_id_tagged(
     }
     missing = sorted(declared_ids - tags.keys())
     if missing:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Tracking id(s) {missing} have no tag; give every id declared in "
             "requirements.tracker.add(tags=...) its own tag."
         )
@@ -290,7 +349,7 @@ def _id_by_symbol_tag(
             tag = tags[tracking_id]
             collision = inverted.get((symbol, tag))
             if collision is not None:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"Tracking ids '{collision}' and '{tracking_id}' share the "
                     f"tag '{tag}' on {symbol}; give every tracking id on a "
                     "symbol its own tag."
@@ -357,10 +416,6 @@ def _passes_through_flat(before: StepCount, after: StepCount) -> bool:
     return after == 0 or (before > 0) != (after > 0)
 
 
-def _on_symbol(executions: Iterable[Execution], symbol: Symbol) -> list[Execution]:
-    return [execution for execution in executions if execution.symbol == symbol]
-
-
 def _new_since(
     cursor: _SymbolCursor, executions: Iterable[Execution]
 ) -> list[Execution]:
@@ -383,11 +438,6 @@ def _new_since(
     return sorted(
         new, key=lambda execution: (execution.timestamp, execution.execution_id)
     )
-
-
-def _signed_steps(execution: Execution) -> StepCount:
-    steps = to_step_count(execution.quantity)
-    return steps if execution.side == OrderSide.BUY else -steps
 
 
 def _advance_cursor(cursor: _SymbolCursor, folded: Sequence[Execution]) -> None:

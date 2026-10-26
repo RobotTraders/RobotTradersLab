@@ -9,7 +9,7 @@ import pytest
 
 from robottraderslab._core import Balance, Execution, OrderSide, Symbol
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import FuturesExchangeProtocol
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.live.report.runners import run_report
@@ -27,6 +27,7 @@ _PROFILES = [
 def bot_config() -> BotConfig:
     return BotConfig.model_validate(
         {
+            "name": "test-bot",
             "strategy": {"strategy_class": "impulse", "profiles": _PROFILES},
             "live": {
                 "trading_account": {"exchange": "bitget"},
@@ -276,6 +277,7 @@ class TestAnalysisIsBuilt:
     ):
         declared = BotConfig.model_validate(
             {
+                "name": "test-bot",
                 "strategy": {"strategy_class": "impulse", "profiles": _PROFILES},
                 "live": {
                     "trading_account": {"exchange": "bitget"},
@@ -324,7 +326,7 @@ class TestChartIsDrawn:
 def test_without_profiles_there_is_nothing_to_chart(bot_config, collaborators):
     bot_config.strategy.profiles = []
 
-    with pytest.raises(StrategyCriticalError, match="strategy.profiles"):
+    with pytest.raises(BotCriticalError, match="strategy.profiles"):
         run_report(bot_config, days=30)
 
     collaborators["load_single_account_with_exchange"].assert_not_called()

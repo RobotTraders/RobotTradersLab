@@ -7,7 +7,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core import Notifications
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import OrderFill, OrderPlacement, OrderSide
 
 
@@ -98,7 +98,7 @@ async def test_flush_without_a_recorded_fill():
 
 @pytest.mark.parametrize(
     "failure",
-    [RuntimeError("boom"), StrategyCriticalError("boom")],
+    [RuntimeError("boom"), BotCriticalError("boom")],
     ids=["exception", "critical"],
 )
 async def test_a_failing_subscriber_among_others(order_fill, caplog, failure):

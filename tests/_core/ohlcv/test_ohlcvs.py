@@ -7,8 +7,8 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab.exceptions import (
+    BotCriticalError,
     MissingOhlcvDataError,
-    StrategyCriticalError,
 )
 from robottraderslab.strategies import OHLCVs
 
@@ -564,7 +564,7 @@ class TestEarliestCandleOpen:
         symbol_dict = _make_ohlcv_dict([], [btc], [[]])
         ohlcvs = OHLCVs({"1d": symbol_dict})
 
-        with pytest.raises(StrategyCriticalError, match="No candles"):
+        with pytest.raises(BotCriticalError, match="No candles"):
             ohlcvs._earliest_candle_open()
 
 

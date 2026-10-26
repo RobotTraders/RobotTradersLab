@@ -180,8 +180,10 @@ def test_exchanges_gate():
         "describe_order",
         "fetch_pages",
         "lacks_a_closed_candle",
+        "next_client_order_id",
         "no_candles",
         "page_bounds",
+        "process_bot_bytes",
         "tag_of",
         "to_milliseconds",
         "venue_trigger_type",
@@ -192,6 +194,7 @@ def test_exchanges_gate():
 
 def test_exceptions_gate():
     assert sorted(exceptions.__all__) == [
+        "BotCriticalError",
         "DataError",
         "DownloadError",
         "ExchangeConnectionError",
@@ -202,9 +205,12 @@ def test_exceptions_gate():
         "MissingOhlcvDataError",
         "NoOpenPositionError",
         "RateLimitExceededError",
-        "StrategyCriticalError",
         "SymbolNotListedError",
     ]
+
+
+def test_strategy_critical_error_is_the_bot_critical_error():
+    assert exceptions.StrategyCriticalError is exceptions.BotCriticalError
 
 
 def test_indicators_gate():

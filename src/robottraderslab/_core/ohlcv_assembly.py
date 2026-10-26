@@ -6,9 +6,9 @@ from typing import cast
 import pandas as pd
 
 from .exceptions import (
+    BotCriticalError,
     DataError,
     ExchangeCriticalError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 from .interfaces import OHLCVFetcher, OHLCVProviderProtocol
@@ -37,7 +37,7 @@ async def assemble_all_ohlcvs_from_requirements(
         requirements: Requirements collected from strategy.setup().
 
     Raises:
-        StrategyCriticalError: If strategy declared no OHLCV requirements.
+        BotCriticalError: If strategy declared no OHLCV requirements.
         DataError: If the venue does not list a declared symbol.
     """
     symbol_timeframes = _declared_symbol_timeframes(provider, requirements)
@@ -78,7 +78,7 @@ async def assemble_available_ohlcvs_from_requirements(
         Assembled OHLCVs, or None when no declared pair could be fetched.
 
     Raises:
-        StrategyCriticalError: If the strategy declared no OHLCV requirements.
+        BotCriticalError: If the strategy declared no OHLCV requirements.
         ExchangeCriticalError: If a fetch reports the venue unusable.
     """
     symbol_timeframes = _declared_symbol_timeframes(provider, requirements)
@@ -89,7 +89,7 @@ async def assemble_available_ohlcvs_from_requirements(
 
     frames: dict[_Pair, pd.DataFrame] = {}
     for (symbol, timeframe), outcome in zip(pairs, outcomes, strict=True):
-        if isinstance(outcome, (ExchangeCriticalError, StrategyCriticalError)):
+        if isinstance(outcome, (ExchangeCriticalError, BotCriticalError)):
             raise outcome
         if isinstance(outcome, SymbolNotListedError):
             logger.warning(
@@ -113,11 +113,11 @@ def _declared_symbol_timeframes(
     """Validate the declarations and pass their lookbacks to the provider.
 
     Raises:
-        StrategyCriticalError: If strategy declared no OHLCV requirements.
+        BotCriticalError: If strategy declared no OHLCV requirements.
     """
     all_requirements = requirements._get_all()
     if not all_requirements:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             "Strategy declared no OHLCV requirements. "
             "Check that strategy.setup() registers at least one symbol/timeframe."
         )

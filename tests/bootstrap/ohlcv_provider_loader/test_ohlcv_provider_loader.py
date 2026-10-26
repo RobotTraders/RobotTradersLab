@@ -3,7 +3,7 @@ import re
 import pytest
 
 from robottraderslab.bootstrap import load_ohlcv_provider, require_ohlcv_provider
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 
 def test_load_mock_provider():
@@ -61,7 +61,7 @@ def test_an_adapter_setting_reaches_the_provider(tmp_path, stub_exchange):
 
 
 def test_a_csv_source_missing_its_symbol_and_timeframe():
-    with pytest.raises(StrategyCriticalError, match="needs `symbol`, `timeframe`"):
+    with pytest.raises(BotCriticalError, match="needs `symbol`, `timeframe`"):
         require_ohlcv_provider(
             {"ohlcv_provider": "csv", "file": "btc.csv"},
             "backtest.ohlcv_provider",
@@ -70,14 +70,14 @@ def test_a_csv_source_missing_its_symbol_and_timeframe():
 
 
 def test_a_mock_source_given_a_key_it_does_not_take():
-    with pytest.raises(StrategyCriticalError, match="does not take `seed`"):
+    with pytest.raises(BotCriticalError, match="does not take `seed`"):
         require_ohlcv_provider(
             {"ohlcv_provider": "mock", "seed": 1}, "backtest.ohlcv_provider", None
         )
 
 
 def test_an_exchange_sources_own_key_misspelt():
-    with pytest.raises(StrategyCriticalError, match="does not take `storage_dirr`"):
+    with pytest.raises(BotCriticalError, match="does not take `storage_dirr`"):
         require_ohlcv_provider(
             {"ohlcv_provider": "ccxt_bitget", "storage_dirr": "data"},
             "live.ohlcv_provider",
@@ -86,7 +86,7 @@ def test_an_exchange_sources_own_key_misspelt():
 
 
 def test_an_exchange_sources_adapter_key_misspelt(stub_exchange):
-    with pytest.raises(StrategyCriticalError, match="does not take `variantt`"):
+    with pytest.raises(BotCriticalError, match="does not take `variantt`"):
         require_ohlcv_provider(
             {"ohlcv_provider": stub_exchange, "variantt": "demo"},
             "live.ohlcv_provider",
@@ -96,7 +96,7 @@ def test_an_exchange_sources_adapter_key_misspelt(stub_exchange):
 
 def test_an_oanda_sources_adapter_key_misspelt():
     pytest.importorskip("robottraderslab_oanda")
-    with pytest.raises(StrategyCriticalError, match="does not take `access_tokenn`"):
+    with pytest.raises(BotCriticalError, match="does not take `access_tokenn`"):
         require_ohlcv_provider(
             {"ohlcv_provider": "oanda", "access_tokenn": "token"},
             "live.ohlcv_provider",
@@ -106,7 +106,7 @@ def test_an_oanda_sources_adapter_key_misspelt():
 
 def test_a_dukascopy_sources_adapter_key_misspelt():
     pytest.importorskip("robottraderslab_dukascopy")
-    with pytest.raises(StrategyCriticalError, match="does not take `offer_sde`"):
+    with pytest.raises(BotCriticalError, match="does not take `offer_sde`"):
         require_ohlcv_provider(
             {"ohlcv_provider": "dukascopy", "offer_sde": "ask"},
             "live.ohlcv_provider",
@@ -116,9 +116,7 @@ def test_a_dukascopy_sources_adapter_key_misspelt():
 
 def test_an_oanda_source_missing_the_keys_its_adapter_needs():
     pytest.importorskip("robottraderslab_oanda")
-    with pytest.raises(
-        StrategyCriticalError, match="needs `access_token`, `account_id`"
-    ):
+    with pytest.raises(BotCriticalError, match="needs `access_token`, `account_id`"):
         require_ohlcv_provider({"ohlcv_provider": "oanda"}, "live.ohlcv_provider", None)
 
 
@@ -131,7 +129,7 @@ def test_a_ccxt_source_carries_no_venue_key_of_its_own(tmp_path):
 
 
 def test_a_ccxt_source_writing_its_venue_is_refused():
-    with pytest.raises(StrategyCriticalError, match="does not take `exchange_name`"):
+    with pytest.raises(BotCriticalError, match="does not take `exchange_name`"):
         require_ohlcv_provider(
             {"ohlcv_provider": "ccxt_bitget", "exchange_name": "binance"},
             "live.ohlcv_provider",
@@ -141,7 +139,7 @@ def test_a_ccxt_source_writing_its_venue_is_refused():
 
 def test_a_csv_source_both_missing_and_unknown_keys():
     with pytest.raises(
-        StrategyCriticalError,
+        BotCriticalError,
         match="needs `symbol`, `timeframe` and does not take `symbol_typo`",
     ):
         require_ohlcv_provider(
@@ -158,7 +156,7 @@ def test_a_csv_source_both_missing_and_unknown_keys():
 def test_the_settings_file_is_named_in_the_message(tmp_path):
     config_file = tmp_path / "bot.toml"
 
-    with pytest.raises(StrategyCriticalError, match=re.escape(str(config_file))):
+    with pytest.raises(BotCriticalError, match=re.escape(str(config_file))):
         require_ohlcv_provider(
             {"ohlcv_provider": "mock", "seed": 1},
             "backtest.ohlcv_provider",
@@ -226,7 +224,7 @@ def test_a_clean_dukascopy_source_is_accepted(tmp_path):
 
 
 def test_a_table_naming_no_source():
-    with pytest.raises(StrategyCriticalError, match="needs `ohlcv_provider`"):
+    with pytest.raises(BotCriticalError, match="needs `ohlcv_provider`"):
         require_ohlcv_provider({"file": "btc.csv"}, "backtest.ohlcv_provider", None)
 
 

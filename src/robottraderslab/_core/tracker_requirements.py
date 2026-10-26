@@ -4,7 +4,7 @@ from datetime import datetime
 
 from .account_snapshot import AccountSnapshots, NamedAccount
 from .actions.members import ProfileTag
-from .exceptions import StrategyCriticalError
+from .exceptions import BotCriticalError
 from .exchange_position_tracker import ExchangePositionTracker
 from .position_tracker import PositionTracker, TrackingId
 from .symbol import Symbol
@@ -61,7 +61,7 @@ class TrackerRequirements:
                 symbol may share one.
 
         Raises:
-            StrategyCriticalError: If a declared id has no tag, two ids on
+            BotCriticalError: If a declared id has no tag, two ids on
                 one symbol share one, or a symbol is already declared on the
                 same account, since a fill on that symbol can belong to one
                 declaration only.
@@ -113,7 +113,7 @@ class TrackerRequirements:
     ) -> None:
         for symbol in ids_by_symbol:
             if (account_name, symbol) in self._claimed_symbols:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"{symbol} is already tracked on account '{account_name}'; "
                     "declare every tracking id of a symbol in one "
                     "requirements.tracker.add(...)."

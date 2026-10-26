@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,7 +12,7 @@ _unpatched_sleep = asyncio.sleep
 
 
 @pytest.fixture(autouse=True)
-def _temporary_state_dir(tmp_path, monkeypatch) -> None:
+def _temporary_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`state_file_path` resolves the temporary directory on every call, so a
     scope written by one test is unreachable from the next.
     """
@@ -28,6 +29,20 @@ class Clock:
 
     def __call__(self) -> float:
         return self.now
+
+
+@pytest.fixture
+def make_unshared_report_levels(
+    caplog: pytest.LogCaptureFixture,
+) -> Callable[[], list[str]]:
+    def make() -> list[str]:
+        return [
+            record.levelname
+            for record in caplog.records
+            if "not shared between processes" in record.getMessage()
+        ]
+
+    return make
 
 
 @pytest.fixture

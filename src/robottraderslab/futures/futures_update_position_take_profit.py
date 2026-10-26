@@ -18,6 +18,7 @@ class UpdatePositionTakeProfitAction(PositionProtectionAction):
 
     protection: ClassVar[ProtectionKind] = OrderType.TAKE_PROFIT
 
+    tag: str = "tp"
     exchange: FuturesExchangeProtocol
 
     @property

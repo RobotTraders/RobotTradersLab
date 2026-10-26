@@ -11,6 +11,7 @@ from robottraderslab._core import (
     OrderSide,
     Symbol,
     calculate_trade_pnl_pct,
+    is_unlabelled_protection,
     tag_of,
 )
 
@@ -48,6 +49,10 @@ def build_trades(
     it, taking the venue's own figure as the trade's gross profit, and its
     fee split in proportion to the quantity each side of the execution
     covers.
+
+    A trade is named after its closing execution's tag, and after the tag of
+    the execution that opened the leg when the close is a fired stop-loss or
+    take-profit carrying no label of its own.
 
     A trade belongs to the window when its closing execution falls inside it.
     An execution outside the window exists only to establish what was already
@@ -94,6 +99,7 @@ class _OpenLeg:
     entry_time: pd.Timestamp
     entry_fee: float
     entry_reason: str | None
+    tag: str | None
 
 
 def _by_symbol(executions: Iterable[Execution]) -> dict[Symbol, list[Execution]]:
@@ -174,7 +180,9 @@ def _close(
         "exit_time": pd.Timestamp(execution.timestamp),
         "symbol": str(execution.symbol),
         "side": leg.side,
-        "tag": tag_of(execution.client_order_id),
+        "tag": leg.tag
+        if is_unlabelled_protection(execution)
+        else tag_of(execution.client_order_id),
         "entry_price": leg.average_price,
         "exit_price": execution.price,
         "gross_quantity": matched,
@@ -212,4 +220,5 @@ def _opened_by(execution: Execution, *, quantity: float, fee: float) -> _OpenLeg
         entry_time=pd.Timestamp(execution.timestamp),
         entry_fee=fee,
         entry_reason=execution.kind,
+        tag=tag_of(execution.client_order_id),
     )

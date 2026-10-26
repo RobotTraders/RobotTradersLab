@@ -27,8 +27,8 @@ from robottraderslab._core import (
 )
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
-    StrategyCriticalError,
 )
 from robottraderslab.strategies import (
     BookKeeper,
@@ -259,7 +259,7 @@ class Backtester:
             failures.append(f"{candidate}: no data")
 
         failure_details = "; ".join(failures)
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"No conversion data available from {currency} to "
             f"{converter.account_currency}: {failure_details}"
         )
@@ -341,7 +341,7 @@ def _fill_describer(requirements: AccountRequirements) -> FillDescriber | None:
     only ask one describer.
 
     Raises:
-        StrategyCriticalError: If more than one account declares a describer.
+        BotCriticalError: If more than one account declares a describer.
     """
     describers = [
         requirement.describe_fills
@@ -349,7 +349,7 @@ def _fill_describer(requirements: AccountRequirements) -> FillDescriber | None:
         if requirement.describe_fills is not None
     ]
     if len(describers) > 1:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"{len(describers)} accounts declare describe_fills; a backtest "
             "simulates one account, so declare it on one account only."
         )
@@ -380,7 +380,7 @@ async def _invoke_callbacks(callbacks: list[Callable[[], Awaitable[None]]]) -> N
         return_exceptions=True,
     )
     for i, result in enumerate(results):
-        if isinstance(result, (ExchangeCriticalError, StrategyCriticalError)):
+        if isinstance(result, (ExchangeCriticalError, BotCriticalError)):
             raise result
         elif isinstance(result, BaseException):
             logger.error(f"Failed to invoke callback {i}: {result}")

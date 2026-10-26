@@ -60,11 +60,12 @@ class ExchangeCriticalError(BaseException):
     pass
 
 
-class StrategyCriticalError(BaseException):
-    """The strategy's configuration or code is broken, so trading stops.
+class BotCriticalError(BaseException):
+    """The bot's configuration file or its strategy's code is broken, so
+    trading stops.
 
     It stands outside the `Exception` tree so that no `except Exception`
-    between the strategy and the entry point can keep the run going on it.
+    between the bot and the entry point can keep the run going on it.
     """
 
     pass

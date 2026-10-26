@@ -6,6 +6,8 @@ from robottraderslab._core import to_quantity
 from robottraderslab.bootstrap import BotConfig
 
 TOML_CONFIG = """\
+name = "test-bot"
+
 [backtest]
 initial_balance = { USDT = 10000.0 }
 maker_fee_rate = 0.001

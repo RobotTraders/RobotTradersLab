@@ -6,17 +6,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from robottraderslab._core import (
+    FLATTEN_TAG,
     OrderProtocol,
     OrderSide,
     PositionSnapshot,
     StepCount,
     Symbol,
     fetch_account_snapshots,
+    name_process,
+    position_steps,
     retry_on_transient,
     run_async,
-    signed_position,
     to_quantity,
-    to_step_count,
 )
 from robottraderslab.bootstrap import (
     AccountConfig,
@@ -28,8 +29,8 @@ from robottraderslab.bootstrap import (
     load_single_exchange,
     load_strategy,
 )
-from robottraderslab.exceptions import ExchangeRecoverableError, StrategyCriticalError
-from robottraderslab.exchanges import FuturesExchangeProtocol
+from robottraderslab.exceptions import BotCriticalError, ExchangeRecoverableError
+from robottraderslab.exchanges import FuturesExchangeProtocol, next_client_order_id
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.strategies import (
     AccountSnapshots,
@@ -40,7 +41,7 @@ from robottraderslab.strategies import (
     TradingSystem,
 )
 
-from .runners import require_live_config
+from .runners import require_live_config, run_alone
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,16 @@ def main(config: Path, symbol: str | None, external: bool) -> int:
             quantity no profile of that bot owns, leaving every profile's own
             quantity and every open order where they are.
 
+    One instance of a config runs at a time, `rtlab live` included, since a
+    close placed under a cycle's orders would be read as theirs.
+
     Returns:
         1 if the account still carries what the command set out to close;
-        0 once the venue is confirmed holding what it should.
+        0 once the venue is confirmed holding what it should; `EX_TEMPFAIL`
+        if another process holds the config's instance lock.
 
     Raises:
-        StrategyCriticalError: If the config is unusable, declares no `[live]`
+        BotCriticalError: If the config is unusable, declares no `[live]`
             section, or, for an external run, tracks no profile a position can
             be attributed to.
         ExchangeCriticalError: If the account cannot be loaded.
@@ -73,15 +78,30 @@ def main(config: Path, symbol: str | None, external: bool) -> int:
     bot_config = BotConfig.from_file(config)
     live_config = require_live_config(bot_config)
     secrets_by_name = load_secrets(bot_config.secrets_file)
+    return run_alone(
+        config,
+        lambda: _flatten_named(
+            bot_config, live_config, secrets_by_name, config.name, symbol, external
+        ),
+    )
+
+
+def _flatten_named(
+    bot_config: BotConfig,
+    live_config: LiveConfig,
+    secrets_by_name: SecretsByName,
+    bot_name: str,
+    symbol: str | None,
+    external: bool,
+) -> int:
+    name_process(bot_config.name, datetime.now(UTC))
     if external:
         return run_async(
-            _flatten_external(bot_config, live_config, secrets_by_name, config.name)
+            _flatten_external(bot_config, live_config, secrets_by_name, bot_name)
         )
     target_symbol = Symbol.create(symbol) if symbol is not None else None
     return run_async(
-        _flatten(
-            live_config.trading_account, secrets_by_name, target_symbol, config.name
-        )
+        _flatten(live_config.trading_account, secrets_by_name, target_symbol, bot_name)
     )
 
 
@@ -147,6 +167,7 @@ async def _close_position(
         position.side.closing_side,
         position.quantity,
         reduce_only=True,
+        client_order_id=next_client_order_id(FLATTEN_TAG),
     )
     await retry_on_transient(close)
     logger.info(
@@ -238,7 +259,7 @@ async def _attribute_positions(
     profile to reach it.
 
     Raises:
-        StrategyCriticalError: If the strategy tracks no profile a position can
+        BotCriticalError: If the strategy tracks no profile a position can
             be attributed to.
     """
     requirements = await _declared_requirements(bot_config, account)
@@ -252,7 +273,7 @@ async def _attribute_positions(
     requirements.tracker.refresh_all(account_snapshots, now, now)
     attributions = _attributions(requirements, account_snapshots)
     if not attributions:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"The strategy of `{bot_name}` tracks no profile, so nothing on its "
             "account can be told from what it opened; flatten a symbol or pass "
             "--all instead"
@@ -268,6 +289,7 @@ async def _declared_requirements(
     """
     strategy = load_strategy(
         bot_config.strategy.model_dump(),
+        config_file=bot_config.config_file,
         account=account,
         trading_system=TradingSystem(trading_mode=TradingMode.LIVE),
         config_dir=bot_config.config_dir,
@@ -285,7 +307,7 @@ def _attributions(
     for requirement in requirements.tracker._get_all():
         account_snapshot = account_snapshots.of(requirement.account)
         for symbol, tracking_ids in requirement.ids_by_symbol.items():
-            venue_steps[symbol] = _position_steps(account_snapshot.position(symbol))
+            venue_steps[symbol] = position_steps(account_snapshot.position(symbol))
             profiles_steps[symbol] = profiles_steps.get(symbol, 0) + _owned_steps(
                 requirement.tracker, tracking_ids
             )
@@ -299,15 +321,11 @@ def _attributions(
     ]
 
 
-def _position_steps(position: PositionSnapshot | None) -> StepCount:
-    return 0 if position is None else to_step_count(signed_position(position))
-
-
 def _owned_steps(
     tracker: PositionTracker, tracking_ids: Iterable[TrackingId]
 ) -> StepCount:
     return sum(
-        to_step_count(signed_position(tracked))
+        position_steps(tracked)
         for tracking_id in tracking_ids
         if (tracked := tracker.get(tracking_id)) is not None
     )
@@ -336,6 +354,7 @@ async def _close_external_quantity(
         side,
         quantity,
         reduce_only=_only_reduces(attribution),
+        client_order_id=next_client_order_id(FLATTEN_TAG),
     )
     try:
         await retry_on_transient(
@@ -409,7 +428,7 @@ async def _verify_profiles_alone(
         (attribution.symbol, difference)
         for attribution in attributions
         if (
-            difference := _position_steps(open_positions.get(attribution.symbol))
+            difference := position_steps(open_positions.get(attribution.symbol))
             - attribution.profiles_steps
         )
         != 0

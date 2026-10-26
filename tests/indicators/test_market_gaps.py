@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.indicators import MAType, donchian_midline, ema, sma, trix, wma
 
 PERIOD = 4
@@ -49,7 +49,7 @@ class TestSma:
         assert np.isfinite(averaged[published][PERIOD - 1 :]).all()
 
     def test_period_longer_than_the_published_candles(self, gapped_closes):
-        with pytest.raises(StrategyCriticalError) as failure:
+        with pytest.raises(BotCriticalError) as failure:
             sma(gapped_closes, LONGER_THAN_THE_SERIES)
 
         assert "SMA(29)" in str(failure.value)
@@ -78,7 +78,7 @@ class TestWma:
         assert np.isfinite(averaged[published][PERIOD - 1 :]).all()
 
     def test_period_longer_than_the_published_candles(self, gapped_closes):
-        with pytest.raises(StrategyCriticalError) as failure:
+        with pytest.raises(BotCriticalError) as failure:
             wma(gapped_closes, LONGER_THAN_THE_SERIES)
 
         assert "WMA(29)" in str(failure.value)
@@ -109,7 +109,7 @@ class TestDonchianMidline:
         assert midline[6] == pytest.approx((7.0 + 0.0) / 2)
 
     def test_period_longer_than_the_published_candles(self, gapped_highs, gapped_lows):
-        with pytest.raises(StrategyCriticalError) as failure:
+        with pytest.raises(BotCriticalError) as failure:
             donchian_midline(gapped_highs, gapped_lows, LONGER_THAN_THE_SERIES)
 
         assert "DCM(29)" in str(failure.value)
@@ -127,7 +127,7 @@ class TestTrix:
     def test_a_windowed_signal_average_needing_more_than_the_series_holds(
         self, gapped_closes
     ):
-        with pytest.raises(StrategyCriticalError) as failure:
+        with pytest.raises(BotCriticalError) as failure:
             trix(
                 gapped_closes,
                 TRIX_LENGTH,

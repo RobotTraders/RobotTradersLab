@@ -11,7 +11,7 @@ from robottraderslab._core import (
     Symbol,
 )
 from robottraderslab.bootstrap import ReportConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .analysis_inputs import AnalysisInputs
 from .execution_equity import build_equity_curve, recover_opening_balance
@@ -50,7 +50,7 @@ def build_execution_inputs(
         ohlcv_provider: Candle source for the reference price.
 
     Raises:
-        StrategyCriticalError: If the symbols settle in more than one currency.
+        BotCriticalError: If the symbols settle in more than one currency.
     """
     settlement = _settlement_currency(symbols)
     paired = build_trades(executions, since=since, until=until)
@@ -83,7 +83,7 @@ def build_execution_inputs(
 def _settlement_currency(symbols: Iterable[Symbol]) -> Currency:
     settlements = {symbol.settlement for symbol in symbols}
     if len(settlements) != 1:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"The report covers symbols settling in several currencies "
             f"{sorted(settlements)}; it measures one account in one currency."
         )

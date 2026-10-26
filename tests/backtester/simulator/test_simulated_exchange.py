@@ -8,7 +8,7 @@ from robottraderslab.backtester.simulator import (
     CacheFillRecorder,
     SimulatedFuturesExchange,
 )
-from robottraderslab.exceptions import StrategyCriticalError, SymbolNotListedError
+from robottraderslab.exceptions import BotCriticalError, SymbolNotListedError
 from robottraderslab.exchanges import (
     Instrument,
     OrderModifyRequest,
@@ -345,5 +345,5 @@ def test_declares_no_trailing_stop_order():
 
 
 async def test_trailing_stop_order_requested_on_the_simulator(sim, btc_usdt_perp):
-    with pytest.raises(StrategyCriticalError, match="simulator"):
+    with pytest.raises(BotCriticalError, match="simulator"):
         await sim.exchange.place_trailing_stop_order(btc_usdt_perp, distance=5.0)

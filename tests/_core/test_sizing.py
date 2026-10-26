@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from robottraderslab import Symbol, TimeFrame
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import Balance
 from robottraderslab.strategies import (
     AccountSnapshot,
@@ -85,5 +85,5 @@ class TestAStrategyWithoutProfiles:
         assert entry.quantity == pytest.approx(20.0)
 
     def test_keys_naming_no_rule(self, account):
-        with pytest.raises(StrategyCriticalError, match="names no sizing rule"):
+        with pytest.raises(BotCriticalError, match="names no sizing rule"):
             _ProfileLessStrategy(account=account, fast_length=20)

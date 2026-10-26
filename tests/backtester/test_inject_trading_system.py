@@ -1,7 +1,9 @@
 import sys
+from datetime import UTC, datetime
 
 import pytest
 
+from robottraderslab._core import BaseExchangeAction, name_process
 from robottraderslab.backtester import run_backtest
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.live.runners import run_livebot
@@ -23,6 +25,8 @@ def _register_test_module(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def toml_config() -> str:
     return """\
+name = "test-bot"
+
 [backtest]
 initial_balance = { USDT = 10000.0 }
 maker_fee_rate = 0.001
@@ -117,3 +121,24 @@ def test_run_livebot_injects_trading_system(toml_config):
 
     with pytest.raises(StrategyLoadRaisesException):
         run_livebot(bot_config)
+
+
+def _bot_segment() -> str:
+    return BaseExchangeAction(symbol="BTC/USDT").client_order_id[:6]
+
+
+@pytest.mark.parametrize(
+    ("runner", "strategy"),
+    [(run_backtest, "StrategyBacktestOnly"), (run_livebot, "StrategyLiveOnly")],
+    ids=["backtest", "live"],
+)
+def test_a_run_names_its_orders_after_the_bot(toml_config, runner, strategy):
+    bot_config = BotConfig.from_text(toml_config.replace("{placeholder}", strategy))
+    name_process("another-bot", datetime.now(UTC))
+
+    with pytest.raises(StrategyLoadRaisesException):
+        runner(bot_config)
+    named_by_the_run = _bot_segment()
+    name_process("test-bot", datetime.now(UTC))
+
+    assert named_by_the_run == _bot_segment()

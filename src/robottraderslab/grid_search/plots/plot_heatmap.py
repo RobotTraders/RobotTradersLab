@@ -16,8 +16,8 @@ from robottraderslab.plotting import (
 from ..optimisation_result import SUMMARY_METRICS
 
 _FIGURE_SIZE = (10, 8)
-_SUMMARY_FIGURE_SIZE = (18, 10)
-_SUMMARY_LAYOUT = (2, 3)
+_SUMMARY_FIGURE_SIZE = (24, 10)
+_SUMMARY_LAYOUT = (2, 4)
 _SUMMARY_FILENAME = "heatmap_summary"
 _SUMMARY_TITLE_FONT_SIZE = 16
 _COLOUR_MAP = "RdYlGn"
@@ -101,9 +101,9 @@ def _draw_heatmap(
     ax.tick_params(axis="both", which="major", labelsize=TICK_FONT_SIZE)
 
 
-def _display_name(metric: str) -> str:
-    return metric.replace("_", " ").title()
-
-
 def _short_name(param: str) -> str:
     return param.removeprefix(_PROFILE_PREFIX)
+
+
+def _display_name(metric: str) -> str:
+    return metric.replace("_", " ").title()

@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .parameter import (
     ExplicitParameter,
@@ -46,14 +46,14 @@ class OptimisationConfig(BaseModel):
             config_dict: The `[optimisation]` section the bot declares.
 
         Raises:
-            StrategyCriticalError: If the section declares a key the sweep
+            BotCriticalError: If the section declares a key the sweep
                 does not read, leaves out one it needs, or gives a value it
                 cannot take.
         """
         try:
             return cls(**config_dict)
         except ValidationError as e:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"`[optimisation]` is not a sweep the engine can run: {e}"
             ) from e
 
@@ -86,7 +86,7 @@ def _parameter_of(pc: ParameterConfig, value_type: _ValueType) -> Parameter:
 
 def _explicit_parameter(pc: ParameterConfig, value_type: _ValueType) -> Parameter:
     if pc.values is None:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Parameter '{pc.parameter}': explicit sampling requires values"
         )
     return ExplicitParameter(
@@ -96,11 +96,11 @@ def _explicit_parameter(pc: ParameterConfig, value_type: _ValueType) -> Paramete
 
 def _range_parameter(pc: ParameterConfig, value_type: _ValueType) -> Parameter:
     if pc.min is None or pc.max is None:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Parameter '{pc.parameter}': {pc.sampling} sampling requires min and max"
         )
     if pc.num_samples is None and pc.step is None:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Parameter '{pc.parameter}': {pc.sampling} sampling requires "
             f"num_samples or step"
         )

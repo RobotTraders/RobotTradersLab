@@ -16,7 +16,7 @@ from robottraderslab._core import (
     EX_TEMPFAIL,
     hold_instance_lock,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.scheduler import run_scheduler
 
 FIRST_RUN = datetime(2026, 1, 1, 9, 7, tzinfo=UTC)
@@ -259,12 +259,30 @@ def test_registry_entry_without_a_config_is_skipped_and_logged(
 def test_malformed_registry_stops_the_scheduler(create_registry):
     registry_file = create_registry("[[bots]\nconfig = 'bot.toml'\n")
 
-    with pytest.raises(StrategyCriticalError, match="not valid TOML"):
+    with pytest.raises(BotCriticalError, match="not valid TOML"):
+        run_scheduler(registry_file)
+
+
+def test_a_registry_naming_two_bots_on_one_symbol_of_one_account_stops_the_scheduler(
+    create_registry, write_bot
+):
+    first = write_bot(
+        "first.toml", name="one", account="main", symbols=("BTC/USDT:USDT",)
+    )
+    second = write_bot(
+        "second.toml", name="two", account="main", symbols=("BTC/USDT:USDT",)
+    )
+    registry_file = create_registry(
+        f"[[bot]]\nconfig = '{first.as_posix()}'\n"
+        f"[[bot]]\nconfig = '{second.as_posix()}'\n"
+    )
+
+    with pytest.raises(BotCriticalError, match="BTC/USDT:USDT"):
         run_scheduler(registry_file)
 
 
 def test_missing_registry_stops_the_scheduler(tmp_path):
-    with pytest.raises(StrategyCriticalError, match="there is no registry file at"):
+    with pytest.raises(BotCriticalError, match="there is no registry file at"):
         run_scheduler(tmp_path / "absent.toml")
 
 
@@ -618,6 +636,35 @@ def test_a_bot_still_there_keeps_its_pause_when_another_is_deleted(
 
     run_scheduler(registry_file)
     deleted.unlink()
+    run_scheduler(registry_file)
+
+    assert mock_subprocess.await_count == 2
+
+
+def test_two_bots_sharing_a_name_and_an_account_are_not_launched(
+    create_registry, write_bot, mock_subprocess
+):
+    write_bot("first.toml", name="grid", account="main")
+    write_bot("second.toml", name="grid", account="main")
+    registry_file = create_registry(
+        '[[bot]]\nconfig = "first.toml"\n[[bot]]\nconfig = "second.toml"\n'
+    )
+
+    with pytest.raises(BotCriticalError, match="same bot digest"):
+        run_scheduler(registry_file)
+
+    mock_subprocess.assert_not_awaited()
+
+
+def test_two_bots_sharing_a_name_on_different_accounts_are_both_launched(
+    create_registry, write_bot, mock_subprocess
+):
+    write_bot("first.toml", name="grid", account="main")
+    write_bot("second.toml", name="grid", account="spare")
+    registry_file = create_registry(
+        '[[bot]]\nconfig = "first.toml"\n[[bot]]\nconfig = "second.toml"\n'
+    )
+
     run_scheduler(registry_file)
 
     assert mock_subprocess.await_count == 2

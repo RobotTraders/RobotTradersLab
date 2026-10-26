@@ -1,4 +1,11 @@
-from robottraderslab._core import auto_configure_notebook_logging, load_class, run_async
+from datetime import UTC, datetime
+
+from robottraderslab._core import (
+    auto_configure_notebook_logging,
+    load_class,
+    name_process,
+    run_async,
+)
 from robottraderslab.bootstrap import (
     BacktestConfig,
     BotConfig,
@@ -7,7 +14,7 @@ from robottraderslab.bootstrap import (
     load_strategy,
     require_ohlcv_provider,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.strategies import TradingMode, TradingSystem
 
 from .backtest_outputs import BacktestOutputs
@@ -23,9 +30,10 @@ def run_backtest(bot_config: BotConfig) -> BacktestOutputs:
         The run's balances, equity snapshots and fills, ready to analyse.
 
     Raises:
-        StrategyCriticalError: If the bot declares no `[backtest]` section.
+        BotCriticalError: If the bot declares no `[backtest]` section.
     """
     auto_configure_notebook_logging()
+    name_process(bot_config.name, datetime.now(UTC))
     backtest_config = require_backtest_config(bot_config)
     config_dir = bot_config.config_dir
 
@@ -52,6 +60,7 @@ def run_backtest(bot_config: BotConfig) -> BacktestOutputs:
 
     strategy = load_strategy(
         bot_config.strategy.model_dump(),
+        config_file=bot_config.config_file,
         account=market.account,
         trading_system=TradingSystem(trading_mode=TradingMode.BACKTEST),
         config_dir=config_dir,
@@ -74,10 +83,8 @@ def require_backtest_config(bot_config: BotConfig) -> BacktestConfig:
     """Read the section a backtest cannot run without.
 
     Raises:
-        StrategyCriticalError: If the bot declares no `[backtest]` section.
+        BotCriticalError: If the bot declares no `[backtest]` section.
     """
     if bot_config.backtest is None:
-        raise StrategyCriticalError(
-            "`[backtest]` section is required to run a backtest"
-        )
+        raise BotCriticalError("`[backtest]` section is required to run a backtest")
     return bot_config.backtest

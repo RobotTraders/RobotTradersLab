@@ -39,7 +39,7 @@ from robottraderslab._core import (
     TriggerType,
     tool_root,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from ..ohlcv_sources import keeps_candles
 
@@ -128,6 +128,7 @@ class LiveConfig(BaseModel):
     trading_account: AccountConfig
     ohlcv_provider: dict[str, Any]
     retry: RetryConfig = RetryConfig()
+    clean_removed_profiles: bool = True
     logging: LiveLoggingConfig = LiveLoggingConfig()
     notifier: dict[str, dict[str, dict[str, Any]]] = {}
 
@@ -267,6 +268,7 @@ class BotConfig(BaseSettings):
 
     model_config = SettingsConfigDict(extra="forbid")
 
+    name: str
     secrets_file: str | None = None
     config_dir: Path | None = None
     config_file: Path | None = None
@@ -284,37 +286,53 @@ class BotConfig(BaseSettings):
         try:
             return cls(**declared)
         except ValidationError as e:
-            raise StrategyCriticalError(_configuration_failure(source, e)) from e
+            raise BotCriticalError(_configuration_failure(source, e)) from e
 
     @classmethod
     def from_file(
         cls, config_file: str | Path, *, overlay: str | None = None
     ) -> "BotConfig":
-        """Read the bot a config file declares.
+        """Build the bot a config file declares, with no environment variable
+        or dotenv file able to add to it.
 
-        A path a bot writes is anchored to the file's own directory, so a config
-        means the same thing whatever directory a run starts from. An overlay is
-        merged section by section, so a caller varying one value restates
-        nothing else. A bot naming no secrets file of its own inherits one found beside
-        it, or one shared by every bot in its workspace.
+        The secrets file, the OHLCV file and store, the log files and the
+        reports directory are anchored to the config file's directory when
+        given as relative paths, so a config means the same thing whatever
+        directory a run starts from; a relative path in the overlay is not
+        anchored. An overlay merges key by key into nested tables, so a caller
+        varying one value restates nothing else, and a list in it replaces the
+        file's list whole. A bot naming no secrets file takes the
+        `secrets.toml` beside its config file, or else the one in the directory
+        above it. A bot declaring no `name` takes its file's stem, which keeps
+        its orders identified the same way across cycles.
 
         Args:
             config_file: TOML file declaring the bot.
-            overlay: TOML adding to or replacing what the file declares.
+            overlay: TOML adding to or replacing what the file declares; None,
+                the default, applies no overlay.
+
+        Returns:
+            The validated bot, with `config_dir` and `config_file` naming the
+            directory and the file it was read from.
 
         Raises:
-            StrategyCriticalError: If the named file is not there, is not valid
+            BotCriticalError: If the named file is not there, is not valid
                 TOML, or declares something other than a bot the engine can run.
+            tomllib.TOMLDecodeError: If the overlay is not valid TOML.
+            UnicodeDecodeError: If the file is not valid UTF-8.
+            OSError: If the file exists but cannot be read.
+            TypeError: If a path the file declares, such as `secrets_file`, is
+                not a string.
         """
         logger.debug(f"Loading config from `{config_file}`")
         if not Path(config_file).is_file():
-            raise StrategyCriticalError(f"There is no config file at `{config_file}`")
+            raise BotCriticalError(f"There is no config file at `{config_file}`")
 
         base_dir = Path(config_file).resolve().parent
         try:
             declared = TomlConfigSettingsSource(cls, toml_file=str(config_file))()
         except tomllib.TOMLDecodeError as e:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"the config at `{config_file}` is not valid TOML: {e}"
             ) from e
         _resolve_relative_paths(declared, base_dir)
@@ -326,6 +344,7 @@ class BotConfig(BaseSettings):
             declared["secrets_file"] = discovered
         declared["config_dir"] = base_dir
         declared["config_file"] = Path(config_file)
+        declared.setdefault("name", Path(config_file).stem)
 
         if overlay is not None:
             declared = _deep_merge(declared, tomllib.loads(overlay))
@@ -335,17 +354,24 @@ class BotConfig(BaseSettings):
 
     @classmethod
     def from_text(cls, toml_config: str) -> "BotConfig":
-        """Read the bot a TOML declaration describes.
+        """Build the bot a TOML declaration describes, with no environment
+        variable or dotenv file able to add to it.
 
-        Nothing anchors a relative path without a file to anchor it to, so a bot
-        described this way states every path in full.
+        Nothing anchors a relative path, names the bot, finds a secrets file or
+        a candle store without a file, so a bot described this way states its
+        `name`, every path in full, and its `secrets_file` and store if it has
+        them.
 
         Args:
             toml_config: TOML declaring the bot.
 
+        Returns:
+            The validated bot, with no `config_dir` or `config_file`.
+
         Raises:
-            StrategyCriticalError: If what it declares is not a bot the engine
+            BotCriticalError: If what it declares is not a bot the engine
                 can run.
+            tomllib.TOMLDecodeError: If the text is not valid TOML.
         """
         declared = tomllib.loads(toml_config)
         logger.debug("Config declares: %s", _DeclaredShape(declared))

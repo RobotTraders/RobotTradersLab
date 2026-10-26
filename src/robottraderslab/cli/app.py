@@ -10,9 +10,9 @@ import typer
 
 from robottraderslab._core import EX_CONFIG, EX_DATAERR, EX_TEMPFAIL
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
-    StrategyCriticalError,
 )
 from robottraderslab.scaffold import (
     CrontabError,
@@ -171,8 +171,8 @@ def main() -> None:
         app()
     except ExchangeCriticalError as e:
         _report(logging.CRITICAL, "Critical exchange error", e, EX_CONFIG)
-    except StrategyCriticalError as e:
-        _report(logging.CRITICAL, "Critical strategy error", e, EX_CONFIG)
+    except BotCriticalError as e:
+        _report(logging.CRITICAL, "Critical bot error", e, EX_CONFIG)
     except ExchangeRecoverableError as e:
         _report(logging.ERROR, "Venue error", e, EX_TEMPFAIL)
     except Exception as e:
@@ -253,7 +253,7 @@ def check(
     folder = _workspace(workspace)
     try:
         _run("check", entry=entry, secrets=secrets, symbol=symbol, workspace=folder)
-    except (Exception, ExchangeCriticalError, StrategyCriticalError) as e:
+    except (Exception, ExchangeCriticalError, BotCriticalError) as e:
         _refuse(e)
 
 

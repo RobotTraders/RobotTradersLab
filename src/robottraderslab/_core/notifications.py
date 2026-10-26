@@ -3,7 +3,7 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Protocol, runtime_checkable
 
-from .exceptions import ExchangeCriticalError, StrategyCriticalError
+from .exceptions import BotCriticalError, ExchangeCriticalError
 from .order import OrderFill, OrderPlacement
 
 logger = logging.getLogger(__name__)
@@ -82,5 +82,5 @@ async def _forward_in_order[T](
     for event in events:
         try:
             await subscriber(event)
-        except (Exception, ExchangeCriticalError, StrategyCriticalError) as e:
+        except (Exception, ExchangeCriticalError, BotCriticalError) as e:
             logger.error("Notifier failed to report %s: %s", event, e)

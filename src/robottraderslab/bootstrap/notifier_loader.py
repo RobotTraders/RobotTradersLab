@@ -9,7 +9,7 @@ from robottraderslab._core import (
     PlacementNotifier,
     load_class,
 )
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 
 from .settings import SecretsByName, resolve_secret_references, reveal_secrets
 
@@ -55,7 +55,7 @@ def load_notifiers(
     for plugin_name, occasions in notifier_configs.items():
         try:
             _subscribe(plugin_name, occasions, secrets_by_name, on_fill, on_placement)
-        except (Exception, ExchangeCriticalError, StrategyCriticalError):
+        except (Exception, ExchangeCriticalError, BotCriticalError):
             logger.error(
                 "Running without the `%s` notifier", plugin_name, exc_info=True
             )
@@ -113,7 +113,7 @@ def load_log_handlers(
     for plugin_name, occasions in notifier_configs.items():
         try:
             handler = _log_handler(plugin_name, occasions, secrets_by_name)
-        except (Exception, ExchangeCriticalError, StrategyCriticalError) as e:
+        except (Exception, ExchangeCriticalError, BotCriticalError) as e:
             unavailable[plugin_name] = str(e)
             continue
         if handler is not None:

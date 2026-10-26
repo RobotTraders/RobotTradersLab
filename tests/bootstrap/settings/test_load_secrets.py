@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from robottraderslab.bootstrap import load_secrets
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.scaffold.workspace import lay_out_workspace
 
 _TEST_DIR = Path(__file__).parent
@@ -31,14 +31,14 @@ def test_a_loaded_secret_rendered_anywhere():
 
 def test_load_secrets_with_duplicates():
     with pytest.raises(
-        StrategyCriticalError, match="Duplicate secret name found: `secret-1`"
+        BotCriticalError, match="Duplicate secret name found: `secret-1`"
     ):
         load_secrets(_TEST_DIR / "secrets_with_duplicates.toml")
 
 
 def test_load_secret_no_name():
     with pytest.raises(
-        StrategyCriticalError,
+        BotCriticalError,
         match="Secret without a name found \\(missing or empty\\)",
     ):
         load_secrets(_TEST_DIR / "secret_no_name.toml")

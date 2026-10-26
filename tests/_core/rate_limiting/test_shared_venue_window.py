@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -31,7 +32,7 @@ def window() -> SharedVenueWindow:
 
 
 @pytest.fixture
-def clocks_of_a_fresh_boot(clock) -> Iterator[AsyncMock]:
+def clocks_of_a_fresh_boot(clock: Any) -> Iterator[AsyncMock]:
     """A monotonic reading counts from the boot it was taken in, so after a
     reboot it sits far behind the wall clock a state file was written on.
     """
@@ -183,7 +184,9 @@ async def test_corrupt_state_is_reset_to_an_unpaced_key(
     virtual_sleeps.assert_not_called()
 
 
-async def test_an_unreachable_budget_never_blocks(window, caplog, virtual_sleeps):
+async def test_an_unreachable_budget_never_blocks(
+    window, caplog, make_unshared_report_levels, virtual_sleeps
+):
     state_file_path(SCOPE).parent.mkdir(parents=True, exist_ok=True)
     state_file_path(SCOPE).mkdir()
 
@@ -192,7 +195,7 @@ async def test_an_unreachable_budget_never_blocks(window, caplog, virtual_sleeps
         await window.wait(KEY)
 
     virtual_sleeps.assert_not_called()
-    assert caplog.text.count("not shared between processes") == 1
+    assert make_unshared_report_levels() == ["ERROR"]
 
 
 async def test_a_deadline_a_previous_boot_recorded_has_passed(

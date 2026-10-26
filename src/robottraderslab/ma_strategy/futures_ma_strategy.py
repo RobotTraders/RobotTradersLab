@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 
 from robottraderslab import Symbol, TimeFrame
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.indicators import sma
 from robottraderslab.strategies import (
     AccountSnapshot,
@@ -56,10 +56,10 @@ class ProfileConfig(Profile):
     def __post_init__(self) -> None:
         """
         Raises:
-            StrategyCriticalError: If both direction flags are set.
+            BotCriticalError: If both direction flags are set.
         """
         if self.long_only and self.short_only:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 "long_only and short_only cannot both be true; leave both out to "
                 "trade both directions"
             )
@@ -138,7 +138,7 @@ class FuturesMAStrategy(ProfileStrategy[ProfileConfig]):
         """Declare the data, account state and tracking the profiles need.
 
         Raises:
-            StrategyCriticalError: If two profiles on the same symbol
+            BotCriticalError: If two profiles on the same symbol
                 resolve to the same tag.
         """
         _reject_colliding_tags(self.profiles)
@@ -322,7 +322,7 @@ def _reject_colliding_tags(profiles: Iterable[ProfileConfig]) -> None:
             f"`{tag}` on {symbol}, declared by {count} profiles"
             for (symbol, tag), count in colliding.items()
         )
-        raise StrategyCriticalError(f"profiles resolve to the same tag: {detail}")
+        raise BotCriticalError(f"profiles resolve to the same tag: {detail}")
 
 
 def _margin_targets(profiles: Iterable[ProfileConfig]) -> dict[Symbol, MarginSettings]:

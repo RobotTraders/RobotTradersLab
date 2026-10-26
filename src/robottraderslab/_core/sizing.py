@@ -8,7 +8,7 @@ from pydantic_core import core_schema
 
 from .account_snapshot import AccountSnapshot
 from .currency import Currency
-from .exceptions import StrategyCriticalError
+from .exceptions import BotCriticalError
 from .symbol import Symbol
 
 type RiskReference = Literal["equity", "total_balance", "available_balance"]
@@ -57,14 +57,14 @@ class SizingRule:
                 engine's.
 
         Raises:
-            StrategyCriticalError: If no key or several keys name a rule, or
+            BotCriticalError: If no key or several keys name a rule, or
                 the rule refuses the value under its key.
             TypeError: If one of `rules` takes the key of an engine rule.
         """
         registry = sizing_rules(rules)
         named = [key for key in settings if key in registry]
         if len(named) != 1:
-            raise StrategyCriticalError(_naming_fault(named, registry))
+            raise BotCriticalError(_naming_fault(named, registry))
         (key,) = named
         value = settings[key]
         build: Callable[..., SizingRule] = registry[key]
@@ -73,7 +73,7 @@ class SizingRule:
                 return build(**value)
             return build(value)
         except (TypeError, ValueError) as error:
-            raise StrategyCriticalError(f"{key}: {error}") from error
+            raise BotCriticalError(f"{key}: {error}") from error
 
     @property
     def reads_balances(self) -> bool:
@@ -122,7 +122,7 @@ class SizingRule:
                 none is.
 
         Raises:
-            StrategyCriticalError: If the rule cannot size the order from what
+            BotCriticalError: If the rule cannot size the order from what
                 it is given.
         """
         raise NotImplementedError
@@ -247,12 +247,12 @@ class Margin(SizingRule):
     ) -> float:
         """
         Raises:
-            StrategyCriticalError: If the venue reports no leverage on the
+            BotCriticalError: If the venue reports no leverage on the
                 symbol.
         """
         settings = account_snapshot.margin_settings(symbol)
         if settings.leverage is None:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"margin sizes from the leverage set on {symbol}, and the venue "
                 f"reports none in {settings.margin_mode} margin mode: set a "
                 "leverage on the symbol before sizing by margin."
@@ -382,10 +382,10 @@ class RiskRatio(SizingRule):
     ) -> float:
         """
         Raises:
-            StrategyCriticalError: If no stop-loss is attached to the order.
+            BotCriticalError: If no stop-loss is attached to the order.
         """
         if stop_loss_price is None:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"risk_ratio sizes from a stop-loss, and none is given on {symbol}: "
                 "an entry takes one with stop_loss() before it is built, and a "
                 "position target has no stop-loss to size from."

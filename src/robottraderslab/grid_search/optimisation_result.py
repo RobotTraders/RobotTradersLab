@@ -11,6 +11,8 @@ SUMMARY_METRICS = (
     "max_drawdown",
     "risk_reward_ratio",
     "sharpe_ratio",
+    "sortino_ratio",
+    "calmar_ratio",
     "closed_trades",
 )
 
@@ -20,6 +22,8 @@ class OptimisationResult:
     grid_point: GridPoint
     error: str | None = None
     sharpe_ratio: float | None = None
+    sortino_ratio: float | None = None
+    calmar_ratio: float | None = None
     roi: float | None = None
     max_drawdown: float | None = None
     win_rate: float | None = None
@@ -37,6 +41,8 @@ class OptimisationResult:
             grid_point=grid_point,
             error=None,
             sharpe_ratio=summary.sharpe_ratio,
+            sortino_ratio=summary.sortino_ratio,
+            calmar_ratio=summary.calmar_ratio,
             roi=summary.roi,
             max_drawdown=summary.max_drawdown,
             win_rate=summary.win_rate,

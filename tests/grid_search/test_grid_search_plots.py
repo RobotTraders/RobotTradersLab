@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from robottraderslab.grid_search import GridSearchResults
 from robottraderslab.grid_search.plots import plot_heatmap, plot_heatmap_summary
 
 _TRIX_LENGTH = "strategy.profiles.trix_length"
@@ -14,6 +15,8 @@ def grid_results() -> pd.DataFrame:
             _TRIX_LENGTH: [5, 5, 5, 10, 10, 10, 15, 15, 15],
             _SIGNAL_LENGTH: [10, 20, 30, 10, 20, 30, 10, 20, 30],
             "sharpe_ratio": [0.5, 1.2, 0.8, 1.5, 2.0, 1.3, 0.9, 1.1, 0.7],
+            "sortino_ratio": [0.7, 1.6, 1.1, 2.0, 2.7, 1.8, 1.2, 1.5, 0.9],
+            "calmar_ratio": [0.5, 2.4, 1.0, 5.0, 10.0, 3.3, 1.3, 1.8, 0.8],
             "roi": [5.0, 12.0, 8.0, 15.0, 20.0, 13.0, 9.0, 11.0, 7.0],
             "max_drawdown": [-10.0, -5.0, -8.0, -3.0, -2.0, -4.0, -7.0, -6.0, -9.0],
             "win_rate": [45.0, 55.0, 50.0, 60.0, 65.0, 58.0, 48.0, 52.0, 47.0],
@@ -71,6 +74,24 @@ class TestPlotHeatmap:
         assert figure.axes[0].get_title() == "Custom Title"
 
 
+class TestGridSearchResultsPlotHeatmap:
+    @pytest.fixture
+    def swept_results(self, grid_results: pd.DataFrame) -> GridSearchResults:
+        return GridSearchResults(grid_results, (_TRIX_LENGTH, _SIGNAL_LENGTH))
+
+    @pytest.mark.parametrize("metric", ["sortino_ratio", "calmar_ratio"])
+    def test_a_ratio_of_the_sweep_is_drawn_and_saved(
+        self, swept_results, tmp_path, metric
+    ):
+        swept_results.plot_heatmap(metric, save_to_path=tmp_path)
+
+        assert (tmp_path / f"{metric}.png").exists()
+
+    def test_a_metric_the_sweep_did_not_score_is_refused(self, swept_results):
+        with pytest.raises(KeyError):
+            swept_results.plot_heatmap("no_such_metric")
+
+
 class TestPlotHeatmapSummary:
     @pytest.mark.filterwarnings("ignore::UserWarning")
     def test_every_summary_metric_gets_a_panel(self, grid_results):
@@ -83,10 +104,12 @@ class TestPlotHeatmapSummary:
             "Max Drawdown",
             "Risk Reward Ratio",
             "Sharpe Ratio",
+            "Sortino Ratio",
+            "Calmar Ratio",
             "Closed Trades",
         ]
 
-    def test_the_six_metrics_are_saved_under_the_default_name(
+    def test_the_summary_metrics_are_saved_under_the_default_name(
         self, grid_results, tmp_path
     ):
         plot_heatmap_summary(
