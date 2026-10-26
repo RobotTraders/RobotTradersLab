@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import Balance, MarginMode, MarginSettings, PositionSide
 from robottraderslab.futures import FuturesAccount, FuturesOrderBuilder
 from robottraderslab.strategies import (
@@ -185,7 +185,7 @@ class TestEntrySizing:
 
     def test_margin_on_a_symbol_without_leverage(self, account):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"reports none in cross margin mode: set a leverage on the symbol",
         ):
             _entry(account).size(Margin(40.0), PRICE, _at_leverage(None)).build()
@@ -208,13 +208,13 @@ class TestEntrySizing:
     def test_an_order_sized_twice(self, account):
         entry = _entry(account).size(TotalBalanceRatio(0.1), PRICE, SNAPSHOT)
 
-        with pytest.raises(StrategyCriticalError, match="already sized"):
+        with pytest.raises(BotCriticalError, match="already sized"):
             entry.size(Notional(200.0), PRICE, SNAPSHOT)
 
     def test_a_rule_on_an_order_given_a_quantity(self, account):
         entry = account.long_entry(BTC_USDT, 1.0)
 
-        with pytest.raises(StrategyCriticalError, match="already sized"):
+        with pytest.raises(BotCriticalError, match="already sized"):
             entry.size(Notional(200.0), PRICE, SNAPSHOT)
 
 
@@ -250,7 +250,7 @@ class TestRiskRatio:
         entry = _entry(account).size(RiskRatio(0.02), PRICE, SNAPSHOT)
 
         with pytest.raises(
-            StrategyCriticalError, match=r"an entry takes one with stop_loss\(\)"
+            BotCriticalError, match=r"an entry takes one with stop_loss\(\)"
         ):
             BookKeeper().add(entry)
 
@@ -335,7 +335,7 @@ class TestTargetSizing:
         target = account.long_target(BTC_USDT, SNAPSHOT)
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match="a position target has no stop-loss to size from",
         ):
             target.size(RiskRatio(0.02), PRICE)

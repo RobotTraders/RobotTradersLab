@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.futures import FuturesAccount, FuturesMarketOrderAction
 from robottraderslab.ma_strategy.futures_ma_strategy import FuturesMAStrategy
 from robottraderslab.strategies import (
@@ -295,7 +295,7 @@ class TestTagValidation:
         ]
         strategy = _make_strategy(mock_account, backtest_trading_system, profiles)
 
-        with pytest.raises(StrategyCriticalError, match="1d-dup"):
+        with pytest.raises(BotCriticalError, match="1d-dup"):
             await strategy.setup(StrategyRequirements())
 
     async def test_same_tag_on_different_timeframes_is_not_a_collision(

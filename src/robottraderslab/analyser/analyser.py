@@ -2,7 +2,7 @@ import logging
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import pandas as pd
 
@@ -24,7 +24,8 @@ from robottraderslab.bootstrap import (
     load_lightweight_chart_indicators,
 )
 from robottraderslab.chart import ChartService
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
+from robottraderslab.plotting import PlottingService
 from robottraderslab.reporting import (
     create_run_folder,
     print_filtered_analysis,
@@ -62,9 +63,6 @@ from .trade_metrics import (
     compute_trade_metrics,
 )
 
-if TYPE_CHECKING:
-    from robottraderslab.plotting import PlottingService
-
 logger = logging.getLogger(__name__)
 
 _REPORT_HTML_NAME = "report.html"
@@ -83,7 +81,7 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
         trade_metrics: TradeMetricsResult,
         equity_metrics: EquityMetricsResult,
         trade_drawdown: TradeDrawdownMetrics,
-        plotting_service: "PlottingService",
+        plotting_service: PlottingService,
         chart_service: ChartService,
         reference_price: pd.Series | None = None,
         reference_symbol_str: str | None = None,
@@ -119,8 +117,6 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
             profiles: The configurations the strategy ran, each holding a
                 symbol, a timeframe and indicator parameters.
         """
-        from robottraderslab.plotting import PlottingService
-
         trades = name_profiles(analysis_input.trades, profiles)
         open_positions = analysis_input.open_positions
         equity_curve = analysis_input.equity_curve
@@ -188,7 +184,7 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
                 symbol, a timeframe and indicator parameters.
 
         Raises:
-            StrategyCriticalError: If the symbols settle in more than one
+            BotCriticalError: If the symbols settle in more than one
                 currency.
         """
         return cls.from_analysis_inputs(
@@ -263,9 +259,10 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
         return compute_trade_metrics(self._trades, trade_filter)
 
     def get_summary_metrics(self) -> SummaryMetrics:
-        """Return the subset of metrics used by grid search optimisation."""
         return SummaryMetrics(
             sharpe_ratio=self._equity_metrics.sharpe_ratio,
+            sortino_ratio=self._equity_metrics.sortino_ratio,
+            calmar_ratio=self._equity_metrics.calmar_ratio,
             roi=self._equity_metrics.roi,
             max_drawdown=self._equity_metrics.max_drawdown,
             win_rate=self._trade_metrics.win_rate,
@@ -569,8 +566,8 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
                 configuration=config_file.read_text(encoding="utf-8"),
                 run_label=f"{config_file.stem} · {timestamp}",
             )
-        except (Exception, ExchangeCriticalError, StrategyCriticalError):
-            logger.warning(
+        except (Exception, ExchangeCriticalError, BotCriticalError):
+            logger.error(
                 "No chart page written for `%s`", indicators_name, exc_info=True
             )
             return None
@@ -579,10 +576,7 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
 def _reference_display_name(symbol_str: str | None) -> str | None:
     if symbol_str is None:
         return None
-    try:
-        return str(Symbol.create(symbol_str).base)
-    except ValueError:
-        return symbol_str
+    return str(Symbol.create(symbol_str).base)
 
 
 def _metrics_per_side(trades: pd.DataFrame) -> list[TradeMetricsResult]:

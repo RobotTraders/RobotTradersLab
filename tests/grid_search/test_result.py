@@ -57,6 +57,8 @@ class TestFromBacktest:
         point = GridPoint(parameters={"length": 10.0})
         summary = SummaryMetrics(
             sharpe_ratio=1.85,
+            sortino_ratio=2.4,
+            calmar_ratio=3.1,
             roi=0.092,
             max_drawdown=-0.037,
             win_rate=0.667,
@@ -73,6 +75,8 @@ class TestFromBacktest:
         assert optimisation_result.is_successful
         assert optimisation_result.grid_point is point
         assert optimisation_result.sharpe_ratio == 1.85
+        assert optimisation_result.sortino_ratio == 2.4
+        assert optimisation_result.calmar_ratio == 3.1
         assert optimisation_result.roi == 0.092
         assert optimisation_result.max_drawdown == -0.037
         assert optimisation_result.win_rate == 0.667
@@ -134,3 +138,5 @@ class TestFromBacktestWithoutFills:
         assert flat_result.max_drawdown == 0.0
         assert flat_result.risk_reward_ratio == 0.0
         assert flat_result.sharpe_ratio == 0.0
+        assert flat_result.sortino_ratio == 0.0
+        assert flat_result.calmar_ratio == 0.0

@@ -6,8 +6,8 @@ from typing import cast
 
 from robottraderslab._core import FillDescriber, OHLCVRow, OHLCVsBySymbol, Symbol
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeRecoverableError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 from robottraderslab.exchanges import (
@@ -587,7 +587,7 @@ class BaseSimulationEngine(ABC):
         at placement or later on a candle.
 
         Raises:
-            StrategyCriticalError: If the stop-loss or the take-profit sits at
+            BotCriticalError: If the stop-loss or the take-profit sits at
                 or beyond the entry price on the side it would close.
         """
         sl = order.stop_loss
@@ -599,20 +599,20 @@ class BaseSimulationEngine(ABC):
         entry = f"{'long' if order.side == OrderSide.BUY else 'short'} entry on {order.symbol} at {entry_price}"
         if order.side == OrderSide.BUY:
             if sl and sl.trigger_price >= entry_price:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"Invalid SL {sl.trigger_price} for {entry}: SL must be below entry price"
                 )
             if tp and tp.trigger_price <= entry_price:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"Invalid TP {tp.trigger_price} for {entry}: TP must be above entry price"
                 )
         else:
             if sl and sl.trigger_price <= entry_price:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"Invalid SL {sl.trigger_price} for {entry}: SL must be above entry price"
                 )
             if tp and tp.trigger_price >= entry_price:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"Invalid TP {tp.trigger_price} for {entry}: TP must be below entry price"
                 )
 

@@ -9,7 +9,7 @@ import pytest
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.backtester.backtester import Backtester
 from robottraderslab.backtester.simulator import SimulatedFuturesExchange
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.ohlcv_provider import CSVOHLCVProvider
 from robottraderslab.strategies import (
@@ -165,5 +165,5 @@ def test_a_market_entry_with_its_stop_above_the_close_stops_the_run(
                 account.long_entry(BTCUSDT_PERP, 1.0).stop_loss(120.0).build()
             )
 
-    with pytest.raises(StrategyCriticalError, match="Invalid SL 120.0"):
+    with pytest.raises(BotCriticalError, match="Invalid SL 120.0"):
         run_backtest(ENTRY_CANDLE_WICKS_DOWN, enter_once_with_a_stop_above)

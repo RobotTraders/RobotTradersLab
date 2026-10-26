@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import NewType, Protocol
 
 from .position import PositionSide, PositionSnapshot
+from .quantity import StepCount, to_step_count
 
 TrackingId = NewType("TrackingId", str)
 
@@ -49,3 +50,7 @@ def signed_position(position: TrackedPosition | PositionSnapshot) -> float:
     if position.side == PositionSide.LONG:
         return position.quantity
     return -position.quantity
+
+
+def position_steps(position: TrackedPosition | PositionSnapshot | None) -> StepCount:
+    return 0 if position is None else to_step_count(signed_position(position))

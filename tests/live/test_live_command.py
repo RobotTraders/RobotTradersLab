@@ -9,10 +9,11 @@ import pytest
 import robottraderslab.live.command
 from robottraderslab._core import EX_TEMPFAIL, hold_instance_lock
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 from robottraderslab.live.command import main
 
 DECLARED = {
+    "name": "test-bot",
     "strategy": {"strategy_class": "fake-strategy-99"},
     "live": {
         "trading_account": {"account_name": "demoaccount"},
@@ -120,9 +121,9 @@ def test_run_livebot_is_called_with_the_loaded_config(bot_config, run_livebot):
 
 
 def test_a_config_file_that_cannot_be_read(read_bot_config, run_livebot):
-    read_bot_config.side_effect = StrategyCriticalError("no config file at `nope`")
+    read_bot_config.side_effect = BotCriticalError("no config file at `nope`")
 
-    with pytest.raises(StrategyCriticalError, match="no config file"):
+    with pytest.raises(BotCriticalError, match="no config file"):
         _run()
 
     run_livebot.assert_not_called()

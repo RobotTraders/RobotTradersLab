@@ -9,10 +9,10 @@ from robottraderslab._core import (
     Symbol,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
-    StrategyCriticalError,
 )
 
 from .futures_exchange_protocol import FuturesExchangeProtocol
@@ -105,7 +105,7 @@ async def _in_order[T](calls: Iterable[Awaitable[T]]) -> list[T | BaseException]
 async def _capture[T](call: Awaitable[T]) -> T | BaseException:
     try:
         return await call
-    except (Exception, ExchangeCriticalError, StrategyCriticalError) as error:
+    except (Exception, ExchangeCriticalError, BotCriticalError) as error:
         return error
 
 
@@ -129,7 +129,7 @@ def _collect_placed(
 def _accepted[T](symbol: Symbol, outcome: T | BaseException, request: str) -> T | None:
     if isinstance(
         outcome,
-        (ExchangeCriticalError, StrategyCriticalError, ExchangeTransientError),
+        (ExchangeCriticalError, BotCriticalError, ExchangeTransientError),
     ):
         raise outcome
     if isinstance(outcome, ExchangeRecoverableError):

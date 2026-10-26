@@ -5,12 +5,14 @@ import pytest
 
 from robottraderslab._core import PlacementReserve, TimeInForce, TriggerType
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 
 @pytest.fixture
 def toml_string() -> str:
     return """\
+name = "test-bot"
+
 [strategy]
 strategy_class = "dummy"
 lookback = 5432
@@ -25,6 +27,8 @@ def toml_filename() -> str:
 @pytest.fixture
 def backtest_preamble() -> str:
     return """\
+name = "test-bot"
+
 [strategy]
 strategy_class = "dummy"
 
@@ -40,6 +44,8 @@ initial_balance = { USDT = 1000.0 }
 @pytest.fixture
 def live_preamble() -> str:
     return """\
+name = "test-bot"
+
 [strategy]
 strategy_class = "dummy"
 
@@ -47,6 +53,16 @@ strategy_class = "dummy"
 trading_account = {}
 ohlcv_provider = {}
 """
+
+
+def test_a_live_bot_cleans_removed_profiles_unless_it_says_not(live_preamble):
+    assert BotConfig.from_text(live_preamble).live.clean_removed_profiles is True
+
+
+def test_a_live_bot_turns_the_removed_profile_cleanup_off(live_preamble):
+    text = live_preamble + "clean_removed_profiles = false\n"
+
+    assert BotConfig.from_text(text).live.clean_removed_profiles is False
 
 
 def test_load_from_file(toml_filename):
@@ -271,6 +287,29 @@ margin_markup = 0.01
     assert bot_config.backtest.placement_reserve.margin_markup == 0.01
 
 
+def test_a_bot_declaring_no_name_is_named_after_its_file(tmp_path):
+    toml_file = tmp_path / "impulse-kraken.toml"
+    toml_file.write_text("[strategy]\nstrategy_class = 'dummy'\n")
+
+    bot_config = BotConfig.from_file(str(toml_file))
+
+    assert bot_config.name == "impulse-kraken"
+
+
+def test_a_declared_name_wins_over_the_file_stem(tmp_path):
+    toml_file = tmp_path / "impulse-kraken.toml"
+    toml_file.write_text("name = 'xrp-pilot'\n[strategy]\nstrategy_class = 'dummy'\n")
+
+    bot_config = BotConfig.from_file(str(toml_file))
+
+    assert bot_config.name == "xrp-pilot"
+
+
+def test_a_bot_declared_from_text_states_its_name():
+    with pytest.raises(BotCriticalError, match="name"):
+        BotConfig.from_text("[strategy]\nstrategy_class = 'dummy'\n")
+
+
 def test_config_dir_set_to_toml_parent(tmp_path):
     toml_file = tmp_path / "workspace" / "my_strategy" / "bot-example.toml"
     toml_file.parent.mkdir(parents=True)
@@ -445,6 +484,8 @@ def test_the_environment_cannot_replace_a_declared_field(tmp_path, monkeypatch):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text(
         """\
+name = "test-bot"
+
 secrets_file = "declared.toml"
 
 [strategy]
@@ -462,6 +503,8 @@ def test_the_retired_flat_notifiers_table(tmp_path):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text(
         """\
+name = "test-bot"
+
 [strategy]
 strategy_class = "dummy"
 
@@ -472,7 +515,7 @@ notifiers = { discord = { webhook_url = "https://example.invalid" } }
 """
     )
 
-    with pytest.raises(StrategyCriticalError, match="declare each subscription under"):
+    with pytest.raises(BotCriticalError, match="declare each subscription under"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -480,6 +523,8 @@ def test_the_retired_custom_handlers_table(tmp_path):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text(
         """\
+name = "test-bot"
+
 [strategy]
 strategy_class = "dummy"
 
@@ -492,7 +537,7 @@ custom_handlers = { discord = { class = "x" } }
 """
     )
 
-    with pytest.raises(StrategyCriticalError, match="declare the handler under"):
+    with pytest.raises(BotCriticalError, match="declare the handler under"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -502,7 +547,7 @@ def test_the_retired_backtest_reference_symbol(tmp_path, backtest_preamble):
         backtest_preamble + 'ohlcv_provider = {}\nreference_symbol = "BTC/USDT:USDT"\n'
     )
 
-    with pytest.raises(StrategyCriticalError, match=r"declare it under `\[report\]`"):
+    with pytest.raises(BotCriticalError, match=r"declare it under `\[report\]`"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -512,9 +557,7 @@ def test_the_retired_backtest_reports_dir(tmp_path, backtest_preamble):
         backtest_preamble + 'ohlcv_provider = {}\nreports_dir = "reports"\n'
     )
 
-    with pytest.raises(
-        StrategyCriticalError, match=r"`backtest.reports_dir` is not read"
-    ):
+    with pytest.raises(BotCriticalError, match=r"`backtest.reports_dir` is not read"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -524,7 +567,7 @@ def test_a_reference_symbol_the_engine_cannot_parse(tmp_path):
         '[strategy]\nstrategy_class = "dummy"\n\n[report]\nreference_symbol = "BTC"\n'
     )
 
-    with pytest.raises(StrategyCriticalError, match="Invalid symbol format: BTC"):
+    with pytest.raises(BotCriticalError, match="Invalid symbol format: BTC"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -534,7 +577,7 @@ def test_a_reporting_key_the_engine_does_not_declare(tmp_path):
         '[strategy]\nstrategy_class = "dummy"\n\n[report]\nreference_symbo = "BTC/USDT"\n'
     )
 
-    with pytest.raises(StrategyCriticalError, match="reference_symbo"):
+    with pytest.raises(BotCriticalError, match="reference_symbo"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -544,7 +587,7 @@ def test_a_section_the_engine_does_not_declare(tmp_path):
         '[strategy]\nstrategy_class = "dummy"\n\n[bakctest]\nfee = 0.1\n'
     )
 
-    with pytest.raises(StrategyCriticalError, match="bakctest"):
+    with pytest.raises(BotCriticalError, match="bakctest"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -552,14 +595,14 @@ def test_a_bot_declaring_no_strategy(tmp_path):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text("[live]\n")
 
-    with pytest.raises(StrategyCriticalError, match="strategy"):
+    with pytest.raises(BotCriticalError, match="strategy"):
         BotConfig.from_file(str(toml_file))
 
 
 def test_a_config_file_that_is_not_there(tmp_path):
     missing = tmp_path / "absent" / "bot-example.toml"
 
-    with pytest.raises(StrategyCriticalError, match=str(missing.name)):
+    with pytest.raises(BotCriticalError, match=str(missing.name)):
         BotConfig.from_file(str(missing))
 
 
@@ -571,7 +614,7 @@ def test_a_credential_written_in_the_file_is_never_logged(tmp_path, caplog):
         'api_key = "a-real-key" }\n'
     )
 
-    with caplog.at_level(logging.DEBUG), pytest.raises(StrategyCriticalError):
+    with caplog.at_level(logging.DEBUG), pytest.raises(BotCriticalError):
         BotConfig.from_file(str(toml_file))
 
     assert "a-real-key" not in caplog.text
@@ -585,7 +628,7 @@ def test_an_inline_credential_in_trading_account_is_refused(tmp_path):
         'secret_key = "shh" }\n'
     )
 
-    with pytest.raises(StrategyCriticalError, match="live.trading_account.secret_key"):
+    with pytest.raises(BotCriticalError, match="live.trading_account.secret_key"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -598,7 +641,7 @@ def test_an_inline_credential_in_a_live_notifier_occasion_is_refused(tmp_path):
     )
 
     with pytest.raises(
-        StrategyCriticalError, match="live.notifier.discord.fills.webhook_url"
+        BotCriticalError, match="live.notifier.discord.fills.webhook_url"
     ):
         BotConfig.from_file(str(toml_file))
 
@@ -613,7 +656,7 @@ def test_an_inline_credential_in_a_backtest_notifier_occasion_is_refused(
     )
 
     with pytest.raises(
-        StrategyCriticalError, match="backtest.notifier.discord.log.webhook_url"
+        BotCriticalError, match="backtest.notifier.discord.log.webhook_url"
     ):
         BotConfig.from_file(str(toml_file))
 
@@ -653,7 +696,7 @@ def test_a_config_that_is_not_valid_toml_names_the_file(tmp_path):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text("[[bot]\n")
 
-    with pytest.raises(StrategyCriticalError, match="is not valid TOML"):
+    with pytest.raises(BotCriticalError, match="is not valid TOML"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -676,12 +719,12 @@ venueOnly = "99"
 
 
 def test_an_orders_key_the_engine_does_not_set(toml_string):
-    with pytest.raises(StrategyCriticalError, match="time_in_forse"):
+    with pytest.raises(BotCriticalError, match="time_in_forse"):
         BotConfig.from_text(toml_string + '\n[orders.entry]\ntime_in_forse = "ioc"\n')
 
 
 def test_orders_params_naming_no_installed_connector(toml_string):
-    with pytest.raises(StrategyCriticalError, match="bitgte"):
+    with pytest.raises(BotCriticalError, match="bitgte"):
         BotConfig.from_text(
             toml_string + '\n[orders.entry.params.bitgte]\nvenueOnly = "99"\n'
         )
@@ -706,5 +749,5 @@ trigger_type = "last_price"
 
 
 def test_an_orders_trigger_type_outside_its_values(toml_string):
-    with pytest.raises(StrategyCriticalError, match="trigger_type"):
+    with pytest.raises(BotCriticalError, match="trigger_type"):
         BotConfig.from_text(toml_string + '\n[orders.exit]\ntrigger_type = "close"\n')

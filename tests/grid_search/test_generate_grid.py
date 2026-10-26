@@ -1,6 +1,6 @@
 import pytest
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search.optimiser import _generate_grid
 from robottraderslab.grid_search.parameter import (
     ExplicitParameter,
@@ -25,7 +25,7 @@ class TestGridGeneratorValidation:
         ]
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"`\[optimisation\]` declares 1\.",
         ):
             _generate_grid(params)
@@ -59,7 +59,7 @@ class TestGridGeneratorValidation:
         ]
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"`\[optimisation\]` declares 3\..*`\[strategy\]`",
         ):
             _generate_grid(params)
@@ -76,7 +76,7 @@ class TestGridGeneratorValidation:
             )
         ]
 
-        with pytest.raises(StrategyCriticalError) as refusal:
+        with pytest.raises(BotCriticalError) as refusal:
             _generate_grid(params)
 
         assert "`[strategy]`" not in str(refusal.value)

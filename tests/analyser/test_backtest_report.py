@@ -159,7 +159,7 @@ class TestSaveRun:
         assert directory.parent == tmp_path / "reports"
 
     def test_a_config_naming_no_file_cannot_be_saved(self):
-        bot_config = BotConfig.from_text(_BOT_TOML)
+        bot_config = BotConfig.from_text(f'name = "test-bot"\n{_BOT_TOML}')
 
         with pytest.raises(ValueError, match="no configuration file"):
             _analyser(_TRADES).save_run(bot_config, "test")

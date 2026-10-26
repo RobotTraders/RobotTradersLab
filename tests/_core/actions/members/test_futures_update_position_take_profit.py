@@ -5,7 +5,12 @@ import pytest
 from robottraderslab import Symbol
 from robottraderslab._core import ActionResult
 from robottraderslab.exceptions import ExchangeRecoverableError
-from robottraderslab.exchanges import FuturesExchangeProtocol, PlacedOrder
+from robottraderslab.exchanges import (
+    FuturesExchangeProtocol,
+    PlacedOrder,
+    TriggerType,
+    tag_of,
+)
 from robottraderslab.futures.futures_update_position_take_profit import (
     UpdatePositionTakeProfitAction,
 )
@@ -34,6 +39,20 @@ async def test_execute_returns_empty_action_result(update_take_profit_action):
 
     assert isinstance(action_result, ActionResult)
     assert action_result.orders == ()
+
+
+async def test_the_update_carries_the_actions_id_with_the_tag_tp(
+    update_take_profit_action,
+):
+    await update_take_profit_action.execute()
+
+    update_take_profit_action.exchange.update_position_take_profit.assert_awaited_once_with(
+        update_take_profit_action.symbol,
+        55_000.0,
+        TriggerType.DEFAULT,
+        update_take_profit_action.client_order_id,
+    )
+    assert tag_of(update_take_profit_action.client_order_id) == "tp"
 
 
 async def test_an_accepted_update_holds_the_order_the_venue_acknowledged(

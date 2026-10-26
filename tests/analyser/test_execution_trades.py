@@ -961,6 +961,47 @@ class TestTagAttribution:
 
         assert trades.iloc[0]["tag"] == "closed"
 
+    def test_a_close_carrying_no_label_takes_the_tag_of_the_leg_it_closed(self):
+        opened = _execution(
+            side=OrderSide.BUY,
+            quantity=2.0,
+            timestamp=datetime(2026, 8, 1, tzinfo=UTC),
+            client_order_id=client_order_id_carrying("1h-alpha"),
+        )
+        stopped = _execution(
+            execution_id="execution-2",
+            side=OrderSide.SELL,
+            quantity=2.0,
+            timestamp=datetime(2026, 8, 2, tzinfo=UTC),
+            kind="stop-loss",
+            realised_profit=-5.0,
+        )
+
+        trades = build_trades([opened, stopped], since=_SINCE, until=_UNTIL).trades
+
+        assert trades.iloc[0]["tag"] == "1h-alpha"
+
+    def test_a_protection_carrying_another_tag_keeps_it(self):
+        opened = _execution(
+            side=OrderSide.BUY,
+            quantity=2.0,
+            timestamp=datetime(2026, 8, 1, tzinfo=UTC),
+            client_order_id=client_order_id_carrying("1h-alpha"),
+        )
+        stopped = _execution(
+            execution_id="execution-2",
+            side=OrderSide.SELL,
+            quantity=2.0,
+            timestamp=datetime(2026, 8, 2, tzinfo=UTC),
+            kind="stop-loss",
+            realised_profit=-5.0,
+            client_order_id=client_order_id_carrying("1h-other"),
+        )
+
+        trades = build_trades([opened, stopped], since=_SINCE, until=_UNTIL).trades
+
+        assert trades.iloc[0]["tag"] == "1h-other"
+
     def test_partial_closes_on_a_stacked_symbol_each_carry_their_own_closing_tag(
         self,
     ):

@@ -16,7 +16,7 @@ def run_grid_search(bot_config: BotConfig) -> GridSearchResults:
         Every point's outcome, ready to analyse and plot.
 
     Raises:
-        StrategyCriticalError: If the grid sweeps a number of parameters other
+        BotCriticalError: If the grid sweeps a number of parameters other
             than two.
     """
     auto_configure_notebook_logging()

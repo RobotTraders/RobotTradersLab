@@ -16,9 +16,9 @@ if sys.platform == "win32":
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab._core import DataError, OhlcvValidationError
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeTransientError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 from robottraderslab.exchanges import no_candles
@@ -658,9 +658,9 @@ class TestCriticalsFromTheVenue:
         "failure",
         [
             ExchangeCriticalError("key revoked"),
-            StrategyCriticalError("the strategy names no account"),
+            BotCriticalError("the strategy names no account"),
         ],
-        ids=["exchange_critical", "strategy_critical"],
+        ids=["exchange_critical", "bot_critical"],
     )
     async def test_a_critical_the_venue_raises_reaches_the_caller_untouched(
         self, failure

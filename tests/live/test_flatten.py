@@ -3,12 +3,20 @@ from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab._core import OHLCVRow, PlacementReserve, profile_tag
+from robottraderslab._core import (
+    EX_TEMPFAIL,
+    OHLCVRow,
+    PlacementReserve,
+    bot_segment,
+    hold_instance_lock,
+    profile_tag,
+    tag_of,
+)
 from robottraderslab.backtester.simulator import (
     CacheFillRecorder,
     FeeRates,
@@ -17,9 +25,9 @@ from robottraderslab.backtester.simulator import (
     fee_model_for,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
-    StrategyCriticalError,
 )
 from robottraderslab.exchanges import (
     FuturesExchangeProtocol,
@@ -164,7 +172,7 @@ def test_the_close_order_is_reduce_only_opposite_side_and_full_quantity(
     _run(config_file, symbol="BTC/USDT:USDT")
 
     exchange.place_market_order.assert_awaited_once_with(
-        _BTC, OrderSide.SELL, 2.5, reduce_only=True
+        _BTC, OrderSide.SELL, 2.5, reduce_only=True, client_order_id=ANY
     )
 
 
@@ -176,8 +184,30 @@ def test_a_short_position_closes_with_a_buy(exchange, config_file):
     _run(config_file, symbol="BTC/USDT:USDT")
 
     exchange.place_market_order.assert_awaited_once_with(
-        _BTC, OrderSide.BUY, 1.5, reduce_only=True
+        _BTC, OrderSide.BUY, 1.5, reduce_only=True, client_order_id=ANY
     )
+
+
+def test_the_close_carries_the_bots_id_under_the_flatten_tag(exchange, config_file):
+    exchange.get_open_positions.return_value = {_BTC: _position(_BTC)}
+
+    _run(config_file, symbol="BTC/USDT:USDT")
+
+    close_id = exchange.place_market_order.await_args.kwargs["client_order_id"]
+    assert close_id.startswith(bot_segment("impulse-bot-example"))
+    assert tag_of(close_id) == "flatten"
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["full", "external"])
+def test_a_config_trading_in_another_process_is_left_alone(
+    exchange, config_file, caplog, external
+):
+    with hold_instance_lock(config_file), caplog.at_level(logging.WARNING):
+        exit_code = _run(config_file, external=external)
+
+    assert exit_code == EX_TEMPFAIL
+    assert exchange.mock_calls == []
+    assert "impulse-bot-example.toml is already trading" in caplog.text
 
 
 def test_omitting_symbol_targets_the_union_of_orders_and_positions(
@@ -244,12 +274,12 @@ def test_a_bot_without_a_live_section_is_refused(tmp_path):
     backtest_only = tmp_path / "backtest-only.toml"
     backtest_only.write_text('[strategy]\nstrategy_class = "impulse"\n')
 
-    with pytest.raises(StrategyCriticalError, match=r"\[live\]"):
+    with pytest.raises(BotCriticalError, match=r"\[live\]"):
         main(config=backtest_only, symbol=None, external=False)
 
 
 def test_a_missing_configuration_file_is_refused(tmp_path):
-    with pytest.raises(StrategyCriticalError, match="absent.toml"):
+    with pytest.raises(BotCriticalError, match="absent.toml"):
         main(config=tmp_path / "absent.toml", symbol=None, external=False)
 
 
@@ -281,9 +311,16 @@ class _FillingSimulator(SimulatedFuturesExchange):
     a venue fills one as it is placed.
     """
 
+    placed_ids: list[str | None]
+
+    def __init__(self, *arguments: Any, **keywords: Any) -> None:
+        super().__init__(*arguments, **keywords)
+        self.placed_ids = []
+
     async def place_market_order(
         self, symbol: Symbol, side: OrderSide, quantity: float, **kwargs: Any
     ) -> PlacedOrder:
+        self.placed_ids.append(kwargs.get("client_order_id"))
         placed = await super().place_market_order(symbol, side, quantity, **kwargs)
         moment = datetime.now(UTC) - timedelta(days=1)
         self.simulation_engine.simulate_on_current_ohlcvs(
@@ -453,6 +490,7 @@ async def test_a_symbol_the_bot_does_not_declare_is_left_alone(
     await _a_profile_fills(simulator, _BTC, OrderSide.BUY, 0.02, "p1")
     await _a_hand_fills(simulator, _BTC, OrderSide.BUY, 0.06)
     await _a_hand_fills(simulator, _ETH, OrderSide.BUY, 0.5)
+    caplog.clear()
 
     with caplog.at_level(logging.INFO):
         exit_code = _run_external(bot)
@@ -482,7 +520,7 @@ async def test_a_strategy_tracking_no_profile_is_refused(simulator, tmp_path):
     untracked = tmp_path / "ma-bot-example.toml"
     untracked.write_text(_ma_bot([]))
 
-    with pytest.raises(StrategyCriticalError, match="tracks no profile"):
+    with pytest.raises(BotCriticalError, match="tracks no profile"):
         _run_external(untracked)
 
 
@@ -530,3 +568,22 @@ def test_another_symbols_open_order_does_not_fail_the_verdict(
 
     assert exit_code == 0
     assert "is flat on BTC/USDT:USDT" in caplog.text
+
+
+async def test_the_external_close_carries_the_bots_id_and_no_profile_owns_it(
+    simulator, make_ma_bot
+):
+    bot = make_ma_bot([(_BTC, "p1")])
+    await _a_profile_fills(simulator, _BTC, OrderSide.BUY, 0.02, "p1")
+    await _a_hand_fills(simulator, _BTC, OrderSide.BUY, 0.06)
+    simulator.placed_ids.clear()
+
+    first_exit_code = _run_external(bot)
+    second_exit_code = _run_external(bot)
+
+    (close_id,) = simulator.placed_ids
+    assert close_id.startswith(bot_segment("ma-bot-example"))
+    assert tag_of(close_id) == "flatten"
+    assert first_exit_code == 0
+    assert second_exit_code == 0
+    assert simulator.simulation_engine.open_positions[_BTC].quantity == 0.02

@@ -93,7 +93,9 @@ async def test_corrupt_state_is_reset_to_a_full_budget(
     virtual_sleeps.assert_not_called()
 
 
-async def test_an_unreachable_budget_never_blocks(caplog, virtual_sleeps):
+async def test_an_unreachable_budget_never_blocks(
+    caplog, make_unshared_report_levels, virtual_sleeps
+):
     state_file_path(SCOPE).parent.mkdir(parents=True, exist_ok=True)
     state_file_path(SCOPE).mkdir()
     bucket = _make_bucket()
@@ -103,4 +105,4 @@ async def test_an_unreachable_budget_never_blocks(caplog, virtual_sleeps):
         await bucket.consume(2.0)
 
     virtual_sleeps.assert_not_called()
-    assert caplog.text.count("not shared between processes") == 1
+    assert make_unshared_report_levels() == ["ERROR"]

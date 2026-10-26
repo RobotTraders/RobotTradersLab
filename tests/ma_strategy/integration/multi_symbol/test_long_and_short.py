@@ -10,6 +10,8 @@ EXPECTED_SYMBOLS = {
 }
 
 TOML_CONFIG = """\
+name = "test-bot"
+
 [backtest]
 initial_balance = { USDT = 10000.0 }
 maker_fee_rate = 0.001

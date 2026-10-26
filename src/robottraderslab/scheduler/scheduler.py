@@ -18,9 +18,10 @@ from robottraderslab._core import (
     hold_instance_lock,
     run_async,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .launch_memory import BotLaunch, LaunchMemory
+from .shared_account import refuse_shared_account
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,13 @@ def run_scheduler(registry_file: str | Path) -> int:
         another instance of itself trading is not one of them.
 
     Raises:
-        StrategyCriticalError: If the registry cannot be read or parsed.
+        BotCriticalError: If the registry cannot be read or parsed, or two
+            of its bots trade one account under the same bot digest.
     """
     registry_path = Path(registry_file)
     registry = read_registry(registry_path)
     bots = _load_registered_bots(registry, registry_path)
+    refuse_shared_account([bot.config for bot in bots])
 
     with hold_instance_lock(registry_path) as held:
         if not held:
@@ -92,21 +95,19 @@ def read_registry(registry_file: Path) -> dict[str, Any]:
     names the file it could not read.
 
     Raises:
-        StrategyCriticalError: If the file is missing, unreadable or not
+        BotCriticalError: If the file is missing, unreadable or not
             valid TOML.
     """
     try:
         return tomllib.loads(registry_file.read_text())
     except FileNotFoundError as e:
-        raise StrategyCriticalError(
-            f"there is no registry file at `{registry_file}`"
-        ) from e
+        raise BotCriticalError(f"there is no registry file at `{registry_file}`") from e
     except OSError as e:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"cannot read the registry at `{registry_file}`: {e.strerror}"
         ) from e
     except tomllib.TOMLDecodeError as e:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"the registry at `{registry_file}` is not valid TOML: {e}"
         ) from e
 

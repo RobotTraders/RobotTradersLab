@@ -6,7 +6,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab._core.account_snapshot import NamedAccount
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import (
     Balance,
     Execution,
@@ -219,25 +219,25 @@ class TestUndeclaredAccess:
     def test_open_orders_names_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="open_orders=True"):
+        with pytest.raises(BotCriticalError, match="open_orders=True"):
             snapshot.open_orders(BTCUSDT)
 
     def test_stop_loss_orders_names_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="open_orders=True"):
+        with pytest.raises(BotCriticalError, match="open_orders=True"):
             snapshot.stop_loss_orders(BTCUSDT)
 
     def test_position_names_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="positions=True"):
+        with pytest.raises(BotCriticalError, match="positions=True"):
             snapshot.position(BTCUSDT)
 
     def test_balance_names_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="balances=True"):
+        with pytest.raises(BotCriticalError, match="balances=True"):
             snapshot.balance("USDT")
 
     def test_balance_in_a_currency_no_declared_symbol_carries(self):
@@ -247,14 +247,14 @@ class TestUndeclaredAccess:
         )
 
         with pytest.raises(
-            StrategyCriticalError, match=r"EUR.*symbols=\[\.\.\.\], balances=True"
+            BotCriticalError, match=r"EUR.*symbols=\[\.\.\.\], balances=True"
         ):
             snapshot.balance("EUR")
 
     def test_equity_names_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="equity"):
+        with pytest.raises(BotCriticalError, match="equity"):
             snapshot.equity("USDT")
 
     def test_equity_raises_for_undeclared_currency(self):
@@ -262,13 +262,13 @@ class TestUndeclaredAccess:
             account_name=ACCOUNT_NAME, equities={"USDT": 10_000.0}
         )
 
-        with pytest.raises(StrategyCriticalError, match="USDC"):
+        with pytest.raises(BotCriticalError, match="USDC"):
             snapshot.equity("USDC")
 
     def test_margin_settings_names_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="margin_settings"):
+        with pytest.raises(BotCriticalError, match="margin_settings"):
             snapshot.margin_settings(BTCUSDT)
 
     def test_margin_settings_raises_for_undeclared_symbol(self):
@@ -277,13 +277,13 @@ class TestUndeclaredAccess:
             account_name=ACCOUNT_NAME, margin_settings={BTCUSDT: settings}
         )
 
-        with pytest.raises(StrategyCriticalError, match="ETH"):
+        with pytest.raises(BotCriticalError, match="ETH"):
             snapshot.margin_settings(ETHUSDT)
 
     def test_stop_loss_fills_name_the_missing_declaration(self):
         snapshot = AccountSnapshot(account_name=ACCOUNT_NAME)
 
-        with pytest.raises(StrategyCriticalError, match="executions=True"):
+        with pytest.raises(BotCriticalError, match="executions=True"):
             snapshot.stop_loss_fills(BTCUSDT)
 
     def test_stop_loss_fills_raise_even_when_fetched_for_reporting(
@@ -294,13 +294,13 @@ class TestUndeclaredAccess:
             account_name=ACCOUNT_NAME, executions=[fetched_for_reporting]
         )
 
-        with pytest.raises(StrategyCriticalError, match="executions=True"):
+        with pytest.raises(BotCriticalError, match="executions=True"):
             snapshot.stop_loss_fills(BTCUSDT)
 
     def test_error_names_the_account(self):
         snapshot = AccountSnapshot(account_name="hedge")
 
-        with pytest.raises(StrategyCriticalError, match="hedge"):
+        with pytest.raises(BotCriticalError, match="hedge"):
             snapshot.position(BTCUSDT)
 
 
@@ -417,5 +417,5 @@ class TestAccountSnapshots:
     def test_undeclared_account_names_itself(self):
         account_snapshots = AccountSnapshots({})
 
-        with pytest.raises(StrategyCriticalError, match="hedge"):
+        with pytest.raises(BotCriticalError, match="hedge"):
             account_snapshots.of(_account_named("hedge"))

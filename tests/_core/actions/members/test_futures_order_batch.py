@@ -6,10 +6,10 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
-    StrategyCriticalError,
 )
 from robottraderslab.exchanges import (
     FuturesExchangeBase,
@@ -237,7 +237,7 @@ class TestBatchAction:
         assert batch.orders[0].price == 50000.0
 
     async def test_unsized_builder_in_a_batch(self):
-        with pytest.raises(StrategyCriticalError, match="The order has no size"):
+        with pytest.raises(BotCriticalError, match="The order has no size"):
             self.account.place_orders([self.account.long_entry(BTC_USDT)])
 
     async def test_batch_without_orders(self):
@@ -558,7 +558,7 @@ class TestModifyAction:
         assert replacement.order.price == 49000.0
 
     async def test_unsized_builder_as_a_replacement(self):
-        with pytest.raises(StrategyCriticalError, match="The order has no size"):
+        with pytest.raises(BotCriticalError, match="The order has no size"):
             self.account.modify_order("a", self.account.long_entry(BTC_USDT))
 
     async def test_one_order_reshaped_alone(self):

@@ -1,4 +1,5 @@
 from robottraderslab._core.exceptions import (
+    BotCriticalError,
     DataError,
     DownloadError,
     ExchangeConnectionError,
@@ -9,11 +10,13 @@ from robottraderslab._core.exceptions import (
     MissingOhlcvDataError,
     NoOpenPositionError,
     RateLimitExceededError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 
+StrategyCriticalError = BotCriticalError
+
 __all__ = [
+    "BotCriticalError",
     "DataError",
     "DownloadError",
     "ExchangeConnectionError",
@@ -24,6 +27,5 @@ __all__ = [
     "MissingOhlcvDataError",
     "NoOpenPositionError",
     "RateLimitExceededError",
-    "StrategyCriticalError",
     "SymbolNotListedError",
 ]

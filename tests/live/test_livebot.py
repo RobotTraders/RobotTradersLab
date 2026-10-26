@@ -9,14 +9,20 @@ import pandas as pd
 import pytest
 
 from robottraderslab import Symbol, TimeFrame
-from robottraderslab._core import OHLCVProviderProtocol, TimeframeSnapshot, TriggerType
+from robottraderslab._core import (
+    OHLCVProviderProtocol,
+    TimeframeSnapshot,
+    TriggerType,
+    name_process,
+)
+from robottraderslab._core.actions.members import carries_this_bot
 from robottraderslab.exceptions import (
+    BotCriticalError,
     DataError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
     MissingOhlcvDataError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 from robottraderslab.exchanges import (
@@ -31,6 +37,7 @@ from robottraderslab.exchanges import (
     PositionSide,
     PositionSnapshot,
     VenueFill,
+    next_client_order_id,
     tag_of,
 )
 from robottraderslab.futures import FuturesAccount
@@ -266,9 +273,9 @@ def test_calls_on_filled_callbacks(
     "error",
     [
         ExchangeCriticalError("API down"),
-        StrategyCriticalError("API down"),
+        BotCriticalError("API down"),
     ],
-    ids=["exchange_critical", "strategy_critical"],
+    ids=["exchange_critical", "bot_critical"],
 )
 def test_with_critical_error_in_action_generation(account, error):
     symbol = Symbol.create("BTC/USDT:USDT")
@@ -301,9 +308,9 @@ def test_with_critical_error_in_action_generation(account, error):
     "error",
     [
         ExchangeCriticalError("Auth expired"),
-        StrategyCriticalError("Auth expired"),
+        BotCriticalError("Auth expired"),
     ],
-    ids=["exchange_critical", "strategy_critical"],
+    ids=["exchange_critical", "bot_critical"],
 )
 def test_with_critical_error_in_callback(
     account, exchange, create_strategy_place_market_order, error
@@ -460,6 +467,152 @@ def test_declared_account_state_reaches_the_strategy(account, exchange):
     exchange.get_open_positions.assert_awaited_once()
 
 
+def _removed_profile_cycle(
+    account: FuturesAccount,
+    exchange: Mock,
+    removed: Symbol,
+    rung_id: str,
+    *,
+    reads_executions: bool = True,
+) -> tuple[StrategyProtocol, Mock, list[datetime]]:
+    declared = Symbol.create("BTC/USDT:USDT")
+
+    class Strategy(StrategyProtocol):
+        market_type = "futures"
+
+        async def setup(self, requirements):
+            requirements.ohlcv.add(declared, "1d")
+            requirements.account.add(
+                account,
+                symbols=[declared],
+                positions=True,
+                open_orders=True,
+                executions=reads_executions,
+            )
+
+        def generate_trading_signals(self, ohlcvs):
+            pass
+
+        def book_trading_actions(
+            self, ohlcvs, account_snapshots, timestamp, bookkeeper, triggered_timeframes
+        ):
+            booked.append(timestamp)
+
+    booked: list[datetime] = []
+    exchange.get_open_positions.return_value = {
+        removed: PositionSnapshot(
+            symbol=removed,
+            side=PositionSide.LONG,
+            quantity=40.0,
+            average_entry_price=0.1,
+            entry_time=datetime(2026, 1, 1, tzinfo=UTC),
+            leverage=1.0,
+            liquidation_price=0.0,
+        )
+    }
+    rung = Mock(spec=OrderProtocol)
+    rung.order_id = "rung-1"
+    rung.symbol = removed
+    rung.client_order_id = rung_id
+    exchange.get_open_orders.return_value = [rung]
+    exchange.get_executions_since.return_value = [
+        Execution(
+            execution_id="fill-1",
+            order_id="order-1",
+            symbol=removed,
+            side=OrderSide.BUY,
+            price=0.1,
+            quantity=40.0,
+            timestamp=datetime(2025, 12, 31, tzinfo=UTC),
+            client_order_id=rung_id,
+        )
+    ]
+    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+    ohlcv_provider.fetch_ohlcv.return_value = pd.DataFrame(
+        {
+            "open": [100.0],
+            "high": [110.0],
+            "low": [90.0],
+            "close": [105.0],
+            "volume": [1000],
+        },
+        index=[pd.Timestamp("2024-01-01")],
+    )
+    return Strategy(), ohlcv_provider, booked
+
+
+def test_a_cycle_cleans_the_symbol_of_a_removed_profile(account, exchange):
+    removed = Symbol.create("DOGE/USDT:USDT")
+    name_process("impulse-kraken", datetime(2026, 10, 22, tzinfo=UTC))
+    strategy, ohlcv_provider, booked = _removed_profile_cycle(
+        account, exchange, removed, next_client_order_id("1d-alpha")
+    )
+
+    asyncio.run(LiveBot(strategy, ohlcv_provider).run())
+
+    closed = exchange.place_market_order.await_args.kwargs
+    assert closed["symbol"] == removed
+    assert closed["side"] == OrderSide.SELL
+    assert closed["quantity"] == 40.0
+    assert closed["reduce_only"] is True
+    assert carries_this_bot(closed["client_order_id"])
+    assert tag_of(closed["client_order_id"]) == "flatten"
+    exchange.cancel_order_by_id.assert_awaited_once_with(removed, "rung-1")
+
+
+def test_a_failed_cleanup_read_does_not_stop_the_strategy_booking(
+    account, exchange, caplog
+):
+    removed = Symbol.create("DOGE/USDT:USDT")
+    name_process("impulse-kraken", datetime(2026, 10, 22, tzinfo=UTC))
+    strategy, ohlcv_provider, booked = _removed_profile_cycle(
+        account,
+        exchange,
+        removed,
+        next_client_order_id("1d-alpha"),
+        reads_executions=False,
+    )
+    exchange.get_executions_since.side_effect = ExchangeRecoverableError("refused")
+
+    asyncio.run(LiveBot(strategy, ohlcv_provider).run())
+
+    assert len(booked) == 1
+    assert "Cleanup of removed profiles skipped" in caplog.text
+
+
+def test_an_unexpected_cleanup_failure_does_not_stop_the_strategy_booking(
+    account, exchange, caplog
+):
+    removed = Symbol.create("DOGE/USDT:USDT")
+    name_process("impulse-kraken", datetime(2026, 10, 22, tzinfo=UTC))
+    strategy, ohlcv_provider, booked = _removed_profile_cycle(
+        account,
+        exchange,
+        removed,
+        next_client_order_id("1d-alpha"),
+        reads_executions=False,
+    )
+    exchange.get_executions_since.side_effect = RuntimeError("broken read")
+
+    asyncio.run(LiveBot(strategy, ohlcv_provider).run())
+
+    assert len(booked) == 1
+    assert "Internal error cleaning removed profiles" in caplog.text
+
+
+def test_a_cycle_with_the_cleanup_off_leaves_the_symbol_alone(account, exchange):
+    removed = Symbol.create("DOGE/USDT:USDT")
+    name_process("impulse-kraken", datetime(2026, 10, 22, tzinfo=UTC))
+    strategy, ohlcv_provider, booked = _removed_profile_cycle(
+        account, exchange, removed, next_client_order_id("1d-alpha")
+    )
+
+    asyncio.run(LiveBot(strategy, ohlcv_provider, clean_removed_profiles=False).run())
+
+    exchange.place_market_order.assert_not_awaited()
+    exchange.cancel_order_by_id.assert_not_awaited()
+
+
 def test_no_account_reads_without_state_declarations(account, exchange):
     symbol = Symbol.create("BTC/USDT:USDT")
 
@@ -496,7 +649,7 @@ def test_raises_when_no_ohlcv_requirements(account):
     ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
     livebot = LiveBot(strategy, ohlcv_provider)
 
-    with pytest.raises(StrategyCriticalError, match="declared no OHLCV requirements"):
+    with pytest.raises(BotCriticalError, match="declared no OHLCV requirements"):
         asyncio.run(livebot.run())
 
 
@@ -1044,9 +1197,9 @@ def test_a_strategy_error_in_signal_generation_skips_the_cycle(account, caplog):
     "error",
     [
         ExchangeCriticalError("Signals broke"),
-        StrategyCriticalError("Signals broke"),
+        BotCriticalError("Signals broke"),
     ],
-    ids=["exchange_critical", "strategy_critical"],
+    ids=["exchange_critical", "bot_critical"],
 )
 def test_with_critical_error_in_signal_generation(account, error):
     symbol = Symbol.create("BTC/USDT:USDT")
@@ -1070,9 +1223,9 @@ def test_with_critical_error_in_signal_generation(account, error):
     "error",
     [
         ExchangeCriticalError("Refresh broke"),
-        StrategyCriticalError("Refresh broke"),
+        BotCriticalError("Refresh broke"),
     ],
-    ids=["exchange_critical", "strategy_critical"],
+    ids=["exchange_critical", "bot_critical"],
 )
 def test_with_critical_error_in_tracker_refresh(account, error):
     symbol = Symbol.create("BTC/USDT:USDT")
@@ -1701,7 +1854,7 @@ def test_a_protection_the_venue_rejects_once_rests_at_the_booked_level_when_the_
 
     assert exchange.update_position_take_profit.await_count == 2
     exchange.update_position_take_profit.assert_awaited_with(
-        DOGE, TAKE_PROFIT, TriggerType.DEFAULT
+        DOGE, TAKE_PROFIT, TriggerType.DEFAULT, ANY
     )
 
 
@@ -1728,8 +1881,10 @@ def test_a_cycle_whose_protections_all_rest_as_booked(
         asyncio.run(protection_livebot.run())
 
     exchange.update_position_take_profit.assert_awaited_once_with(
-        DOGE, TAKE_PROFIT, TriggerType.DEFAULT
+        DOGE, TAKE_PROFIT, TriggerType.DEFAULT, ANY
     )
+    sent_id = exchange.update_position_take_profit.await_args.args[3]
+    assert tag_of(sent_id) == "tp"
     assert caplog.records == []
 
 

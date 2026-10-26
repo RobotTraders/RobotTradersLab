@@ -28,7 +28,7 @@ def sma(close: npt.NDArray[np.float64], period: int) -> npt.NDArray[np.float64]:
     leaves empty over a weekend or a holiday carry no weight in the average.
 
     Raises:
-        StrategyCriticalError: If the series holds fewer published candles than
+        BotCriticalError: If the series holds fewer published candles than
             `period`.
     """
     published = published_candles(close)
@@ -66,7 +66,7 @@ def wma(close: npt.NDArray[np.float64], period: int) -> npt.NDArray[np.float64]:
     leaves empty over a weekend or a holiday carry no weight in the average.
 
     Raises:
-        StrategyCriticalError: If the series holds fewer published candles than
+        BotCriticalError: If the series holds fewer published candles than
             `period`.
     """
     weights = np.arange(1, period + 1, dtype=float)
@@ -93,7 +93,7 @@ def moving_average(
     """Moving average of a close-price series, of the kind `ma_type` names.
 
     Raises:
-        StrategyCriticalError: If a windowed average is asked for and the series
+        BotCriticalError: If a windowed average is asked for and the series
             holds fewer published candles than `period`.
     """
     return _AVERAGES_BY_TYPE[ma_type](close, period)

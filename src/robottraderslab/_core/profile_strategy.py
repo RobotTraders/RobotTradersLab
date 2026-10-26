@@ -23,7 +23,7 @@ from pydantic.errors import PydanticSchemaGenerationError
 from .account_requirements import AccountProtocol
 from .account_snapshot import AccountSnapshots
 from .actions import BookKeeper
-from .exceptions import StrategyCriticalError
+from .exceptions import BotCriticalError
 from .interfaces import StrategyProtocol
 from .ohlcv.ohlcvs import OHLCVs
 from .profile_failure_boundary import profile_failure_boundary
@@ -108,7 +108,7 @@ class ProfileStrategy(Generic[TProfile]):
                 attribute of the same name.
 
         Raises:
-            StrategyCriticalError: If a section or a setting holds a key the
+            BotCriticalError: If a section or a setting holds a key the
                 class declares no field or attribute for, a value its type
                 refuses, or leaves out a setting that has no default, or if a
                 `sizing` it declares is named by no key or by several.
@@ -228,13 +228,13 @@ class ProfileStrategy(Generic[TProfile]):
         """Check the instance the subclass initialised before running it.
 
         Raises:
-            StrategyCriticalError: If the subclass's initialiser never called
+            BotCriticalError: If the subclass's initialiser never called
                 the base's, a profile lacks `profile_id` or `timeframe`, or two
                 profiles share a profile id.
         """
         name = type(self).__name__
         if not hasattr(self, "_ProfileStrategy__trading_mode"):
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"{name}.__init__ must call super().__init__(**kwargs)"
             )
         profiles = self.profiles
@@ -243,7 +243,7 @@ class ProfileStrategy(Generic[TProfile]):
                 field for field in _PROFILE_FIELDS if not hasattr(profile, field)
             ]
             if missing:
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"{name}: profile {profile!r} lacks {', '.join(missing)}"
                 )
         counts = Counter(str(profile.profile_id) for profile in profiles)
@@ -251,7 +251,7 @@ class ProfileStrategy(Generic[TProfile]):
             profile_id for profile_id, count in counts.items() if count > 1
         )
         if duplicated:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"{name}: profiles share a profile_id: {', '.join(duplicated)}"
             )
 
@@ -264,7 +264,7 @@ def log_strategy_slots(strategy: StrategyProtocol) -> None:
     fills no slot.
 
     Raises:
-        StrategyCriticalError: If the strategy's profiles fail the checks its
+        BotCriticalError: If the strategy's profiles fail the checks its
             first run would make.
     """
     if not isinstance(strategy, ProfileStrategy):
@@ -377,7 +377,7 @@ def _build_profile(
 ) -> Any:
     """
     Raises:
-        StrategyCriticalError: If the section holds a key the profile class
+        BotCriticalError: If the section holds a key the profile class
             has no field for, or a value its type refuses.
     """
     where = f"{cls.__name__}: profile {index}{_market_of(section)}"
@@ -387,16 +387,16 @@ def _build_profile(
         return cls._profile_adapter.validate_python(section)
     except ValidationError as error:
         reasons = "; ".join(f"{key}: {reason}" for key, reason in _reasons(error))
-        raise StrategyCriticalError(f"{where}: {reasons}") from error
-    except StrategyCriticalError as error:
-        raise StrategyCriticalError(f"{where}: {error}") from error
+        raise BotCriticalError(f"{where}: {reasons}") from error
+    except BotCriticalError as error:
+        raise BotCriticalError(f"{where}: {error}") from error
 
 
 def _apply_settings(strategy: Any, settings: dict[str, Any]) -> None:
     """Set every `[strategy]` key on the typed class attribute it names.
 
     Raises:
-        StrategyCriticalError: If a key names no attribute, a value is refused
+        BotCriticalError: If a key names no attribute, a value is refused
             by the attribute's type, or an attribute without a default is
             not set.
     """
@@ -405,14 +405,12 @@ def _apply_settings(strategy: Any, settings: dict[str, Any]) -> None:
     if _SIZING_FIELD in declared:
         try:
             settings = _with_sizing(settings, cls.sizing_rules)
-        except StrategyCriticalError as error:
-            raise StrategyCriticalError(
-                f"{cls.__name__}: [strategy] {error}"
-            ) from error
+        except BotCriticalError as error:
+            raise BotCriticalError(f"{cls.__name__}: [strategy] {error}") from error
     unknown = sorted(set(settings) - set(declared))
     if unknown:
         known = f"; it declares {', '.join(declared)}" if declared else ""
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"{cls.__name__}: unknown [strategy] key {', '.join(unknown)}{known}"
         )
     for name, hint in declared.items():
@@ -421,14 +419,12 @@ def _apply_settings(strategy: Any, settings: dict[str, Any]) -> None:
                 value = TypeAdapter(hint).validate_python(settings[name])
             except ValidationError as error:
                 reasons = "; ".join(reason for _, reason in _reasons(error))
-                raise StrategyCriticalError(
+                raise BotCriticalError(
                     f"{cls.__name__}: [strategy] key {name}: {reasons}"
                 ) from error
             setattr(strategy, name, value)
         elif not hasattr(cls, name):
-            raise StrategyCriticalError(
-                f"{cls.__name__}: [strategy] key {name} is required"
-            )
+            raise BotCriticalError(f"{cls.__name__}: [strategy] key {name} is required")
 
 
 def _declared_settings(cls: type) -> dict[str, Any]:
@@ -447,7 +443,7 @@ def _with_sizing(
 ) -> dict[str, Any]:
     """
     Raises:
-        StrategyCriticalError: If no key or several keys name a rule, or the
+        BotCriticalError: If no key or several keys name a rule, or the
             rule refuses its value.
     """
     rule = SizingRule.from_settings(section, rules)

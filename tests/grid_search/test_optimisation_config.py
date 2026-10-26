@@ -1,6 +1,6 @@
 import pytest
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search.optimisation_config import OptimisationConfig
 from robottraderslab.grid_search.parameter import SamplingType
 
@@ -87,9 +87,7 @@ class TestOptimisationConfig:
             }
         )
 
-        with pytest.raises(
-            StrategyCriticalError, match="explicit sampling requires values"
-        ):
+        with pytest.raises(BotCriticalError, match="explicit sampling requires values"):
             config.to_parameters(CURRENT_VALUES)
 
     def test_to_parameters_range_without_required_fields(self):
@@ -106,7 +104,7 @@ class TestOptimisationConfig:
         )
 
         with pytest.raises(
-            StrategyCriticalError, match="linear sampling requires min and max"
+            BotCriticalError, match="linear sampling requires min and max"
         ):
             config.to_parameters(CURRENT_VALUES)
 
@@ -125,7 +123,7 @@ class TestOptimisationConfig:
         )
 
         with pytest.raises(
-            StrategyCriticalError, match="linear sampling requires num_samples or step"
+            BotCriticalError, match="linear sampling requires num_samples or step"
         ):
             config.to_parameters(CURRENT_VALUES)
 
@@ -161,7 +159,7 @@ class TestOptimisationConfig:
 
 class TestOptimisationConfigValueType:
     def test_a_dtype_declaration_is_refused(self):
-        with pytest.raises(StrategyCriticalError, match="dtype"):
+        with pytest.raises(BotCriticalError, match="dtype"):
             OptimisationConfig.from_config(
                 {
                     "parameter_configs": [

@@ -26,7 +26,7 @@ _REJECTION_REPORTS = (
 
 async def hold_protection(
     action: PositionProtectionAction,
-    update: Callable[[Symbol, float, TriggerType], Awaitable[PlacedOrder]],
+    update: Callable[[Symbol, float, TriggerType, str], Awaitable[PlacedOrder]],
 ) -> None:
     """A position guarded at a level the strategy did not book is the failure
     this prevents. A symbol the account holds no position on any more has
@@ -40,7 +40,12 @@ async def hold_protection(
     for level, message in _REJECTION_REPORTS:
         try:
             action.held = (
-                await update(action.symbol, action.trigger_price, action.trigger_type),
+                await update(
+                    action.symbol,
+                    action.trigger_price,
+                    action.trigger_type,
+                    action.client_order_id,
+                ),
             )
             return
         except NoOpenPositionError as gone:

@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from robottraderslab._core import LogLevel
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.scheduler.command import main
 
 
@@ -184,7 +184,7 @@ def test_the_secrets_file_is_found_beside_the_registry(
 def test_a_malformed_registry(run_scheduler, create_registry):
     registry_file = create_registry("[[bots]\nconfig = 'bot.toml'\n")
 
-    with pytest.raises(StrategyCriticalError, match="cannot start the scheduler"):
+    with pytest.raises(BotCriticalError, match="cannot start the scheduler"):
         main(registry_file)
 
     run_scheduler.assert_not_called()
@@ -193,7 +193,7 @@ def test_a_malformed_registry(run_scheduler, create_registry):
 def test_a_malformed_registry_still_configures_logging(setup_logging, create_registry):
     registry_file = create_registry("[[bots]\nconfig = 'bot.toml'\n")
 
-    with pytest.raises(StrategyCriticalError):
+    with pytest.raises(BotCriticalError):
         main(registry_file)
 
     setup_logging.assert_called_once()
@@ -205,7 +205,7 @@ def test_a_malformed_registry_still_configures_logging(setup_logging, create_reg
 def test_an_unusable_logging_level(run_scheduler, create_registry):
     registry_file = create_registry('[logging]\nfile_level = "warn"\n')
 
-    with pytest.raises(StrategyCriticalError, match="cannot start the scheduler"):
+    with pytest.raises(BotCriticalError, match="cannot start the scheduler"):
         main(registry_file)
 
     run_scheduler.assert_not_called()
@@ -246,7 +246,7 @@ def test_a_bare_webhook_url_in_the_registry(run_scheduler, create_registry):
         '[[bot]]\nconfig = "bot.toml"\n'
     )
 
-    with pytest.raises(StrategyCriticalError, match="notifier.discord.log.webhook_url"):
+    with pytest.raises(BotCriticalError, match="notifier.discord.log.webhook_url"):
         main(registry_file)
 
     run_scheduler.assert_not_called()
@@ -261,7 +261,7 @@ def test_a_refused_credential_never_reaches_the_fallback_logging(
         '[[bot]]\nconfig = "bot.toml"\n'
     )
 
-    with pytest.raises(StrategyCriticalError):
+    with pytest.raises(BotCriticalError):
         main(registry_file)
 
     setup_logging.assert_called_once()

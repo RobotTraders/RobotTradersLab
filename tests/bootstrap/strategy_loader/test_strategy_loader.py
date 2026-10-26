@@ -1,3 +1,5 @@
+import re
+from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
@@ -5,7 +7,7 @@ import numpy as np
 import pytest
 
 from robottraderslab.bootstrap import load_lightweight_chart_indicators, load_strategy
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.strategies import Candles, StrategyProtocol
 from strategy_loader.strategy_loader_stubs import StrategyCapturesSettings
 
@@ -40,7 +42,36 @@ def _mock_entry_points() -> None:
         yield
 
 
+class _RefusingStrategy:
+    def __init__(self, **settings):
+        raise BotCriticalError("profile 1 (BTC/USDT:USDT): tag: 'tp' is reserved")
+
+
 class TestLoadStrategy:
+    def test_a_refusal_names_the_file_the_sections_were_read_from(self):
+        settings = {"strategy_class": "refusing"}
+        config_file = Path("bots") / "mine.toml"
+
+        with patch(
+            "robottraderslab.bootstrap.strategy_loader._load_strategy_class",
+            return_value=_RefusingStrategy,
+        ):
+            with pytest.raises(
+                BotCriticalError,
+                match=f"`{re.escape(str(config_file))}`: profile 1",
+            ):
+                load_strategy(settings, config_file=config_file)
+
+    def test_a_refusal_with_no_file_given_is_left_as_it_is(self):
+        settings = {"strategy_class": "refusing"}
+
+        with patch(
+            "robottraderslab.bootstrap.strategy_loader._load_strategy_class",
+            return_value=_RefusingStrategy,
+        ):
+            with pytest.raises(BotCriticalError, match=r"^profile 1"):
+                load_strategy(settings)
+
     @pytest.mark.parametrize(
         "strategy_class",
         [
@@ -78,9 +109,7 @@ class TestLoadStrategyErrors:
     def test_nonexistent_module(self):
         settings = {"strategy_class": "a.b.c.SomeStrategy"}
 
-        with pytest.raises(
-            StrategyCriticalError, match="Module `a.b.c` can't be imported"
-        ):
+        with pytest.raises(BotCriticalError, match="Module `a.b.c` can't be imported"):
             load_strategy(settings)
 
     def test_nonexistent_class(self):
@@ -89,7 +118,7 @@ class TestLoadStrategyErrors:
         }
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match="There is no `NonExistentClass` class in module `strategy_loader.strategy_loader_stubs`",
         ):
             load_strategy(settings)
@@ -98,7 +127,7 @@ class TestLoadStrategyErrors:
         settings = {}
 
         with pytest.raises(
-            StrategyCriticalError, match="`strategy_class` is a required config key"
+            BotCriticalError, match="`strategy_class` is a required config key"
         ):
             load_strategy(settings)
 
@@ -106,7 +135,7 @@ class TestLoadStrategyErrors:
         settings = {"strategy_class": "NotRegistered"}
 
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match="'NotRegistered' not found in entry point",
         ):
             load_strategy(settings)
@@ -145,7 +174,7 @@ class TestLoadLightweightChartIndicators:
 
     def test_not_in_entry_points(self, candles):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"'nonexistent' not found in entry point group",
         ):
             load_lightweight_chart_indicators(
@@ -154,7 +183,7 @@ class TestLoadLightweightChartIndicators:
 
     def test_nonexistent_module_via_dotted_path(self, candles):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"Module `a\.b\.c` can't be imported",
         ):
             load_lightweight_chart_indicators(
@@ -163,7 +192,7 @@ class TestLoadLightweightChartIndicators:
 
     def test_nonexistent_function_in_module(self, candles):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=r"There is no `nonexistent_func` class in module",
         ):
             load_lightweight_chart_indicators(

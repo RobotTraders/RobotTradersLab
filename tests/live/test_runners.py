@@ -28,6 +28,7 @@ from robottraderslab.strategies import (
 def _build_bot_config(**live_overrides: Any) -> BotConfig:
     return BotConfig.model_validate(
         {
+            "name": "test-bot",
             "strategy": {"strategy_class": "fake-strategy-99"},
             "live": {
                 "trading_account": {},
@@ -67,6 +68,7 @@ def test_notifiers_passed_to_livebot(
         mock_load_ohlcv_provider.return_value,
         on_fill=[mock_notifier],
         on_placement=[mock_notifier.notify_placement],
+        clean_removed_profiles=True,
         max_attempts=3,
         base_delay=1.0,
     )
@@ -77,7 +79,7 @@ def test_notifiers_passed_to_livebot(
 @patch("robottraderslab.live.runners.load_ohlcv_provider")
 @patch("robottraderslab.live.runners._load_account")
 @patch("robottraderslab.live.runners.load_notifiers")
-def test_retry_config_forwarded_to_livebot(
+def test_retry_and_cleanup_settings_forwarded_to_livebot(
     mock_load_notifiers,
     mock_load_account,
     mock_load_ohlcv_provider,
@@ -86,7 +88,10 @@ def test_retry_config_forwarded_to_livebot(
 ):
     mock_load_notifiers.return_value = ([], [])
     mock_livebot_class.return_value.run = AsyncMock()
-    bot_config = _build_bot_config(retry={"max_attempts": 5, "base_delay_seconds": 2.0})
+    bot_config = _build_bot_config(
+        retry={"max_attempts": 5, "base_delay_seconds": 2.0},
+        clean_removed_profiles=False,
+    )
 
     run_livebot(bot_config)
 
@@ -95,6 +100,7 @@ def test_retry_config_forwarded_to_livebot(
         mock_load_ohlcv_provider.return_value,
         on_fill=[],
         on_placement=[],
+        clean_removed_profiles=False,
         max_attempts=5,
         base_delay=2.0,
     )
@@ -116,6 +122,7 @@ def test_the_configured_order_settings_reach_the_account(
     mock_livebot_class.return_value.run = AsyncMock()
     bot_config = BotConfig.model_validate(
         {
+            "name": "test-bot",
             "strategy": {"strategy_class": "fake-strategy-99"},
             "live": {
                 "trading_account": {},

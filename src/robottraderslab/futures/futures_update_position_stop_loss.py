@@ -18,6 +18,7 @@ class UpdatePositionStopLossAction(PositionProtectionAction):
 
     protection: ClassVar[ProtectionKind] = OrderType.STOP_LOSS
 
+    tag: str = "sl"
     exchange: FuturesExchangeProtocol
 
     @property

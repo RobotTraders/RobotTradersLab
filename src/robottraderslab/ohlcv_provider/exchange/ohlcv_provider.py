@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 
 from robottraderslab._core import (
+    BotCriticalError,
     OHLCVProviderProtocol,
-    StrategyCriticalError,
     Symbol,
     TimeFrame,
     candle_stamp_before,
@@ -282,7 +282,7 @@ def _published_lookback_start(
     `lookback`.
 
     Raises:
-        StrategyCriticalError: If the mask reports no open stamp across a
+        BotCriticalError: If the mask reports no open stamp across a
             span longer than a week, since no venue calendar the engine
             ships closes that long.
     """
@@ -300,7 +300,7 @@ def _published_lookback_start(
         if open_positions.size >= lookback:
             return _from_epoch_ms(int(stamps[open_positions[-lookback]]))
         if open_positions.size == 0 and last_ms - candidate_start_ms > _ONE_WEEK_MS:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"{symbol}@{timeframe}: no candle published between "
                 f"{_from_epoch_ms(candidate_start_ms)} and {_from_epoch_ms(last_ms)}"
             )

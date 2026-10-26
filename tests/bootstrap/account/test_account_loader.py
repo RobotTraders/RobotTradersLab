@@ -10,7 +10,7 @@ from robottraderslab.bootstrap.account_loader import (
     load_single_account,
     load_single_exchange,
 )
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 from robottraderslab.exchanges import FuturesCapabilities, FuturesExchangeProtocol
 
 _SECRETS = {
@@ -81,7 +81,7 @@ config_with_account_name = {
     ],
 )
 async def test_cant_have_accounts_with_same_account_name(accounts_config):
-    with pytest.raises(StrategyCriticalError, match="Duplicate account name: `bitget`"):
+    with pytest.raises(BotCriticalError, match="Duplicate account name: `bitget`"):
         await load_accounts(accounts_config, _SECRETS)
 
 
@@ -152,14 +152,14 @@ async def test_an_explicit_secret_name_is_used_over_the_account_name(
 
 async def test_an_unknown_secret_name_is_refused():
     with pytest.raises(
-        StrategyCriticalError, match="`bitget` references secret `missing`.*not defined"
+        BotCriticalError, match="`bitget` references secret `missing`.*not defined"
     ):
         await load_single_exchange({"exchange": "bitget", "secret_name": "missing"}, {})
 
 
 async def test_an_account_without_a_name_is_named_by_its_section():
     with pytest.raises(
-        StrategyCriticalError,
+        BotCriticalError,
         match="`live.trading_account` references secret `missing`.*not defined",
     ):
         await load_single_exchange({"secret_name": "missing"}, {})
@@ -170,7 +170,7 @@ async def test_a_configured_trigger_type_the_venue_does_not_offer(mock_load_exch
         trigger_types=frozenset({TriggerType.DEFAULT, TriggerType.MARK_PRICE})
     )
 
-    with pytest.raises(StrategyCriticalError, match="orders.stop_loss.trigger_type"):
+    with pytest.raises(BotCriticalError, match="orders.stop_loss.trigger_type"):
         await load_single_account(
             {"exchange": "hyperliquid"},
             {},

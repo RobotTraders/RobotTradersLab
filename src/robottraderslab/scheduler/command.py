@@ -10,7 +10,7 @@ from robottraderslab.bootstrap import (
     refuse_credentials_in_notifiers,
     report_unavailable_notifiers,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.live import setup_live_logging
 
 from .scheduler import notifier_occasions, read_registry, run_scheduler
@@ -28,7 +28,7 @@ def main(registry: Path) -> int:
         How many bots exited on a failure.
 
     Raises:
-        StrategyCriticalError: If the registry cannot be read.
+        BotCriticalError: If the registry cannot be read.
     """
     entries: dict[str, Any] = {}
     notifier_config: dict[str, dict[str, dict[str, Any]]] = {}
@@ -43,9 +43,9 @@ def main(registry: Path) -> int:
             notifier_config,
             _secrets(registry, entries),
         )
-    except (StrategyCriticalError, RuntimeError, ValueError) as e:
+    except (BotCriticalError, RuntimeError, ValueError) as e:
         _start_logging(registry, {}, notifier_config, {})
-        raise StrategyCriticalError(f"cannot start the scheduler: {e}") from e
+        raise BotCriticalError(f"cannot start the scheduler: {e}") from e
 
     return run_scheduler(registry)
 

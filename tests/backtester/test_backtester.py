@@ -23,7 +23,7 @@ from robottraderslab.backtester.simulator import (
     SimulatedFuturesExchange,
     fee_model_for,
 )
-from robottraderslab.exceptions import ExchangeCriticalError, StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError, ExchangeCriticalError
 from robottraderslab.exchanges import OrderFill, OrderSide, PlacedOrder
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.ohlcv_provider import MockOHLCVProvider
@@ -286,9 +286,9 @@ def test_calls_on_filled_callbacks(
     "error",
     [
         ExchangeCriticalError("Auth expired"),
-        StrategyCriticalError("Auth expired"),
+        BotCriticalError("Auth expired"),
     ],
-    ids=["exchange_critical", "strategy_critical"],
+    ids=["exchange_critical", "bot_critical"],
 )
 def test_with_critical_error_in_callback(
     simulation_engine, fill_recorder, account, create_strategy_place_market_order, error
@@ -335,7 +335,7 @@ def test_run_with_no_requirements_raises(simulation_engine, fill_recorder, accou
         "2024-01-01",
     )
 
-    with pytest.raises(StrategyCriticalError, match="declared no OHLCV requirements"):
+    with pytest.raises(BotCriticalError, match="declared no OHLCV requirements"):
         asyncio.run(backtester.run())
 
 
@@ -757,5 +757,5 @@ def test_an_order_on_a_symbol_the_account_did_not_declare_stops_the_run(
         "2024-01-01",
     )
 
-    with pytest.raises(StrategyCriticalError, match="without declaring it"):
+    with pytest.raises(BotCriticalError, match="without declaring it"):
         asyncio.run(backtester.run())

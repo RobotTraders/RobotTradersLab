@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search import GridSearchResults, run_grid_search
 from robottraderslab.grid_search.command import main as grid_search_main
 from robottraderslab.grid_search.optimiser import GridSearchOptimiser
@@ -12,6 +12,7 @@ from robottraderslab.grid_search.optimiser import GridSearchOptimiser
 CSV_PATH = "../../ma_strategy/integration/single_symbol_pipeline/data/btc_usdt_binance_2024.csv"
 
 TEST_CONFIG_TOML = f"""
+name = "test-bot"
 [strategy]
 strategy_class = "futures_ma"
 
@@ -119,6 +120,8 @@ class TestGridSearchIntegration:
 
         exported = pd.read_csv(csv_path)
         assert len(exported) == EXPECTED_GRID_SIZE
+        assert exported["sortino_ratio"].notna().all()
+        assert exported["calmar_ratio"].notna().all()
 
     def test_from_csv_roundtrip(self, results, tmp_path):
         csv_path = tmp_path / "results.csv"
@@ -178,7 +181,7 @@ class TestSweepOutcome:
 
     def test_the_run_stops_when_no_point_scored(self, config_no_point_can_score):
         with pytest.raises(
-            StrategyCriticalError,
+            BotCriticalError,
             match=f"No point of the {EXPECTED_GRID_SIZE}-point grid",
         ):
             grid_search_main(config_no_point_can_score, None)
@@ -188,7 +191,7 @@ class TestSweepOutcome:
     ):
         exported = tmp_path / "results.csv"
 
-        with pytest.raises(StrategyCriticalError):
+        with pytest.raises(BotCriticalError):
             grid_search_main(config_no_point_can_score, exported)
 
         assert pd.read_csv(exported)["error"].notna().all()

@@ -9,7 +9,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from ..candle_grid import candle_step
-from ..exceptions import MissingOhlcvDataError, StrategyCriticalError
+from ..exceptions import BotCriticalError, MissingOhlcvDataError
 from ..symbol import Symbol
 from ..timeframes import TimeFrame, to_seconds
 from .timeframe_snapshot import TimeframeSnapshot, _SymbolData
@@ -192,7 +192,7 @@ class OHLCVs:
         """Return the open of the first candle of the loaded window.
 
         Raises:
-            StrategyCriticalError: If no series holds a single candle.
+            BotCriticalError: If no series holds a single candle.
         """
         starts = [
             symbol_df.index[0]
@@ -201,7 +201,7 @@ class OHLCVs:
             if not symbol_df.empty
         ]
         if not starts:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 "No candles were loaded for any declared symbol and timeframe."
             )
         return cast(datetime, min(starts))

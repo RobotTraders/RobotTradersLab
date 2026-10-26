@@ -189,7 +189,7 @@ class FuturesExchangeProtocol(Protocol):
             **kwargs: Additional keyword arguments (e.g., reason for analytics)
 
         Raises:
-            StrategyCriticalError: If a venue field names one the connector
+            BotCriticalError: If a venue field names one the connector
                 sets from the order itself, or the venue offers no trigger on
                 a trigger type the order carries; no request is sent.
         """
@@ -225,7 +225,7 @@ class FuturesExchangeProtocol(Protocol):
             **kwargs: Additional keyword arguments (e.g., reason for analytics)
 
         Raises:
-            StrategyCriticalError: If a venue field names one the connector
+            BotCriticalError: If a venue field names one the connector
                 sets from the order itself, or the venue offers no trigger on
                 a trigger type the order carries; no request is sent.
             ExchangeRecoverableError: If the venue refuses the order,
@@ -286,12 +286,16 @@ class FuturesExchangeProtocol(Protocol):
         symbol: Symbol,
         trigger_price: float,
         trigger_type: TriggerType = TriggerType.DEFAULT,
+        client_order_id: str | None = None,
     ) -> PlacedOrder:
         """Update the stop-loss trigger price of an open position.
 
         Args:
             trigger_type: The price the stop-loss watches; `DEFAULT` leaves the
                 choice to the connector.
+            client_order_id: Id the order the venue places carries where the
+                venue keeps one on it; it stays the same when the update is
+                sent again.
 
         Returns:
             The protection order the venue now holds, under the id it reports
@@ -299,7 +303,7 @@ class FuturesExchangeProtocol(Protocol):
 
         Raises:
             NoOpenPositionError: If the account holds no position on the symbol.
-            StrategyCriticalError: If the venue offers no trigger on the
+            BotCriticalError: If the venue offers no trigger on the
                 trigger type; no request is sent.
         """
 
@@ -328,7 +332,7 @@ class FuturesExchangeProtocol(Protocol):
 
         Raises:
             NoOpenPositionError: If the account holds no position on the symbol.
-            StrategyCriticalError: If the venue offers no trailing stop,
+            BotCriticalError: If the venue offers no trailing stop,
                 takes only an activation price and none was given, takes none
                 and one was given, or cannot express the distance; no request
                 is sent.
@@ -339,12 +343,16 @@ class FuturesExchangeProtocol(Protocol):
         symbol: Symbol,
         trigger_price: float,
         trigger_type: TriggerType = TriggerType.DEFAULT,
+        client_order_id: str | None = None,
     ) -> PlacedOrder:
         """Update the take-profit trigger price of an open position.
 
         Args:
             trigger_type: The price the take-profit watches; `DEFAULT` leaves the
                 choice to the connector.
+            client_order_id: Id the order the venue places carries where the
+                venue keeps one on it; it stays the same when the update is
+                sent again.
 
         Returns:
             The protection order the venue now holds, under the id it reports
@@ -352,6 +360,6 @@ class FuturesExchangeProtocol(Protocol):
 
         Raises:
             NoOpenPositionError: If the account holds no position on the symbol.
-            StrategyCriticalError: If the venue offers no trigger on the
+            BotCriticalError: If the venue offers no trigger on the
                 trigger type; no request is sent.
         """

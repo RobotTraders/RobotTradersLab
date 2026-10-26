@@ -20,6 +20,8 @@ def _register_test_module(monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def toml_config() -> str:
     return """\
+name = "test-bot"
+
 [backtest]
 initial_balance = { USDT = 10000.0 }
 maker_fee_rate = 0.001

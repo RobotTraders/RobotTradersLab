@@ -11,10 +11,10 @@ from robottraderslab._core import (
     assemble_available_ohlcvs_from_requirements,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeCriticalError,
     ExchangeTransientError,
     MissingOhlcvDataError,
-    StrategyCriticalError,
 )
 from robottraderslab.strategies import OHLCVs, SymbolTimeframe
 
@@ -42,9 +42,7 @@ class TestAssembleOhlcvsFromRequirements:
     async def test_empty_requirements_raises(self, provider):
         empty_requirements = OHLCVRequirements()
 
-        with pytest.raises(
-            StrategyCriticalError, match="declared no OHLCV requirements"
-        ):
+        with pytest.raises(BotCriticalError, match="declared no OHLCV requirements"):
             await assemble_all_ohlcvs_from_requirements(provider, empty_requirements)
 
     @patch(
@@ -269,9 +267,9 @@ class TestAssembleAvailableOhlcvsFromRequirements:
         "failure",
         [
             ExchangeCriticalError("auth"),
-            StrategyCriticalError("auth"),
+            BotCriticalError("auth"),
         ],
-        ids=["exchange_critical", "strategy_critical"],
+        ids=["exchange_critical", "bot_critical"],
     )
     async def test_a_critical_error_propagates(self, btc_symbol, failure):
         provider = Mock()
@@ -309,9 +307,7 @@ class TestAssembleAvailableOhlcvsFromRequirements:
     async def test_empty_requirements_raises(self, btc_symbol):
         provider = Mock()
 
-        with pytest.raises(
-            StrategyCriticalError, match="declared no OHLCV requirements"
-        ):
+        with pytest.raises(BotCriticalError, match="declared no OHLCV requirements"):
             await assemble_available_ohlcvs_from_requirements(
                 provider, OHLCVRequirements()
             )

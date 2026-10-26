@@ -10,7 +10,12 @@ from robottraderslab.exceptions import (
     ExchangeTransientError,
     NoOpenPositionError,
 )
-from robottraderslab.exchanges import FuturesExchangeProtocol, PlacedOrder
+from robottraderslab.exchanges import (
+    FuturesExchangeProtocol,
+    PlacedOrder,
+    TriggerType,
+    tag_of,
+)
 from robottraderslab.futures.futures_update_position_stop_loss import (
     UpdatePositionStopLossAction,
 )
@@ -47,6 +52,37 @@ async def test_exceptions_passthrough_execute(update_stop_loss_action):
 
     with pytest.raises(type(error)):
         await update_stop_loss_action.execute()
+
+
+async def test_the_update_carries_the_actions_id_with_the_tag_sl(
+    update_stop_loss_action,
+):
+    await update_stop_loss_action.execute()
+
+    update_stop_loss_action.exchange.update_position_stop_loss.assert_awaited_once_with(
+        update_stop_loss_action.symbol,
+        42_000.0,
+        TriggerType.DEFAULT,
+        update_stop_loss_action.client_order_id,
+    )
+    assert tag_of(update_stop_loss_action.client_order_id) == "sl"
+
+
+async def test_a_rejected_update_is_sent_again_under_the_same_id(
+    update_stop_loss_action,
+):
+    update_stop_loss_action.exchange.update_position_stop_loss.side_effect = [
+        ExchangeRecoverableError("code 99999"),
+        None,
+    ]
+
+    await update_stop_loss_action.execute()
+
+    first, second = (
+        update_stop_loss_action.exchange.update_position_stop_loss.await_args_list
+    )
+    assert first.args[3] == update_stop_loss_action.client_order_id
+    assert second == first
 
 
 async def test_an_accepted_update_holds_the_order_the_venue_acknowledged(

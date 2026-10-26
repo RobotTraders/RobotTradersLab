@@ -7,9 +7,9 @@ import pytest
 from robottraderslab import Symbol
 from robottraderslab._core import AccountRequirement
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 from robottraderslab.exchanges import (
@@ -306,7 +306,7 @@ class TestSnapshot:
             executions_since=WINDOW_START,
         )
 
-        with pytest.raises(StrategyCriticalError, match="hedge"):
+        with pytest.raises(BotCriticalError, match="hedge"):
             snapshot.position(BTCUSDT)
 
     async def test_nothing_declared_fetches_nothing(self, exchange):
@@ -380,7 +380,7 @@ class TestSnapshot:
             report_fills=True,
         )
 
-        with pytest.raises(StrategyCriticalError, match="executions=True"):
+        with pytest.raises(BotCriticalError, match="executions=True"):
             snapshot.stop_loss_fills(BTCUSDT)
 
     async def test_positions_read_alongside_executions_undeclared(self, exchange):
@@ -405,7 +405,7 @@ class TestSnapshot:
             report_fills=True,
         )
 
-        with pytest.raises(StrategyCriticalError, match="positions=True"):
+        with pytest.raises(BotCriticalError, match="positions=True"):
             snapshot.position(BTCUSDT)
 
     async def test_executions_carry_what_they_did_to_the_position(self, exchange):

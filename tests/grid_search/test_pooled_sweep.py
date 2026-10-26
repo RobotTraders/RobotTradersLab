@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search.grid_point import GridPoint
 from robottraderslab.grid_search.optimisation_result import OptimisationResult
 from robottraderslab.grid_search.pooled_sweep import (
@@ -41,7 +41,7 @@ class RaisesACritical:
 
     def __call__(self, grid_point: GridPoint) -> OptimisationResult:
         if grid_point.parameters["position"] == self.critical_point:
-            raise StrategyCriticalError("the strategy declares no candles")
+            raise BotCriticalError("the strategy declares no candles")
         return OptimisationResult(grid_point=grid_point)
 
 
@@ -85,12 +85,12 @@ def test_a_pool_breaking_past_the_cap_stops_the_sweep(tmp_path):
         tmp_path, frozenset(range(breaks)), lethal_attempts=1
     )
 
-    with pytest.raises(StrategyCriticalError, match=f"broke {breaks} times"):
+    with pytest.raises(BotCriticalError, match=f"broke {breaks} times"):
         measure_pooled(kills_each_once, _grid(breaks), 1, breaks)
 
 
 def test_a_critical_raised_in_a_worker_stops_the_sweep():
-    with pytest.raises(StrategyCriticalError, match="declares no candles"):
+    with pytest.raises(BotCriticalError, match="declares no candles"):
         measure_pooled(RaisesACritical(KILLER), _grid(GRID_SIZE), 2, GRID_SIZE)
 
 

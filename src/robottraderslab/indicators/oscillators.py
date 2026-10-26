@@ -44,7 +44,7 @@ def trix(
         signal_type: The kind of moving average the signal line is drawn with.
 
     Raises:
-        StrategyCriticalError: If the signal average needs a full window and the
+        BotCriticalError: If the signal average needs a full window and the
             oscillator holds fewer published values than `signal_length`.
     """
     published = published_candles(close)

@@ -1,7 +1,7 @@
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import OrderSide, StopLoss, TakeProfit
 
 ENTRY_PRICE = 100.0
@@ -49,7 +49,7 @@ class TestTpSlValidation:
             take_profit=tp,
         )
 
-        with pytest.raises(StrategyCriticalError, match=expected_match):
+        with pytest.raises(BotCriticalError, match=expected_match):
             sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=ENTRY_PRICE)
 
         assert len(sim.open_orders) == 0

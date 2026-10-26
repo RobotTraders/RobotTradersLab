@@ -7,12 +7,18 @@ from .account_requirements import (
 from .account_snapshot import AccountSnapshot
 from .actions import BookKeeper, execute_trading_actions
 from .actions.members import (
+    ENGINE_TAGS,
+    FLATTEN_TAG,
     ActionBuilder,
     ActionResult,
     BaseExchangeAction,
     OrderOutcome,
     PositionProtectionAction,
+    bot_leading_bytes,
+    bot_segment,
+    engine_tag_refusal,
     finished,
+    name_process,
     profile_identity,
     profile_tag,
     tag_of,
@@ -30,6 +36,7 @@ from .chart import Candles, ChartLine, DrawdownUnit
 from .currency import Currency
 from .dynamic_class_loading import ClassLoadingError, find_class, load_class
 from .exceptions import (
+    BotCriticalError,
     DataError,
     DownloadError,
     ExchangeConnectionError,
@@ -39,9 +46,9 @@ from .exceptions import (
     InvalidTimeframeError,
     OhlcvValidationError,
     RateLimitExceededError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
+from .exchange_position_tracker import is_unlabelled_protection
 from .exit_codes import EX_CONFIG, EX_DATAERR, EX_TEMPFAIL
 from .fees import DEFAULT_FEE_MODE, FeeMode, PlacementReserve
 from .fill_effects import attribute_fill_effects, settle_booked_fill
@@ -124,13 +131,14 @@ from .performance_report import (
 )
 from .plugin_settings import settings_the_factory_does_not_take
 from .position import PositionSide, PositionSnapshot
-from .position_tracker import TrackedPosition, signed_position
+from .position_tracker import TrackedPosition, position_steps, signed_position
 from .price import validate_price
 from .profile_strategy import log_strategy_slots
 from .protection_readback import confirm_booked_protections
 from .protection_sweep import sweep_orphan_protections
 from .quantity import StepCount, to_quantity, to_step_count
 from .quote import Quote
+from .removed_profiles import clean_removed_profiles
 from .retry import BASE_DELAY_SECONDS, MAX_ATTEMPTS, retry_on_transient
 from .sizing import (
     SizingRule,
@@ -166,6 +174,7 @@ __all__ = [
     "BASE_DELAY_SECONDS",
     "BaseExchangeAction",
     "BookKeeper",
+    "BotCriticalError",
     "calculate_pnl_long",
     "calculate_pnl_short",
     "calculate_trade_pnl_pct",
@@ -192,6 +201,9 @@ __all__ = [
     "drain_tasks",
     "DrawdownUnit",
     "drop_dead_locks",
+    "engine_tag_refusal",
+    "ENGINE_TAGS",
+    "FLATTEN_TAG",
     "EX_CONFIG",
     "EX_DATAERR",
     "EX_TEMPFAIL",
@@ -216,6 +228,7 @@ __all__ = [
     "hold_instance_lock",
     "hold_margin_targets",
     "Instrument",
+    "is_unlabelled_protection",
     "InvalidTimeframeError",
     "last_per_month",
     "load_class",
@@ -226,6 +239,10 @@ __all__ = [
     "MarginSettings",
     "mark_root",
     "MAX_ATTEMPTS",
+    "bot_leading_bytes",
+    "bot_segment",
+    "clean_removed_profiles",
+    "name_process",
     "newest_settled_candle_start",
     "NO_ORDER_OVERRIDES",
     "NO_VENUE_PARAMS",
@@ -275,11 +292,11 @@ __all__ = [
     "settings_the_factory_does_not_take",
     "settle_booked_fill",
     "setup_notebook_logging",
+    "position_steps",
     "signed_position",
     "SizingRule",
     "StepCount",
     "StopLoss",
-    "StrategyCriticalError",
     "sweep_orphan_protections",
     "Symbol",
     "SymbolAnalysis",

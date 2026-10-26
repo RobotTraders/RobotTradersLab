@@ -6,7 +6,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-from .exceptions import StrategyCriticalError
+from .exceptions import BotCriticalError
 from .price import validate_price
 from .symbol import Symbol
 
@@ -444,13 +444,13 @@ def with_venue_params(
             reshapes the position the engine tracks.
 
     Raises:
-        StrategyCriticalError: If a strategy's field names one the
+        BotCriticalError: If a strategy's field names one the
             connector sets or reserves.
     """
     fields = params.get(venue, _NO_FIELDS)
     overwritten = sorted(name for name in fields if name in body or name in reserved)
     if overwritten:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"The order's {venue} params set {', '.join(overwritten)}, which the "
             "connector sets from the order itself; set it through the order "
             "builder and drop it from params()."
@@ -474,14 +474,14 @@ def venue_trigger_type(
         default: The venue's word for the price `DEFAULT` watches there.
 
     Raises:
-        StrategyCriticalError: If the venue offers no such trigger type.
+        BotCriticalError: If the venue offers no such trigger type.
     """
     if trigger_type is TriggerType.DEFAULT:
         return default
     name = names.get(trigger_type)
     if name is None:
         offered = ", ".join(sorted(names)) or "its default price alone"
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"{venue} offers no {trigger_type} trigger; it triggers on {offered}"
         )
     return name

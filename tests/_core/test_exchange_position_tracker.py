@@ -7,7 +7,7 @@ import pytest
 from robottraderslab import Symbol
 from robottraderslab._core.actions.members.tags import profile_tag
 from robottraderslab._core.exchange_position_tracker import ExchangePositionTracker
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import (
     FillEffect,
     PositionSide,
@@ -17,6 +17,7 @@ from robottraderslab.strategies import (
     AccountSnapshot,
     Execution,
     OrderSide,
+    OrderType,
     TrackedPosition,
     TrackingId,
 )
@@ -48,6 +49,7 @@ def create_execution() -> Callable[..., Execution]:
         effect: FillEffect,
         tag: str | None = None,
         symbol: Symbol = BTC,
+        kind: OrderType | None = None,
     ) -> Execution:
         return Execution(
             execution_id=execution_id,
@@ -58,6 +60,7 @@ def create_execution() -> Callable[..., Execution]:
             quantity=quantity,
             timestamp=timestamp,
             effect=effect,
+            kind=kind,
             client_order_id=client_order_id_carrying(tag) if tag is not None else None,
         )
 
@@ -103,14 +106,14 @@ def tracker() -> ExchangePositionTracker:
 
 class TestCreateValidation:
     def test_an_id_left_without_a_tag_is_refused(self):
-        with pytest.raises(StrategyCriticalError, match="have no tag"):
+        with pytest.raises(BotCriticalError, match="have no tag"):
             ExchangePositionTracker.create(
                 {BTC: (ALPHA, BETA)},
                 {ALPHA: profile_tag("1h", "a")},
             )
 
     def test_two_ids_sharing_a_tag_on_one_symbol_are_refused(self):
-        with pytest.raises(StrategyCriticalError, match="share the tag"):
+        with pytest.raises(BotCriticalError, match="share the tag"):
             ExchangePositionTracker.create(
                 {BTC: (ALPHA, BETA)},
                 {ALPHA: profile_tag("1h", "same"), BETA: profile_tag("1h", "same")},
@@ -854,6 +857,290 @@ class TestUnownedQuantity:
             )
 
         assert caplog.text == ""
+
+
+class TestFiredProtectionWithoutLabel:
+    @pytest.fixture
+    def opened_by_alpha(
+        self,
+        tracker: ExchangePositionTracker,
+        create_execution: Callable[..., Execution],
+        create_snapshot: Callable[[list[Execution], float | None], AccountSnapshot],
+    ) -> Execution:
+        opened = create_execution(
+            execution_id="e1",
+            side=OrderSide.BUY,
+            quantity=10.0,
+            timestamp=T0,
+            effect="open",
+            tag="1h-a",
+        )
+        tracker.refresh(
+            create_snapshot([opened], venue_quantity=10.0), CANDLE_OPEN, CANDLE_CLOSE
+        )
+        return opened
+
+    def test_a_stop_loss_closing_part_of_the_only_long_is_credited_to_it(
+        self, tracker, create_execution, create_snapshot, opened_by_alpha, caplog
+    ):
+        stop_loss = create_execution(
+            execution_id="e2",
+            side=OrderSide.SELL,
+            quantity=4.0,
+            timestamp=T1,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+        )
+
+        with caplog.at_level(logging.INFO):
+            tracker.refresh(
+                create_snapshot([opened_by_alpha, stop_loss], venue_quantity=6.0),
+                CANDLE_OPEN,
+                CANDLE_CLOSE,
+            )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 6.0)
+        assert caplog.records == []
+
+    def test_a_take_profit_carrying_the_engines_tag_is_credited_the_same(
+        self, tracker, create_execution, create_snapshot, opened_by_alpha
+    ):
+        take_profit = create_execution(
+            execution_id="e2",
+            side=OrderSide.SELL,
+            quantity=4.0,
+            timestamp=T1,
+            effect="close",
+            kind=OrderType.TAKE_PROFIT,
+            tag="tp",
+        )
+
+        tracker.refresh(
+            create_snapshot([opened_by_alpha, take_profit], venue_quantity=6.0),
+            CANDLE_OPEN,
+            CANDLE_CLOSE,
+        )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 6.0)
+
+    def test_a_buy_stop_closes_the_short_and_leaves_the_long(
+        self, tracker, create_execution, create_snapshot
+    ):
+        long_opened = create_execution(
+            execution_id="e1",
+            side=OrderSide.BUY,
+            quantity=10.0,
+            timestamp=T0,
+            effect="open",
+            tag="1h-a",
+        )
+        short_opened = create_execution(
+            execution_id="e2",
+            side=OrderSide.SELL,
+            quantity=3.0,
+            timestamp=T1,
+            effect="open",
+            tag="1h-b",
+        )
+        stop_loss = create_execution(
+            execution_id="e3",
+            side=OrderSide.BUY,
+            quantity=3.0,
+            timestamp=T2,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+        )
+
+        tracker.refresh(
+            create_snapshot(
+                [long_opened, short_opened, stop_loss], venue_quantity=10.0
+            ),
+            CANDLE_OPEN,
+            CANDLE_CLOSE,
+        )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 10.0)
+        assert tracker.get(BETA) is None
+
+    def test_several_ids_on_the_closed_side_resolve_to_the_one_the_quantity_equals(
+        self, tracker, create_execution, create_snapshot
+    ):
+        alpha_opened = create_execution(
+            execution_id="e1",
+            side=OrderSide.BUY,
+            quantity=10.0,
+            timestamp=T0,
+            effect="open",
+            tag="1h-a",
+        )
+        beta_opened = create_execution(
+            execution_id="e2",
+            side=OrderSide.BUY,
+            quantity=4.0,
+            timestamp=T1,
+            effect="open",
+            tag="1h-b",
+        )
+        stop_loss = create_execution(
+            execution_id="e3",
+            side=OrderSide.SELL,
+            quantity=4.0,
+            timestamp=T2,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+        )
+
+        tracker.refresh(
+            create_snapshot(
+                [alpha_opened, beta_opened, stop_loss], venue_quantity=10.0
+            ),
+            CANDLE_OPEN,
+            CANDLE_CLOSE,
+        )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 10.0)
+        assert tracker.get(BETA) is None
+
+    def test_a_fill_no_rule_settles_is_warned_as_opened_outside(
+        self, tracker, create_execution, create_snapshot, caplog
+    ):
+        alpha_opened = create_execution(
+            execution_id="e1",
+            side=OrderSide.BUY,
+            quantity=10.0,
+            timestamp=T0,
+            effect="open",
+            tag="1h-a",
+        )
+        beta_opened = create_execution(
+            execution_id="e2",
+            side=OrderSide.BUY,
+            quantity=8.0,
+            timestamp=T1,
+            effect="open",
+            tag="1h-b",
+        )
+        stop_loss = create_execution(
+            execution_id="e3",
+            side=OrderSide.SELL,
+            quantity=4.0,
+            timestamp=T2,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+        )
+
+        with caplog.at_level(logging.INFO):
+            tracker.refresh(
+                create_snapshot(
+                    [alpha_opened, beta_opened, stop_loss], venue_quantity=14.0
+                ),
+                CANDLE_OPEN,
+                CANDLE_CLOSE,
+            )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 10.0)
+        assert tracker.get(BETA) == TrackedPosition(PositionSide.LONG, 8.0)
+        assert [record.levelname for record in caplog.records] == ["WARNING"]
+        assert "-4" in caplog.text
+
+    def test_an_unlabelled_fill_of_another_kind_stays_outside(
+        self, tracker, create_execution, create_snapshot, opened_by_alpha, caplog
+    ):
+        by_hand = create_execution(
+            execution_id="e2",
+            side=OrderSide.SELL,
+            quantity=4.0,
+            timestamp=T1,
+            effect="close",
+            kind=OrderType.MARKET,
+        )
+
+        with caplog.at_level(logging.INFO):
+            tracker.refresh(
+                create_snapshot([opened_by_alpha, by_hand], venue_quantity=6.0),
+                CANDLE_OPEN,
+                CANDLE_CLOSE,
+            )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 10.0)
+        assert [record.levelname for record in caplog.records] == ["WARNING"]
+
+    def test_a_protection_carrying_another_bots_tag_stays_outside(
+        self, tracker, create_execution, create_snapshot, opened_by_alpha
+    ):
+        stop_loss = create_execution(
+            execution_id="e2",
+            side=OrderSide.SELL,
+            quantity=4.0,
+            timestamp=T1,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+            tag="1h-other",
+        )
+
+        tracker.refresh(
+            create_snapshot([opened_by_alpha, stop_loss], venue_quantity=6.0),
+            CANDLE_OPEN,
+            CANDLE_CLOSE,
+        )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 10.0)
+
+    def test_a_protection_taking_the_venue_through_flat_still_clears_every_id(
+        self, tracker, create_execution, create_snapshot, opened_by_alpha
+    ):
+        stop_loss = create_execution(
+            execution_id="e2",
+            side=OrderSide.SELL,
+            quantity=10.0,
+            timestamp=T1,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+        )
+
+        tracker.refresh(
+            create_snapshot([opened_by_alpha, stop_loss], venue_quantity=None),
+            CANDLE_OPEN,
+            CANDLE_CLOSE,
+        )
+
+        assert tracker.get(ALPHA) is None
+
+    def test_a_stop_closing_more_than_the_only_long_holds_is_not_credited_to_it(
+        self, tracker, create_execution, create_snapshot
+    ):
+        alpha_opened = create_execution(
+            execution_id="e1",
+            side=OrderSide.BUY,
+            quantity=4.0,
+            timestamp=T0,
+            effect="open",
+            tag="1h-a",
+        )
+        by_hand = create_execution(
+            execution_id="e2",
+            side=OrderSide.BUY,
+            quantity=6.0,
+            timestamp=T1,
+            effect="open",
+            kind=OrderType.MARKET,
+        )
+        stop_loss = create_execution(
+            execution_id="e3",
+            side=OrderSide.SELL,
+            quantity=6.0,
+            timestamp=T2,
+            effect="close",
+            kind=OrderType.STOP_LOSS,
+        )
+
+        tracker.refresh(
+            create_snapshot([alpha_opened, by_hand, stop_loss], venue_quantity=4.0),
+            CANDLE_OPEN,
+            CANDLE_CLOSE,
+        )
+
+        assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 4.0)
 
 
 class TestMultipleSymbols:

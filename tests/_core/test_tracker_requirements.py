@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import (
     PositionSide,
     client_order_id_carrying,
@@ -93,7 +93,7 @@ class TestDeclaringATracker:
         assert tracker.get(ALPHA) is None
 
     def test_an_untagged_id_is_refused(self, requirements, account, btc):
-        with pytest.raises(StrategyCriticalError, match="have no tag"):
+        with pytest.raises(BotCriticalError, match="have no tag"):
             requirements.tracker.add(
                 account, symbols={ALPHA: btc, BETA: btc}, tags={ALPHA: ALPHA_TAG}
             )
@@ -101,7 +101,7 @@ class TestDeclaringATracker:
     def test_two_ids_sharing_a_tag_on_one_symbol_are_refused(
         self, requirements, account, btc
     ):
-        with pytest.raises(StrategyCriticalError, match="share the tag"):
+        with pytest.raises(BotCriticalError, match="share the tag"):
             requirements.tracker.add(
                 account,
                 symbols={ALPHA: btc, BETA: btc},
@@ -151,7 +151,7 @@ class TestDeclaringATracker:
     ):
         requirements.tracker.add(account, symbols={ALPHA: btc}, tags={ALPHA: ALPHA_TAG})
 
-        with pytest.raises(StrategyCriticalError, match="already tracked"):
+        with pytest.raises(BotCriticalError, match="already tracked"):
             requirements.tracker.add(
                 account, symbols={BETA: btc}, tags={BETA: BETA_TAG}
             )

@@ -2,7 +2,7 @@ import logging
 from typing import Any, cast
 
 from robottraderslab._core import ClassLoadingError, load_class
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .market_type import SimulatedMarket
 
@@ -23,12 +23,12 @@ def load_simulated_market(market_type: str, **settings: Any) -> SimulatedMarket:
         The simulator and account for this market type.
 
     Raises:
-        StrategyCriticalError: If no installed package registers the market type.
+        BotCriticalError: If no installed package registers the market type.
     """
     try:
         factory = load_class(market_type, _MARKET_TYPE_ENTRY_POINT_GROUP)
     except ClassLoadingError as e:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"Market type `{market_type}` is not installed; "
             "install the package that provides it or check the strategy's `market_type`"
         ) from e

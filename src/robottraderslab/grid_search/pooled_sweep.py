@@ -5,7 +5,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wai
 from concurrent.futures.process import BrokenProcessPool
 from contextlib import ExitStack
 
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .grid_point import GridPoint
 from .optimisation_result import OptimisationResult
@@ -34,7 +34,7 @@ def measure_pooled(
             against.
 
     Raises:
-        StrategyCriticalError: If the pool breaks more than `MAX_POOL_BREAKS`
+        BotCriticalError: If the pool breaks more than `MAX_POOL_BREAKS`
             times.
     """
     return _PooledSweep(measure, grid_points, max_workers, total_points).run()
@@ -69,7 +69,7 @@ class _PooledSweep:
                 return self._results
             pool_breaks += 1
             if pool_breaks > MAX_POOL_BREAKS:
-                raise StrategyCriticalError(_too_many_breaks(pool_breaks))
+                raise BotCriticalError(_too_many_breaks(pool_breaks))
             logger.warning(
                 f"The process pool broke ({pool_breaks}/{MAX_POOL_BREAKS}): "
                 f"{len(self._results)} results kept, "

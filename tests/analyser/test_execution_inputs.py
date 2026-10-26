@@ -17,7 +17,7 @@ from robottraderslab._core import (
 from robottraderslab.analyser import AnalysisInputs
 from robottraderslab.analyser.execution_inputs import build_execution_inputs
 from robottraderslab.bootstrap import ReportConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 _BTC = Symbol.create("BTC/USDT:USDT")
 _ETH_USDC = Symbol.create("ETH/USDC:USDC")
@@ -137,7 +137,7 @@ class TestSettlementCurrency:
         )
 
     def test_symbols_settling_in_several_currencies_are_rejected(self):
-        with pytest.raises(StrategyCriticalError, match="several currencies"):
+        with pytest.raises(BotCriticalError, match="several currencies"):
             _analysis_input(
                 symbols=[_BTC, _ETH_USDC],
             )

@@ -1,29 +1,44 @@
-from ...exceptions import StrategyCriticalError
+from ...exceptions import BotCriticalError
 from ...timeframes import TIMEFRAMES, TimeFrame
 
 CUSTOM_TAG_BUDGET = 8
 
 SEPARATOR = "-"
 
+BRACKET_SUFFIXES: frozenset[str] = frozenset({"sl", "tp"})
+
+FLATTEN_TAG = "flatten"
+
+ENGINE_TAGS: frozenset[str] = BRACKET_SUFFIXES | {
+    "sl-reached",
+    "tp-reached",
+    FLATTEN_TAG,
+}
+
 
 class ProfileTag(str):
-    """A profile's whole identity on the wire, `timeframe` or `timeframe-tag`,
-    refused at construction unless every venue's client order id can carry it.
+    """A profile's whole identity on the wire, refused at construction unless
+    every venue's client order id can carry it and no venue's readback takes
+    its id for a bracket's.
     """
 
     __slots__ = ()
 
     def __new__(cls, value: str) -> "ProfileTag":
-        """Build the tag, holding it to what a client order id can carry.
+        """Hold the tag to what a client order id can carry.
+
+        Args:
+            value: The timeframe, followed by `-` and the custom part when the
+                profile sets one.
 
         Raises:
-            StrategyCriticalError: If the value does not open with a
-                timeframe, or its custom part carries the separator or
-                exceeds `CUSTOM_TAG_BUDGET` encoded bytes.
+            BotCriticalError: If the value does not open with a
+                timeframe, or its custom part carries the separator, is `sl`
+                or `tp`, or exceeds the byte budget a client order id allows it.
         """
         timeframe, separator, custom = value.partition(SEPARATOR)
         if timeframe not in TIMEFRAMES:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"`{timeframe}` is not a timeframe; a profile tag starts with one."
             )
         if separator:
@@ -32,19 +47,36 @@ class ProfileTag(str):
 
 
 def profile_tag(timeframe: TimeFrame, tag: str) -> ProfileTag:
-    """Return the tag a profile's orders carry in their client order id, the
-    timeframe followed by `-` and the tag when one is given.
+    """Return the tag a profile's orders carry in their client order id.
 
     The timeframe keeps two profiles distinguishable on the wire when
     nothing but the timeframe sets them apart.
 
+    Args:
+        timeframe: The timeframe the profile trades on; it leads the tag even
+            when `tag` is empty.
+        tag: The profile's own label; an empty one leaves the timeframe alone.
+
     Raises:
-        StrategyCriticalError: If the timeframe is unknown, the tag carries
-            `-`, or it exceeds 8 encoded bytes.
+        BotCriticalError: If the timeframe is unknown, the tag carries
+            `-`, is `sl` or `tp`, or it exceeds the byte budget a client order id allows it.
     """
     if not tag:
         return ProfileTag(timeframe)
     return ProfileTag(f"{timeframe}{SEPARATOR}{tag}")
+
+
+def require_not_a_bracket_suffix(tag: str) -> None:
+    """Keep a custom tag from ending a client order id the way a bracket's does.
+
+    Raises:
+        ValueError: If the tag is `sl` or `tp`.
+    """
+    if tag in BRACKET_SUFFIXES:
+        raise ValueError(
+            f"'{tag}' ends a bracket's client order id on Kraken, so the id "
+            "would read as the bracket of the entry before it; choose another"
+        )
 
 
 def require_within_budget(tag: str) -> None:
@@ -59,6 +91,16 @@ def require_within_budget(tag: str) -> None:
             f"'{tag}' is {size} bytes, over the {CUSTOM_TAG_BUDGET}-byte budget "
             "every venue's client order id honours"
         )
+
+
+def engine_tag_refusal(tag: str) -> BotCriticalError:
+    """Return the refusal for a tag the engine and the connectors write on the
+    protections and closes they place, so an order carrying one is always
+    theirs.
+    """
+    return BotCriticalError(
+        f"tag `{tag}` is the engine's own; choose another for the order."
+    )
 
 
 def tag_of(client_order_id: str | None) -> str | None:
@@ -99,11 +141,12 @@ def profile_identity(symbol: str, timeframe: TimeFrame, tag: str) -> str:
 
 def _require_carryable(custom: str) -> None:
     if SEPARATOR in custom:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"tag `{custom}` contains `{SEPARATOR}`, which separates the "
             "timeframe from the tag in the client order id."
         )
     try:
+        require_not_a_bracket_suffix(custom)
         require_within_budget(custom)
     except ValueError as error:
-        raise StrategyCriticalError(f"tag {error}.") from error
+        raise BotCriticalError(f"tag {error}.") from error

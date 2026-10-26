@@ -80,7 +80,7 @@ class FuturesPositionTarget:
                 the minimum order is measured at.
 
         Raises:
-            StrategyCriticalError: If the rule cannot size the position, as a
+            BotCriticalError: If the rule cannot size the position, as a
                 risk rule cannot without a stop-loss.
             ValueError: If the price is not positive or the symbol carries no
                 margin currency.

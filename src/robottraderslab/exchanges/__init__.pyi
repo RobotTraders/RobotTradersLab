@@ -4,6 +4,8 @@ from robottraderslab._core.actions.members import (
     BaseExchangeAction,
     OrderOutcome,
     client_order_id_carrying,
+    next_client_order_id,
+    process_bot_bytes,
     tag_of,
 )
 from robottraderslab._core.balance import Balance
@@ -132,10 +134,12 @@ __all__ = [
     "VenueParams",
     "fetch_pages",
     "lacks_a_closed_candle",
+    "next_client_order_id",
     "no_candles",
     "client_order_id_carrying",
     "describe_order",
     "page_bounds",
+    "process_bot_bytes",
     "tag_of",
     "to_milliseconds",
     "venue_trigger_type",

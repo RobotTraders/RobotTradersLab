@@ -8,7 +8,7 @@ from typing import Protocol
 from .account_snapshot import AccountSnapshot, AccountSnapshots, NamedAccount
 from .actions.members import BaseExchangeAction
 from .currency import Currency
-from .exceptions import StrategyCriticalError
+from .exceptions import BotCriticalError
 from .margin import MarginMode, MarginSettings
 from .order import Execution, FillDescriber
 from .retry import BASE_DELAY_SECONDS, MAX_ATTEMPTS
@@ -83,6 +83,16 @@ class AccountProtocol(NamedAccount, Protocol):
 
         Returns:
             The executions, in the sequence the venue booked them.
+        """
+        ...
+
+    def _close_removed_position(self, symbol: Symbol) -> BaseExchangeAction:
+        """Return an action closing the position the account holds on a symbol no
+        profile declares any more, reduce-only at market, under an id that
+        names the bot.
+
+        Returns:
+            Nothing is placed by this call; the caller books the action.
         """
         ...
 
@@ -256,12 +266,12 @@ class AccountRequirements:
                 keep protective orders the venue did not clean up.
 
         Raises:
-            StrategyCriticalError: If an account of that name is already declared.
+            BotCriticalError: If an account of that name is already declared.
         """
         if any(
             declared.account.name == account.name for declared in self._requirements
         ):
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"An account named '{account.name}' is already declared. Declare "
                 "each account once, and give accounts distinct names."
             )

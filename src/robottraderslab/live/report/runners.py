@@ -27,7 +27,7 @@ from robottraderslab.bootstrap import (
     load_strategy,
     require_ohlcv_provider,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import FuturesExchangeProtocol
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.strategies import StrategyRequirements, TradingMode, TradingSystem
@@ -94,7 +94,7 @@ def run_report(bot_config: BotConfig, days: int) -> None:
 def _profiles(bot_config: BotConfig) -> list[dict[str, Any]]:
     profiles = bot_config.strategy.profiles
     if not profiles:
-        raise StrategyCriticalError("`strategy.profiles` declares nothing to chart")
+        raise BotCriticalError("`strategy.profiles` declares nothing to chart")
     return profiles
 
 
@@ -189,6 +189,7 @@ async def _warm_ohlcv_provider(
     """
     strategy = load_strategy(
         bot_config.strategy.model_dump(),
+        config_file=bot_config.config_file,
         account=account,
         trading_system=TradingSystem(trading_mode=TradingMode.LIVE),
         config_dir=bot_config.config_dir,

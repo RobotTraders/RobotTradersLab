@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Self
 
 from robottraderslab._core import (
+    ENGINE_TAGS,
     NO_VENUE_PARAMS,
     AccountSnapshot,
     ActionBuilder,
@@ -16,11 +17,12 @@ from robottraderslab._core import (
     TimeInForce,
     TriggerType,
     VenueParams,
+    engine_tag_refusal,
     validate_price,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     ExchangeRecoverableError,
-    StrategyCriticalError,
 )
 
 from .futures_limit_order import FuturesLimitOrderAction
@@ -140,7 +142,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
                 the state it reads.
 
         Raises:
-            StrategyCriticalError: If the order is already sized.
+            BotCriticalError: If the order is already sized.
             ValueError: If price is not positive or is NaN.
         """
         self._require_unsized()
@@ -273,10 +275,17 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         order, where `tag_of` reads it; a profile's `order_tag` fits every
         venue's client order id.
 
+        Args:
+            tag: The label written into the order's client order id.
+
         Raises:
-            ValueError: If the tag is empty.
+            ValueError: If the tag is empty or blank.
+            BotCriticalError: If the tag is one the engine writes on its
+                own orders: `sl`, `tp`, `sl-reached`, `tp-reached`, `flatten`.
         """
         validate_tag(tag)
+        if tag in ENGINE_TAGS:
+            raise engine_tag_refusal(tag)
         self._params.tag = tag
         return self
 
@@ -310,7 +319,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         denial, and nothing of it reaches the venue.
 
         Raises:
-            StrategyCriticalError: If the order was never given a size, its
+            BotCriticalError: If the order was never given a size, its
                 rule cannot size it, a triggered order was given a time in
                 force other than `GTC`, or the symbol was never declared for
                 the account.
@@ -345,7 +354,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         if order.trigger_price is None:
             time_in_force = settings.time_in_force_over(time_in_force)
         elif time_in_force is not TimeInForce.GTC:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 f"A time in force of {time_in_force} on a triggered order: the "
                 "trigger decides when the order goes, and it then rests until "
                 "cancelled."
@@ -401,7 +410,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
         if self._params.sizing is not None:
             self._params.quantity = self._quantity_from_rule(self._params.sizing)
         if self._params.quantity is None:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 "The order has no size. Give it a quantity or size it with "
                 "size(rule, price, account_snapshot) before it is built."
             )
@@ -420,7 +429,7 @@ class FuturesOrderBuilder(ActionBuilder[BatchableOrderAction]):
 
     def _require_unsized(self) -> None:
         if self._params.quantity is not None or self._params.sizing is not None:
-            raise StrategyCriticalError(
+            raise BotCriticalError(
                 "The order is already sized; give it a quantity or a rule only once."
             )
 

@@ -1,6 +1,7 @@
 from typing import Any, Self
 
 from robottraderslab._core import (
+    ENGINE_TAGS,
     NO_VENUE_PARAMS,
     ActionBuilder,
     OnFillRead,
@@ -8,6 +9,7 @@ from robottraderslab._core import (
     Symbol,
     TimeInForce,
     VenueParams,
+    engine_tag_refusal,
     validate_price,
 )
 
@@ -129,10 +131,17 @@ class FuturesCloseBuilder(ActionBuilder[ClosePositionAction]):
         """Label the close so a later run can recognise it as its own, in the
         client order id where `tag_of` reads it.
 
+        Args:
+            tag: The label written into the order's client order id.
+
         Raises:
-            ValueError: If the tag is empty.
+            ValueError: If the tag is empty or blank.
+            BotCriticalError: If the tag is one the engine writes on its
+                own orders: `sl`, `tp`, `sl-reached`, `tp-reached`, `flatten`.
         """
         validate_tag(tag)
+        if tag in ENGINE_TAGS:
+            raise engine_tag_refusal(tag)
         self._tag = tag
         return self
 

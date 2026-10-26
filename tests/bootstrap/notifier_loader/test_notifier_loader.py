@@ -8,10 +8,10 @@ from robottraderslab.bootstrap import (
     load_notifiers,
     report_unavailable_notifiers,
 )
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 PLUGIN_FAILURES = pytest.mark.parametrize(
-    "failure_class", [ValueError, StrategyCriticalError], ids=["exception", "critical"]
+    "failure_class", [ValueError, BotCriticalError], ids=["exception", "critical"]
 )
 
 

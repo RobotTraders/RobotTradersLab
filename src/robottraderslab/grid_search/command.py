@@ -3,7 +3,7 @@ from pathlib import Path
 
 from robottraderslab._core import setup_notebook_logging
 from robottraderslab.bootstrap import BotConfig
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 from .grid_search_results import ERROR_COLUMN, GridSearchResults
 from .runner import run_grid_search
@@ -15,7 +15,7 @@ def main(config: Path, output_csv: Path | None) -> None:
     """Score every parameter combination the config declares.
 
     Raises:
-        StrategyCriticalError: If the config is unusable, or if no point of
+        BotCriticalError: If the config is unusable, or if no point of
             the grid scored.
         ExchangeCriticalError: If a backtest cannot reach what it needs.
     """
@@ -36,7 +36,7 @@ def _report_outcome(results: GridSearchResults) -> None:
     point still has a surface to read.
 
     Raises:
-        StrategyCriticalError: If no point of the grid scored.
+        BotCriticalError: If no point of the grid scored.
     """
     errors = results.dataframe[ERROR_COLUMN]
     total = len(errors)
@@ -45,7 +45,7 @@ def _report_outcome(results: GridSearchResults) -> None:
     logger.info("Grid search completed: %s/%s successful", scored, total)
 
     if not scored:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"No point of the {total}-point grid scored. The first failed with: "
             f"{errors.iloc[0]}"
         )

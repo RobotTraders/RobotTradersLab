@@ -12,7 +12,7 @@ class ActionBuilder[ActionT: BaseExchangeAction]:
         """Return the finished action.
 
         Raises:
-            StrategyCriticalError: If what was put together is not an action
+            BotCriticalError: If what was put together is not an action
                 the engine can carry out.
         """
         raise NotImplementedError

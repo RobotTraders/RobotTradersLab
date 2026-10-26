@@ -107,7 +107,9 @@ async def test_corrupt_state_is_reset_to_an_open_window(
     virtual_sleeps.assert_not_called()
 
 
-async def test_an_unreachable_budget_never_blocks(caplog, virtual_sleeps):
+async def test_an_unreachable_budget_never_blocks(
+    caplog, make_unshared_report_levels, virtual_sleeps
+):
     state_file_path(SCOPE).parent.mkdir(parents=True, exist_ok=True)
     state_file_path(SCOPE).mkdir()
     window = _make_window(cap=1)
@@ -117,7 +119,7 @@ async def test_an_unreachable_budget_never_blocks(caplog, virtual_sleeps):
         await window.wait(PACED_KEY)
 
     virtual_sleeps.assert_not_called()
-    assert caplog.text.count("not shared between processes") == 1
+    assert make_unshared_report_levels() == ["ERROR"]
 
 
 async def test_a_held_lock_lets_the_caller_go(caplog):

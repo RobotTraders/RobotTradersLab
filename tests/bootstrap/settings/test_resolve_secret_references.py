@@ -1,7 +1,7 @@
 import pytest
 
 from robottraderslab.bootstrap import resolve_secret_references
-from robottraderslab.exceptions import StrategyCriticalError
+from robottraderslab.exceptions import BotCriticalError
 
 
 def test_block_without_secret_name_is_unchanged():
@@ -35,7 +35,7 @@ def test_secret_value_wins_over_inline_value():
 def test_unknown_secret_name_raises_with_block_and_secret_names():
     configs = {"discord": {"secret_name": "missing"}}
 
-    with pytest.raises(StrategyCriticalError, match="`discord`.*`missing`"):
+    with pytest.raises(BotCriticalError, match="`discord`.*`missing`"):
         resolve_secret_references(configs, {})
 
 

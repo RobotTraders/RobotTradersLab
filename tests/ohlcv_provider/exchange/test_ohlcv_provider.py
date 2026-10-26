@@ -22,9 +22,9 @@ from robottraderslab._core import (
     to_seconds,
 )
 from robottraderslab.exceptions import (
+    BotCriticalError,
     DataError,
     ExchangeCriticalError,
-    StrategyCriticalError,
     SymbolNotListedError,
 )
 from robottraderslab.exchanges import OhlcvAdapterProtocol, OhlcvData
@@ -411,9 +411,9 @@ class TestExchangeOHLCVProvider:
         "failure",
         [
             ExchangeCriticalError("key revoked"),
-            StrategyCriticalError("the strategy names no account"),
+            BotCriticalError("the strategy names no account"),
         ],
-        ids=["exchange_critical", "strategy_critical"],
+        ids=["exchange_critical", "bot_critical"],
     )
     async def test_a_critical_the_adapter_raises_stops_the_live_assembly(
         self, make_registered_adapter, failure
@@ -936,7 +936,7 @@ class TestExchangeOHLCVProvider:
         provider = ExchangeOHLCVProvider(exchange="always_closed", storage_dir="/tmp")
         provider.set_required_lookbacks({"1d": 10})
 
-        with pytest.raises(StrategyCriticalError) as failure:
+        with pytest.raises(BotCriticalError) as failure:
             provider.fetch_ohlcv(Symbol.create("BTC/USDT:USDT"), "1d")
 
         assert "BTC/USDT:USDT" in str(failure.value)

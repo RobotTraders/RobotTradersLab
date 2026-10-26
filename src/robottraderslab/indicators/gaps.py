@@ -1,7 +1,7 @@
 import numpy as np
 import numpy.typing as npt
 
-from robottraderslab._core import StrategyCriticalError
+from robottraderslab._core import BotCriticalError
 
 
 def published_candles(*series: npt.NDArray[np.float64]) -> npt.NDArray[np.bool_]:
@@ -19,7 +19,7 @@ def require_full_window(
     """
     count = int(published.sum())
     if count < period:
-        raise StrategyCriticalError(
+        raise BotCriticalError(
             f"{indicator}({period}) needs {period} published candles; the series "
             f"carries {count} across {published.size} stamps, "
             f"{published.size - count} of them holding no candle the market "

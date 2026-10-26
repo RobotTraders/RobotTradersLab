@@ -21,6 +21,8 @@ def mock_metrics() -> tuple[Mock, Mock]:
     trade_metrics.total_trades = 10
     equity_metrics = Mock(spec=EquityMetricsResult)
     equity_metrics.sharpe_ratio = 1.85
+    equity_metrics.sortino_ratio = 2.4
+    equity_metrics.calmar_ratio = 3.1
     equity_metrics.roi = 0.092
     equity_metrics.max_drawdown = -0.037
     equity_metrics.max_drawdown_amount = -37.0
@@ -61,6 +63,8 @@ class TestSummaryMetrics:
         summary = analyser.get_summary_metrics()
 
         assert summary.sharpe_ratio == 1.85
+        assert summary.sortino_ratio == 2.4
+        assert summary.calmar_ratio == 3.1
         assert summary.roi == 0.092
         assert summary.max_drawdown == -0.037
         assert summary.win_rate == 0.667
