@@ -959,6 +959,27 @@ def test_entry_fills_of_the_closed_candle_reach_notifiers(
     assert "fired-1" in caplog.text
 
 
+def test_resting_limit_fill_is_worth_its_quantity_at_its_price(
+    exchange, create_entry_fill_strategy
+):
+    symbol = Symbol.create("BTC/USDT:USDT")
+    fill = replace(
+        _entry_fill(symbol, datetime(2024, 1, 1, 5, tzinfo=UTC), kind="limit"),
+        price=2.5,
+        quantity=4.0,
+    )
+    exchange.get_executions_since = AsyncMock(return_value=[fill])
+    notifier = AsyncMock()
+    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+    ohlcv_provider.fetch_ohlcv.return_value = _candles(["2024-01-01"])
+
+    strategy = create_entry_fill_strategy(symbol)
+    livebot = LiveBot(strategy, ohlcv_provider, on_fill=[notifier])
+    asyncio.run(livebot.run())
+
+    assert notifier.await_args.args[0].filled_value == 10.0
+
+
 def test_a_fill_of_no_entry_kind_is_not_notified_as_an_entry(
     exchange, create_entry_fill_strategy
 ):
@@ -1617,6 +1638,32 @@ def test_venue_fired_fill_carries_the_profit_the_venue_booked(
     asyncio.run(livebot.run())
 
     assert notifier.await_args.args[0].realised_profit == -7.25
+
+
+@pytest.mark.parametrize(
+    "create_fill",
+    [_stop_loss_fill, _take_profit_fill, _liquidation_fill],
+    ids=["stop_loss", "take_profit", "liquidation"],
+)
+def test_venue_fired_fill_is_worth_its_quantity_at_its_price(
+    exchange, create_venue_fill_strategy, create_fill
+):
+    symbol = Symbol.create("BTC/USDT:USDT")
+    fill = replace(
+        create_fill(symbol, datetime(2024, 1, 1, 5, tzinfo=UTC)),
+        price=2.5,
+        quantity=4.0,
+    )
+    exchange.get_executions_since = AsyncMock(return_value=[fill])
+    notifier = AsyncMock()
+    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+    ohlcv_provider.fetch_ohlcv.return_value = _candles(["2024-01-01"])
+
+    strategy = create_venue_fill_strategy(symbol)
+    livebot = LiveBot(strategy, ohlcv_provider, on_fill=[notifier])
+    asyncio.run(livebot.run())
+
+    assert notifier.await_args.args[0].filled_value == 10.0
 
 
 def test_venue_fired_fill_states_what_it_did_to_the_position(
