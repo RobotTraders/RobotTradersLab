@@ -508,8 +508,10 @@ async def _record_reconciled_fill(
     source: FillSource,
     reason: str | None,
 ) -> None:
-    """The kind is passed apart from the fill: a fill only reaches here once its
-    caller has settled that the venue named one.
+    """A fill only reaches here once its caller has settled that the venue named
+    its kind. Every connector trades linear contracts only. A linear
+    contract's price is quoted per unit of the base currency, so price times
+    quantity is the fill's value in the quote currency.
     """
     order_fill = OrderFill(
         order_id=fill.order_id,
@@ -518,6 +520,7 @@ async def _record_reconciled_fill(
         kind=kind,
         quantity=fill.quantity,
         timestamp=fill.timestamp,
+        filled_value=fill.price * fill.quantity,
         realised_profit=fill.realised_profit,
         client_order_id=fill.client_order_id,
         reason=reason,
