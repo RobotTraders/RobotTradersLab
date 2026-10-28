@@ -3,11 +3,10 @@ from importlib.metadata import entry_points
 from importlib.resources import as_file, files
 from pathlib import Path
 
-from robottraderslab._core import mark_root
+from .workspace import mark_workspace
 
 _ENTRY_POINT_GROUP = "robot_traders_lab.examples"
 _EXAMPLES_DIR_NAME = "examples"
-_EXAMPLE_FOLDER_SUFFIX = "-bot-example"
 
 
 class ExampleError(Exception):
@@ -19,18 +18,15 @@ def list_examples() -> list[str]:
     return sorted(ep.name for ep in entry_points(group=_ENTRY_POINT_GROUP))
 
 
-def copy_example(name: str, destination_root: str | Path) -> Path:
+def copy_example(name: str, destination_root: str | Path, folder: str | Path) -> Path:
     """Every example copied into one destination shares that destination's
     engine files and its store of candles, which its marker gathers.
 
     Args:
         name: Name of a registered example.
-        destination_root: Directory that receives the example folder,
-            created if missing.
-
-    Returns:
-        A folder whose name differs from the example's, so that name stays
-        free for a bot of the user's.
+        destination_root: The workspace that receives the bot's folder.
+        folder: The bot's folder, relative to `destination_root`; its name
+            is the bot's.
 
     Raises:
         ExampleError: If the example is not registered, its package ships
@@ -42,13 +38,13 @@ def copy_example(name: str, destination_root: str | Path) -> Path:
     if not source.is_dir():
         raise ExampleError(f"Package '{package}' ships no example files")
 
-    destination = Path(destination_root) / f"{name}{_EXAMPLE_FOLDER_SUFFIX}"
+    destination = Path(destination_root) / folder
     if destination.exists():
         raise ExampleError(f"'{destination}' already exists; not overwriting")
 
     with as_file(source) as source_path:
         shutil.copytree(source_path, destination)
-    mark_root(Path(destination_root))
+    mark_workspace(Path(destination_root))
     return destination
 
 

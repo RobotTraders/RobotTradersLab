@@ -156,8 +156,11 @@ cython_debug/
 workspace/*
 !workspace/.gitkeep
 
-# Backtest run folders
+# What a bot writes in its folder
+backtests/
 reports/
+optimisations/
+logs/
 
 # Don't commit your secrets :)
 secret*

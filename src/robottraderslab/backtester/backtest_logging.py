@@ -1,7 +1,10 @@
 import logging
 import logging.config
-from datetime import datetime
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from io import StringIO
 from pathlib import Path
+from typing import Any
 
 from robottraderslab._core import (
     LogLevel,
@@ -9,47 +12,28 @@ from robottraderslab._core import (
     lowest_handler_level,
 )
 
+RUN_LOG_FILENAME = "backtest.log"
+_QUIETED_LOGGERS = ("ccxt", "robottraderslab._core.actions.executor")
+
 
 def setup_backtest_logging(
-    logfile: str | Path | None,
-    log_name: str,
+    logfile: Path | None,
     console_level: LogLevel,
     file_level: LogLevel,
     enable_console: bool,
-    enable_file: bool,
-    custom_handlers: dict[str, dict] | None = None,
-    config_dir: Path | None = None,
-) -> Path:
-    """Earlier runs stay available for comparison.
+    custom_handlers: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """The root logger's handlers are replaced by the ones this run configures."""
+    handlers_config: dict[str, dict[str, Any]] = {}
+    root_handlers: list[str] = []
 
-    Args:
-        logfile: Defaults to a timestamped file under a logs/ directory when
-            not given.
-        log_name: Names the default log file, so bots sharing a directory
-            keep their runs apart.
-        custom_handlers: Additional handlers to configure (e.g. Discord, Telegram).
-        config_dir: Workspace directory anchoring the default log, so a bot
-            writes beside its own config wherever the run started.
-    """
-    if logfile is None:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        logs_dir = (config_dir or Path()) / "logs"
-        logs_dir.mkdir(parents=True, exist_ok=True)
-        logfile_path = logs_dir / f"backtest_{log_name}_{timestamp}.log"
-    else:
-        logfile_path = Path(logfile)
-        if logfile_path.parent != Path("."):
-            logfile_path.parent.mkdir(parents=True, exist_ok=True)
-
-    handlers_config = {}
-    root_handlers = []
-
-    if enable_file:
+    if logfile is not None:
+        logfile.parent.mkdir(parents=True, exist_ok=True)
         handlers_config["file"] = {
             "class": "logging.FileHandler",
             "level": file_level,
             "formatter": "default",
-            "filename": str(logfile_path),
+            "filename": str(logfile),
             "encoding": "utf-8",
         }
         root_handlers.append("file")
@@ -78,15 +62,61 @@ def setup_backtest_logging(
             "level": lowest_handler_level(handlers_config),
             "handlers": root_handlers,
         },
-        "loggers": {
-            "ccxt": {
-                "level": "WARNING",
-            },
-            "robottraderslab._core.actions.executor": {
-                "level": "WARNING",
-            },
-        },
+        "loggers": {name: {"level": logging.WARNING} for name in _QUIETED_LOGGERS},
     }
     logging.config.dictConfig(config)
 
-    return logfile_path
+
+@contextmanager
+def logger_levels(
+    levels: Mapping[logging.Logger | logging.Handler, int],
+) -> Iterator[None]:
+    """Every logger and handler is back at the level it had once the block
+    ends, whatever the block raises.
+
+    Args:
+        levels: The level each logger or handler holds for the block.
+    """
+    previous = {target: target.level for target in levels}
+    for target, level in levels.items():
+        target.setLevel(level)
+    try:
+        yield
+    finally:
+        for target, level in previous.items():
+            target.setLevel(level)
+
+
+@contextmanager
+def recorded_log(level: LogLevel) -> Iterator[StringIO]:
+    """A run started from Python is saved, or not, only once it has finished,
+    so its log is held in memory until its folder is written.
+
+    A caller that configured no logging keeps the warnings Python prints to
+    stderr: `logging.lastResort` stays on the root beside this run's handler.
+    The root's own handlers keep showing what the root let through before,
+    so lowering the root for this run's handler adds no line to them.
+    """
+    handler = logging.StreamHandler(StringIO())
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter(get_formatter_config()["default"]["format"]))
+    root = logging.getLogger()
+    added: list[logging.Handler] = [handler]
+    if not root.handlers and logging.lastResort is not None:
+        added.append(logging.lastResort)
+    levels: dict[logging.Logger | logging.Handler, int] = {
+        root: min(root.level, handler.level),
+        **{
+            caller_handler: max(caller_handler.level, root.level)
+            for caller_handler in root.handlers
+        },
+        **{logging.getLogger(name): logging.WARNING for name in _QUIETED_LOGGERS},
+    }
+    with logger_levels(levels):
+        for added_handler in added:
+            root.addHandler(added_handler)
+        try:
+            yield handler.stream
+        finally:
+            for added_handler in added:
+                root.removeHandler(added_handler)

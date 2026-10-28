@@ -28,7 +28,7 @@ def run_scheduler() -> Iterator[Mock]:
 
 
 def test_logs_rotate_next_to_the_registry_file(setup_logging, create_registry):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     main(registry_file)
 
@@ -39,7 +39,7 @@ def test_logs_rotate_next_to_the_registry_file(setup_logging, create_registry):
 
 
 def test_the_scheduler_runs_against_the_given_registry(run_scheduler, create_registry):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     main(registry_file)
 
@@ -48,7 +48,7 @@ def test_the_scheduler_runs_against_the_given_registry(run_scheduler, create_reg
 
 def test_a_bot_that_failed(run_scheduler, create_registry):
     run_scheduler.return_value = 2
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     failed = main(registry_file)
 
@@ -72,7 +72,7 @@ def test_logging_settings_come_from_the_registry(setup_logging, create_registry)
 def test_a_registry_without_logging_settings_uses_the_defaults(
     setup_logging, create_registry
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     main(registry_file)
 
@@ -216,7 +216,7 @@ def test_a_secret_reference_that_is_not_defined(run_scheduler, create_registry):
         'secrets_file = "absent.toml"\n'
         "[notifier.discord.log]\n"
         'secret_name = "nowhere"\n'
-        '[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\nconfig = "pilot"\n'
     )
 
     main(registry_file)
@@ -228,7 +228,7 @@ def test_a_notifier_plugin_that_is_not_installed(
     run_scheduler, setup_logging, create_registry, caplog
 ):
     registry_file = create_registry(
-        '[notifier.nosuchplugin.log]\n[[bot]]\nconfig = "bot.toml"\n'
+        '[notifier.nosuchplugin.log]\n[[bot]]\nconfig = "pilot"\n'
     )
 
     with caplog.at_level(logging.ERROR):
@@ -243,7 +243,7 @@ def test_a_bare_webhook_url_in_the_registry(run_scheduler, create_registry):
     registry_file = create_registry(
         "[notifier.discord.log]\n"
         'webhook_url = "https://discord.test/hook"\n'
-        '[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\nconfig = "pilot"\n'
     )
 
     with pytest.raises(BotCriticalError, match="notifier.discord.log.webhook_url"):
@@ -258,7 +258,7 @@ def test_a_refused_credential_never_reaches_the_fallback_logging(
     registry_file = create_registry(
         "[notifier.discord.log]\n"
         'webhook_url = "https://discord.test/hook"\n'
-        '[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\nconfig = "pilot"\n'
     )
 
     with pytest.raises(BotCriticalError):
@@ -279,7 +279,7 @@ def test_a_secret_name_only_registry_notifier_reaches_the_scheduler(
         f'secrets_file = "{secrets_file.as_posix()}"\n'
         "[notifier.discord.log]\n"
         'secret_name = "scheduler_discord"\n'
-        '[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\nconfig = "pilot"\n'
     )
 
     main(registry_file)

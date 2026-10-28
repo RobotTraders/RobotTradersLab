@@ -8,6 +8,9 @@ from robottraderslab._core import BacktestReport, SymbolAnalysis
 from .summaries import write_performance_summary, write_trades_summary
 
 _REPORT_FILENAME = "report.txt"
+_BACKTESTS_DIR_NAME = "backtests"
+_REPORTS_DIR_NAME = "reports"
+_OPTIMISATIONS_DIR_NAME = "optimisations"
 
 
 def timestamp_now() -> str:
@@ -15,28 +18,33 @@ def timestamp_now() -> str:
     return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 
-def run_folder_name(bot_stem: str, timestamp: str) -> str:
-    """Name a run folder as `<timestamp>_backtest_<bot_stem>`."""
-    return f"{timestamp}_backtest_{bot_stem}"
+def backtest_folder(bot_folder: Path, timestamp: str) -> Path:
+    return bot_folder / _BACKTESTS_DIR_NAME / timestamp
+
+
+def optimisation_folder(bot_folder: Path, timestamp: str) -> Path:
+    return bot_folder / _OPTIMISATIONS_DIR_NAME / timestamp
+
+
+def report_folder(bot_folder: Path, timestamp: str) -> Path:
+    return bot_folder / _REPORTS_DIR_NAME / timestamp
 
 
 def create_run_folder(
-    report: BacktestReport, reports_root: Path, folder_name: str, config_file: Path
-) -> Path:
-    """
-    Args:
-        report: The measured performance and per-symbol breakdown to write.
-        config_file: The configuration file, copied into the folder byte for
-            byte, under its own name.
+    report: BacktestReport, directory: Path, config_file: Path
+) -> None:
+    """A folder the run's log already opened is completed in place, and a
+    folder another run already completed is never overwritten.
 
-    Returns:
-        The created folder.
+    Raises:
+        FileExistsError: If the folder already holds a run's report.
     """
-    directory = reports_root / folder_name
-    directory.mkdir(parents=True)
+    report_file = directory / _REPORT_FILENAME
+    if report_file.exists():
+        raise FileExistsError(f"`{directory}` already holds a saved run")
+    directory.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(config_file, directory / config_file.name)
-    _write_report(report, directory / _REPORT_FILENAME)
-    return directory
+    _write_report(report, report_file)
 
 
 def _write_report(report: BacktestReport, path: Path) -> None:

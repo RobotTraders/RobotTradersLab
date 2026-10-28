@@ -32,8 +32,6 @@ from robottraderslab.reporting import (
     print_long_short_comparison,
     print_performance_summary,
     print_symbol_analysis,
-    run_folder_name,
-    timestamp_now,
 )
 
 from .analysis_inputs import AnalysisInputs
@@ -43,7 +41,7 @@ from .analysis_tables import (
     build_reason_tables,
     build_symbol_analysis,
 )
-from .backtest_report import build_backtest_report, resolve_reports_dir
+from .backtest_report import build_backtest_report, resolve_run_folder
 from .equity_metrics import (
     EquityMetricsMixin,
     EquityMetricsResult,
@@ -475,20 +473,56 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
         )
         print_symbol_analysis(analysis)
 
-    def save_run(self, bot_config: BotConfig, indicators_name: str) -> Path:
+    def save_report(
+        self,
+        directory: Path,
+        bot_config: BotConfig,
+        indicators_name: str,
+        timestamp: str,
+        start_date: str,
+    ) -> Path:
         """A later `plot_candlesticks` opens that page without rendering again.
 
         Args:
-            bot_config: The configuration this run replayed; its `[report]`
-                section names where the folder is written and its config file
-                is copied into it and read for the page's configuration view.
+            directory: The folder the page is written into.
+            bot_config: The bot reported on.
             indicators_name: Entry point name for indicators (e.g., "impulse").
+            timestamp: The moment the page is titled with, as `timestamp_now`
+                gives it.
+            start_date: The window's first day; the candles fetched before it
+                for the indicators' lookback stay off the page.
+        """
+        self._saved_run_report = self._write_page(
+            directory / _REPORT_HTML_NAME,
+            bot_config,
+            indicators_name,
+            timestamp,
+            start_date,
+        )
+        return self._saved_run_report
 
-        Returns:
-            The run's folder.
+    def save_run(
+        self,
+        bot_config: BotConfig,
+        indicators_name: str,
+        timestamp: str,
+        start_date: str,
+    ) -> Path:
+        """A run with strategy profiles saves its page, which a later
+        `plot_candlesticks` opens without rendering again.
+
+        Args:
+            bot_config: The configuration this run replayed.
+            indicators_name: Entry point name for indicators (e.g., "impulse").
+            timestamp: The moment naming the folder, as `timestamp_now` gives
+                it; a folder the run's log already opened under that name is
+                completed in place.
+            start_date: The run's first day, where its page starts.
 
         Raises:
             ValueError: If `bot_config` carries no configuration file to copy.
+            FileExistsError: If another run already saved its folder under
+                `timestamp`.
         """
         config_file = bot_config.config_file
         if config_file is None:
@@ -496,20 +530,16 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
                 "This bot config carries no configuration file to save the run's "
                 "folder from."
             )
-        timestamp = timestamp_now()
         report = build_backtest_report(
             self.performance_report(), self._trades, self._require_initial_equity()
         )
-        directory = create_run_folder(
-            report,
-            resolve_reports_dir(bot_config),
-            run_folder_name(config_file.stem, timestamp),
-            config_file,
-        )
+        directory = resolve_run_folder(bot_config, timestamp)
+        create_run_folder(report, directory, config_file)
         if self._profiles:
             self._saved_run_report = self._write_run_report(
-                directory, config_file, indicators_name, timestamp
+                directory, bot_config, indicators_name, timestamp, start_date
             )
+        logger.info("Run saved to %s", directory)
         return directory
 
     def _cumulative_pnl_series(self, *, show_percentage: bool) -> pd.Series:
@@ -545,26 +575,51 @@ class Analyser(TradeMetricsMixin, EquityMetricsMixin):
             return self._equity_metrics.absolute_drawdown, DrawdownUnit.CURRENCY
         return shares * FRACTION_TO_PERCENT, DrawdownUnit.PERCENT
 
+    def _write_page(
+        self,
+        destination: Path,
+        bot_config: BotConfig,
+        indicators_name: str,
+        timestamp: str,
+        start_date: str,
+    ) -> Path:
+        config_file = bot_config.config_file
+        drawdown_curve, drawdown_unit = self._stated_drawdown_curve()
+        return self._chart_service.write_report(
+            indicators_name=indicators_name,
+            charts=self._require_profiles(),
+            report=self.performance_report(),
+            equity_curve=self._equity_curve,
+            drawdown_curve=drawdown_curve,
+            drawdown_unit=drawdown_unit,
+            trades_df=self._trades,
+            destination=destination,
+            configuration=(
+                config_file.read_text(encoding="utf-8") if config_file else ""
+            ),
+            run_label=f"{bot_config.name} · {timestamp}",
+            start_date=start_date,
+        )
+
     def _write_run_report(
-        self, directory: Path, config_file: Path, indicators_name: str, timestamp: str
+        self,
+        directory: Path,
+        bot_config: BotConfig,
+        indicators_name: str,
+        timestamp: str,
+        start_date: str,
     ) -> Path | None:
         """A chart failure never costs the folder its configuration and its
         report, since drawing is a presentation detail and the run's figures
         are already measured and written.
         """
-        drawdown_curve, drawdown_unit = self._stated_drawdown_curve()
         try:
-            return self._chart_service.write_report(
-                indicators_name=indicators_name,
-                charts=self._profiles,
-                report=self.performance_report(),
-                equity_curve=self._equity_curve,
-                drawdown_curve=drawdown_curve,
-                drawdown_unit=drawdown_unit,
-                trades_df=self._trades,
-                destination=directory / _REPORT_HTML_NAME,
-                configuration=config_file.read_text(encoding="utf-8"),
-                run_label=f"{config_file.stem} · {timestamp}",
+            return self._write_page(
+                directory / _REPORT_HTML_NAME,
+                bot_config,
+                indicators_name,
+                timestamp,
+                start_date,
             )
         except (Exception, ExchangeCriticalError, BotCriticalError):
             logger.error(

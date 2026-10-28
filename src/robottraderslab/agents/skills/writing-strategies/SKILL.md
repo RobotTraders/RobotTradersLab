@@ -44,13 +44,13 @@ The guides carry the concepts:
    [project.entry-points."robot_traders_lab.examples"]
    my_strategy = "my_strategy"
    ```
-2. **Code and configuration**: the class in `src/my_strategy/__init__.py`, its configuration file in `src/my_strategy/examples/my-strategy-bot-example.toml`. The file's `[strategy]` section names the entry point's key, `strategy_class = "my_strategy"`, and carries the strategy's settings and its `[[strategy.profiles]]`; `[backtest]` and `[backtest.ohlcv_provider]` carry the balance, the fees, the dates and the candle source.
+2. **Code and configuration**: the class in `src/my_strategy/__init__.py`, its configuration file in `src/my_strategy/examples/bot.toml`. The file's `[strategy]` section names the entry point's key, `strategy_class = "my_strategy"`, and carries the strategy's settings and its `[[strategy.profiles]]`; `[backtest]` and `[backtest.ohlcv_provider]` carry the balance, the fees, the dates and the candle source.
 3. **Install it into the bot project**:
    ```bash
    uv add --editable ../my-strategy
    ```
    An edit to a `.py` file reaches the next run as it is; an edit to the package's `pyproject.toml` needs `uv sync --reinstall-package my-strategy`.
-4. **Backtest it** with the commands `AGENTS.md` gives under Set up a workspace and Backtest, `my_strategy` being the example: the scaffold copies it to `workspace/my_strategy-bot-example/`.
+4. **Backtest it** with the commands `AGENTS.md` gives under Set up a workspace and Backtest, `my_strategy` being the example: `rtlab scaffold my_strategy my_strategy-bot-example` copies it to `workspace/my_strategy-bot-example/`.
 5. **Fix and rerun step 4 until the backtest completes.** The error names the profile, the key or the slot at fault. The work is done when the backtest completes and its report shows the trades the strategy was meant to take.
 
 ## The contract

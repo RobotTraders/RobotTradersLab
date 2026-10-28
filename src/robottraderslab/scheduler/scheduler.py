@@ -18,6 +18,7 @@ from robottraderslab._core import (
     hold_instance_lock,
     run_async,
 )
+from robottraderslab.bootstrap import bot_file, bot_name, names_a_file, not_a_bot
 from robottraderslab.exceptions import BotCriticalError
 
 from .launch_memory import BotLaunch, LaunchMemory
@@ -25,6 +26,7 @@ from .shared_account import refuse_shared_account
 
 logger = logging.getLogger(__name__)
 
+_BOT_KEY = "bot"
 _CONFIG_KEY = "config"
 _EXCHANGES_KEY = "exchanges"
 _NOTIFIER_KEY = "notifier"
@@ -34,8 +36,6 @@ _CLOCK_FORMAT = "%H:%M UTC"
 
 @dataclass(frozen=True)
 class _RegisteredBot:
-    """A registry entry: a bot config and the timeframes that make it due."""
-
     config: Path
     timeframes: list[TimeFrame]
 
@@ -54,9 +54,9 @@ def run_scheduler(registry_file: str | Path) -> int:
     the files the engine kept about it with it.
 
     Args:
-        registry_file: TOML file with a `[[bot]]` array; each entry has a
-            `config` path and an optional `timeframes` list. Relative config
-            paths are anchored to the registry file's directory. An optional
+        registry_file: TOML file with a `[[bot]]` array; each entry names
+            its bot's folder as `config` and an optional `timeframes` list. An
+            optional
             `[exchanges]` table and the scalars under `[notifier.<plugin>]`
             carry settings every launched bot receives.
 
@@ -65,7 +65,8 @@ def run_scheduler(registry_file: str | Path) -> int:
         another instance of itself trading is not one of them.
 
     Raises:
-        BotCriticalError: If the registry cannot be read or parsed, or two
+        BotCriticalError: If the registry cannot be read or parsed, names a
+            file where a bot's folder belongs, or two
             of its bots trade one account under the same bot digest.
     """
     registry_path = Path(registry_file)
@@ -135,20 +136,21 @@ def _load_registered_bots(
 ) -> list[_RegisteredBot]:
     base_dir = registry_file.resolve().parent
     bots: list[_RegisteredBot] = []
-    for position, entry in enumerate(raw.get("bot", []), start=1):
-        config_value = entry.get(_CONFIG_KEY)
-        if not config_value:
+    for position, entry in enumerate(raw.get(_BOT_KEY, []), start=1):
+        folder_value = entry.get(_CONFIG_KEY)
+        if not folder_value:
             logger.error(
                 "Registry entry %s has no `%s`, skipping it", position, _CONFIG_KEY
             )
             continue
-        config = Path(config_value)
-        if not config.is_absolute():
-            config = base_dir / config
-        if not config.exists():
-            logger.error("Bot config %s does not exist, skipping it", config)
+        folder = base_dir / folder_value
+        refusal = not_a_bot(folder)
+        if refusal is not None and names_a_file(folder):
+            raise BotCriticalError(refusal)
+        if refusal is not None:
+            logger.error("%s, skipping it", refusal)
             continue
-        bots.append(_RegisteredBot(config, entry.get("timeframes", [])))
+        bots.append(_RegisteredBot(bot_file(folder), entry.get("timeframes", [])))
     return bots
 
 
@@ -218,7 +220,7 @@ async def _launch_bots(
     failures = 0
     for bot_config, outcome in zip(bot_configs, outcomes, strict=True):
         if isinstance(outcome, BaseException):
-            logger.error("Cannot launch %s", bot_config.name, exc_info=outcome)
+            logger.error("Cannot launch %s", bot_name(bot_config), exc_info=outcome)
             failures += 1
         elif _failed(outcome):
             failures += 1
@@ -227,19 +229,19 @@ async def _launch_bots(
 
 
 async def _run_bot(bot_config: Path, memory: LaunchMemory, now: datetime) -> int:
-    logger.info("Launching %s", bot_config.name)
+    logger.info("Launching %s", bot_name(bot_config))
     started = time.monotonic()
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
         "robottraderslab",
         "live",
-        str(bot_config),
+        str(bot_config.parent),
         stderr=asyncio.subprocess.PIPE,
     )
     _, stderr = await process.communicate()
     exit_code = await process.wait()
-    _report_slow_cycle(bot_config.name, time.monotonic() - started)
+    _report_slow_cycle(bot_name(bot_config), time.monotonic() - started)
     _report_lifecycle(bot_config, exit_code, stderr, memory, now)
     return exit_code
 
@@ -251,15 +253,15 @@ def _failed(exit_code: int) -> bool:
 def _is_paused(memory: LaunchMemory, bot_config: Path, now: datetime) -> bool:
     if not memory.is_paused(bot_config, now):
         return False
-    logger.debug("%s is paused, not launching it", bot_config.name)
+    logger.debug("%s is paused, not launching it", bot_name(bot_config))
     return True
 
 
-def _report_slow_cycle(bot_name: str, seconds: float) -> None:
+def _report_slow_cycle(name: str, seconds: float) -> None:
     if seconds > _CADENCE_SECONDS:
         logger.warning(
             "%s took %.0f seconds, longer than the minute between runs",
-            bot_name,
+            name,
             seconds,
         )
 
@@ -272,20 +274,20 @@ def _report_lifecycle(
     """
     if exit_code == 0:
         if memory.record_success(bot_config):
-            logger.warning("%s is running again", bot_config.name)
+            logger.warning("%s is running again", bot_name(bot_config))
         return
     launch = memory.record_exit(bot_config, exit_code, now)
     if launch is not None:
-        _report_failed_launch(bot_config.name, launch, stderr)
+        _report_failed_launch(bot_name(bot_config), launch, stderr)
 
 
-def _report_failed_launch(bot_name: str, launch: BotLaunch, stderr: bytes) -> None:
+def _report_failed_launch(name: str, launch: BotLaunch, stderr: bytes) -> None:
     if launch.exit_code == EX_TEMPFAIL:
-        logger.warning("%s exited %s, retrying every run", bot_name, launch.exit_code)
+        logger.warning("%s exited %s, retrying every run", name, launch.exit_code)
         return
     logger.error(
         "%s exited %s, paused, next attempt at %s%s",
-        bot_name,
+        name,
         launch.exit_code,
         launch.next_attempt.strftime(_CLOCK_FORMAT),
         _carried_sentence(launch.exit_code, stderr),

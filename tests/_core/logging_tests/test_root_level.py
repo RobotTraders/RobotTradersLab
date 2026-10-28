@@ -22,11 +22,9 @@ def _restore_logging() -> Iterator[None]:
 def _configure(logfile: Path, file_level: LogLevel, **overrides: Any) -> None:
     setup_backtest_logging(
         logfile=logfile,
-        log_name="a-bot",
         console_level=LogLevel.INFO,
         file_level=file_level,
         enable_console=True,
-        enable_file=True,
         **overrides,
     )
 

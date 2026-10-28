@@ -52,19 +52,20 @@ def bot_clock() -> Iterator[Mock]:
 
 @pytest.fixture
 def bot_config(tmp_path: Path) -> Path:
-    config = tmp_path / "bot.toml"
+    config = tmp_path / "pilot" / "bot.toml"
+    config.parent.mkdir()
     config.write_text("[strategy]\nstrategy_class = 'dummy'\n")
     return config
 
 
 def _launch_args(config: Path) -> tuple[str, ...]:
-    return (sys.executable, "-m", "robottraderslab", "live", str(config))
+    return (sys.executable, "-m", "robottraderslab", "live", str(config.parent))
 
 
 def test_launches_a_bot_registered_without_timeframes(
     create_registry, bot_config, mock_subprocess
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     failed_bots = run_scheduler(registry_file)
 
@@ -77,9 +78,7 @@ def test_launches_a_bot_registered_without_timeframes(
 def test_launches_a_bot_on_its_candle_boundary(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock
 ):
-    registry_file = create_registry(
-        '[[bot]]\nconfig = "bot.toml"\ntimeframes = ["15m"]\n'
-    )
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\ntimeframes = ["15m"]\n')
     candle_boundary_clock.now.return_value = datetime(2026, 1, 1, 9, 15, tzinfo=UTC)
 
     run_scheduler(registry_file)
@@ -90,9 +89,7 @@ def test_launches_a_bot_on_its_candle_boundary(
 def test_skips_a_bot_off_its_candle_boundary(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock
 ):
-    registry_file = create_registry(
-        '[[bot]]\nconfig = "bot.toml"\ntimeframes = ["15m"]\n'
-    )
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\ntimeframes = ["15m"]\n')
     candle_boundary_clock.now.return_value = datetime(2026, 1, 1, 9, 7, tzinfo=UTC)
 
     run_scheduler(registry_file)
@@ -104,7 +101,7 @@ def test_launches_a_bot_when_one_of_its_timeframes_closes(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock
 ):
     registry_file = create_registry(
-        '[[bot]]\nconfig = "bot.toml"\ntimeframes = ["1h", "4h"]\n'
+        '[[bot]]\nconfig = "pilot"\ntimeframes = ["1h", "4h"]\n'
     )
     candle_boundary_clock.now.return_value = datetime(2026, 1, 1, 10, 0, tzinfo=UTC)
 
@@ -113,13 +110,13 @@ def test_launches_a_bot_when_one_of_its_timeframes_closes(
     mock_subprocess.assert_awaited_once()
 
 
-def test_relative_paths_anchor_to_the_registry_file(
+def test_a_nested_bot_folder_is_anchored_to_the_registry_file(
     tmp_path, create_registry, mock_subprocess
 ):
-    nested_config = tmp_path / "bots" / "envelope" / "envelope.toml"
+    nested_config = tmp_path / "trend" / "first-bot" / "bot.toml"
     nested_config.parent.mkdir(parents=True)
     nested_config.write_text("[strategy]\nstrategy_class = 'dummy'\n")
-    registry_file = create_registry('[[bot]]\nconfig = "bots/envelope/envelope.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "trend/first-bot"\n')
 
     run_scheduler(registry_file)
 
@@ -128,17 +125,41 @@ def test_relative_paths_anchor_to_the_registry_file(
     )
 
 
-def test_missing_config_is_skipped_and_logged(
+def test_an_entry_naming_a_toml_file_that_is_gone_stops_the_scheduler(
+    create_registry, bot_config, mock_subprocess
+):
+    registry_file = create_registry('[[bot]]\nconfig = "pilot/impulse-pilot.toml"\n')
+
+    with pytest.raises(BotCriticalError, match="a bot is a folder") as refusal:
+        run_scheduler(registry_file)
+
+    assert f"`{bot_config.parent}`" in str(refusal.value)
+    mock_subprocess.assert_not_awaited()
+
+
+def test_an_entry_naming_a_toml_file_stops_the_scheduler_naming_the_folder(
+    create_registry, bot_config, mock_subprocess
+):
+    registry_file = create_registry('[[bot]]\nconfig = "pilot/bot.toml"\n')
+
+    with pytest.raises(BotCriticalError, match="a bot is a folder") as refusal:
+        run_scheduler(registry_file)
+
+    assert f"`{bot_config.parent}`" in str(refusal.value)
+    mock_subprocess.assert_not_awaited()
+
+
+def test_a_folder_without_a_bot_file_is_skipped_and_logged(
     create_registry, bot_config, mock_subprocess, caplog
 ):
     registry_file = create_registry(
-        '[[bot]]\nconfig = "ghost.toml"\n\n[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\nconfig = "ghost"\n\n[[bot]]\nconfig = "pilot"\n'
     )
 
     with caplog.at_level(logging.ERROR):
         run_scheduler(registry_file)
 
-    assert "does not exist" in caplog.text
+    assert "There is no `bot.toml` in" in caplog.text
     mock_subprocess.assert_awaited_once_with(
         *_launch_args(bot_config), stderr=asyncio.subprocess.PIPE
     )
@@ -147,7 +168,7 @@ def test_missing_config_is_skipped_and_logged(
 def test_reports_bots_that_exited_with_an_error(
     create_registry, bot_config, mock_subprocess, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=1)
 
     with caplog.at_level(logging.ERROR):
@@ -156,14 +177,14 @@ def test_reports_bots_that_exited_with_an_error(
     assert failed_bots == 1
     assert (
         caplog.records[-1].getMessage()
-        == "bot.toml exited 1, paused, next attempt at 09:08 UTC"
+        == "pilot exited 1, paused, next attempt at 09:08 UTC"
     )
 
 
 def test_a_broken_config_is_paused_without_the_bots_own_message(
     create_registry, bot_config, mock_subprocess, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
     mock_subprocess.return_value.communicate = AsyncMock(
         return_value=(None, b"Error: FET/USDT:USDT has no usable contract on Bitget\n")
@@ -174,7 +195,7 @@ def test_a_broken_config_is_paused_without_the_bots_own_message(
 
     assert failed_bots == 1
     assert [record.getMessage() for record in caplog.records] == [
-        "bot.toml exited 78, paused, next attempt at 09:08 UTC"
+        "pilot exited 78, paused, next attempt at 09:08 UTC"
     ]
 
 
@@ -182,7 +203,7 @@ def test_a_broken_config_is_paused_without_the_bots_own_message(
 def test_a_bot_that_died_before_its_log_has_its_message_carried(
     exit_code, create_registry, bot_config, mock_subprocess, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=exit_code)
     mock_subprocess.return_value.communicate = AsyncMock(
         return_value=(None, b"Error: strategy config is broken\n")
@@ -192,7 +213,7 @@ def test_a_bot_that_died_before_its_log_has_its_message_carried(
         run_scheduler(registry_file)
 
     assert caplog.records[-1].getMessage() == (
-        f"bot.toml exited {exit_code}, paused, next attempt at 09:08 UTC: "
+        f"pilot exited {exit_code}, paused, next attempt at 09:08 UTC: "
         "Error: strategy config is broken"
     )
 
@@ -200,7 +221,7 @@ def test_a_bot_that_died_before_its_log_has_its_message_carried(
 def test_a_crash_report_survives_undecodable_stderr_bytes(
     create_registry, bot_config, mock_subprocess, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=1)
     mock_subprocess.return_value.communicate = AsyncMock(
         return_value=(None, b"\xffboom\n")
@@ -211,14 +232,14 @@ def test_a_crash_report_survives_undecodable_stderr_bytes(
 
     assert (
         caplog.records[-1].getMessage()
-        == "bot.toml exited 1, paused, next attempt at 09:08 UTC: �boom"
+        == "pilot exited 1, paused, next attempt at 09:08 UTC: �boom"
     )
 
 
 def test_a_clean_exit_is_not_logged_as_an_error(
     create_registry, bot_config, mock_subprocess, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.communicate = AsyncMock(
         return_value=(None, b"a benign warning\n")
     )
@@ -240,11 +261,11 @@ def test_empty_registry_launches_nothing(create_registry, mock_subprocess, caplo
     assert failed_bots == 0
 
 
-def test_registry_entry_without_a_config_is_skipped_and_logged(
+def test_registry_entry_without_a_bot_is_skipped_and_logged(
     create_registry, bot_config, mock_subprocess, caplog
 ):
     registry_file = create_registry(
-        '[[bot]]\ntimeframes = ["1h"]\n\n[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\ntimeframes = ["1h"]\n\n[[bot]]\nconfig = "pilot"\n'
     )
 
     with caplog.at_level(logging.ERROR):
@@ -257,7 +278,7 @@ def test_registry_entry_without_a_config_is_skipped_and_logged(
 
 
 def test_malformed_registry_stops_the_scheduler(create_registry):
-    registry_file = create_registry("[[bots]\nconfig = 'bot.toml'\n")
+    registry_file = create_registry("[[bots]\nbot = 'pilot'\n")
 
     with pytest.raises(BotCriticalError, match="not valid TOML"):
         run_scheduler(registry_file)
@@ -266,15 +287,11 @@ def test_malformed_registry_stops_the_scheduler(create_registry):
 def test_a_registry_naming_two_bots_on_one_symbol_of_one_account_stops_the_scheduler(
     create_registry, write_bot
 ):
-    first = write_bot(
-        "first.toml", name="one", account="main", symbols=("BTC/USDT:USDT",)
-    )
-    second = write_bot(
-        "second.toml", name="two", account="main", symbols=("BTC/USDT:USDT",)
-    )
+    first = write_bot("first", name="one", account="main", symbols=("BTC/USDT:USDT",))
+    second = write_bot("second", name="two", account="main", symbols=("BTC/USDT:USDT",))
     registry_file = create_registry(
-        f"[[bot]]\nconfig = '{first.as_posix()}'\n"
-        f"[[bot]]\nconfig = '{second.as_posix()}'\n"
+        f"[[bot]]\nconfig = '{first.parent.as_posix()}'\n"
+        f"[[bot]]\nconfig = '{second.parent.as_posix()}'\n"
     )
 
     with pytest.raises(BotCriticalError, match="BTC/USDT:USDT"):
@@ -289,9 +306,7 @@ def test_missing_registry_stops_the_scheduler(tmp_path):
 def test_nothing_due_is_not_reported_at_info(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock, caplog
 ):
-    registry_file = create_registry(
-        '[[bot]]\nconfig = "bot.toml"\ntimeframes = ["15m"]\n'
-    )
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\ntimeframes = ["15m"]\n')
     candle_boundary_clock.now.return_value = datetime(2026, 1, 1, 9, 7, tzinfo=UTC)
 
     with caplog.at_level(logging.INFO):
@@ -305,7 +320,7 @@ def test_an_exchange_setting_reaches_the_launched_bots(
 ):
     monkeypatch.delenv("BITGET_MARKET_PACE_FRACTION", raising=False)
     registry_file = create_registry(
-        '[[bot]]\nconfig = "bot.toml"\n[exchanges.bitget]\nmarket_pace_fraction = 0.5\n'
+        '[[bot]]\nconfig = "pilot"\n[exchanges.bitget]\nmarket_pace_fraction = 0.5\n'
     )
 
     run_scheduler(registry_file)
@@ -319,7 +334,7 @@ def test_a_notifier_setting_reaches_the_launched_bots(
     monkeypatch.delenv("DISCORD_YELLOW", raising=False)
     monkeypatch.delenv("DISCORD_LOG", raising=False)
     registry_file = create_registry(
-        '[[bot]]\nconfig = "bot.toml"\n'
+        '[[bot]]\nconfig = "pilot"\n'
         "[notifier.discord]\nyellow = 0xF1C40F\n"
         '[notifier.discord.log]\nwebhook_url = "https://discord.test/hook"\n'
     )
@@ -334,7 +349,7 @@ def test_a_registry_without_exchange_settings_changes_nothing(
     create_registry, bot_config, mock_subprocess, monkeypatch
 ):
     monkeypatch.setenv("BITGET_MARKET_PACE_FRACTION", "0.5")
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     run_scheduler(registry_file)
 
@@ -344,10 +359,13 @@ def test_a_registry_without_exchange_settings_changes_nothing(
 def test_a_bot_that_cannot_be_launched_leaves_the_others_running(
     create_registry, tmp_path, mock_subprocess, caplog
 ):
-    for name in ("first.toml", "second.toml"):
-        (tmp_path / name).write_text("[strategy]\nstrategy_class = 'dummy'\n")
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "bot.toml").write_text(
+            "[strategy]\nstrategy_class = 'dummy'\n"
+        )
     registry_file = create_registry(
-        '[[bot]]\nconfig = "first.toml"\n\n[[bot]]\nconfig = "second.toml"\n'
+        '[[bot]]\nconfig = "first"\n\n[[bot]]\nconfig = "second"\n'
     )
     launched = Mock(spec=asyncio.subprocess.Process)
     launched.wait = AsyncMock(return_value=0)
@@ -359,13 +377,13 @@ def test_a_bot_that_cannot_be_launched_leaves_the_others_running(
 
     assert mock_subprocess.await_count == 2
     assert failed_bots == 1
-    assert "Cannot launch first.toml" in caplog.text
+    assert "Cannot launch first" in caplog.text
 
 
 def test_a_run_while_the_previous_one_still_holds_the_registry(
     create_registry, bot_config, mock_subprocess, caplog, tmp_path
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     with hold_instance_lock(registry_file), caplog.at_level(logging.WARNING):
         failed_bots = run_scheduler(registry_file)
@@ -379,7 +397,7 @@ def test_a_run_while_the_previous_one_still_holds_the_registry(
 
 
 def test_two_consecutive_runs_both_launch(create_registry, bot_config, mock_subprocess):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
 
     run_scheduler(registry_file)
     run_scheduler(registry_file)
@@ -388,13 +406,11 @@ def test_two_consecutive_runs_both_launch(create_registry, bot_config, mock_subp
 
 
 def test_the_run_after_a_crash_launches(create_registry, bot_config, mock_subprocess):
-    registry_file = create_registry(
-        'exchanges = "broken"\n[[bot]]\nconfig = "bot.toml"\n'
-    )
+    registry_file = create_registry('exchanges = "broken"\n[[bot]]\nconfig = "pilot"\n')
 
     with pytest.raises(AttributeError):
         run_scheduler(registry_file)
-    create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    create_registry('[[bot]]\nconfig = "pilot"\n')
     run_scheduler(registry_file)
 
     mock_subprocess.assert_awaited_once()
@@ -403,7 +419,7 @@ def test_the_run_after_a_crash_launches(create_registry, bot_config, mock_subpro
 def test_a_bot_outrunning_the_minute(
     create_registry, bot_config, mock_subprocess, bot_clock, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     bot_clock.monotonic.side_effect = [0.0, 70.0]
 
     with caplog.at_level(logging.WARNING):
@@ -411,14 +427,14 @@ def test_a_bot_outrunning_the_minute(
 
     assert (
         caplog.records[-1].getMessage()
-        == "bot.toml took 70 seconds, longer than the minute between runs"
+        == "pilot took 70 seconds, longer than the minute between runs"
     )
 
 
 def test_a_bot_within_the_minute(
     create_registry, bot_config, mock_subprocess, bot_clock, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     bot_clock.monotonic.side_effect = [0.0, 60.0]
 
     with caplog.at_level(logging.WARNING):
@@ -430,7 +446,7 @@ def test_a_bot_within_the_minute(
 def test_a_bot_yielding_to_a_running_instance_is_not_a_failure(
     create_registry, bot_config, mock_subprocess, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_TEMPFAIL)
 
     with caplog.at_level(logging.ERROR):
@@ -443,7 +459,7 @@ def test_a_bot_yielding_to_a_running_instance_is_not_a_failure(
 def test_a_temporary_failure_is_launched_again_on_the_next_run(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_TEMPFAIL)
     mock_subprocess.return_value.communicate = AsyncMock(
         return_value=(None, b"Error: the venue timed out\n")
@@ -455,14 +471,14 @@ def test_a_temporary_failure_is_launched_again_on_the_next_run(
         run_scheduler(registry_file)
 
     assert mock_subprocess.await_count == 2
-    assert caplog.text.count("bot.toml exited 75, retrying every run\n") == 1
+    assert caplog.text.count("pilot exited 75, retrying every run\n") == 1
     assert "the venue timed out" not in caplog.text
 
 
 def test_a_paused_bot_is_launched_again_after_one_two_four_then_every_five_minutes(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
 
     launches_after_each_run = []
@@ -477,7 +493,7 @@ def test_a_paused_bot_is_launched_again_after_one_two_four_then_every_five_minut
 def test_a_pause_from_a_failure_inside_a_minute_ends_on_the_next_run(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
     candle_boundary_clock.now.return_value = FIRST_RUN.replace(second=30)
 
@@ -491,7 +507,7 @@ def test_a_pause_from_a_failure_inside_a_minute_ends_on_the_next_run(
 def test_editing_a_paused_bots_config_launches_it_again(
     create_registry, bot_config, mock_subprocess
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
 
     run_scheduler(registry_file)
@@ -505,7 +521,7 @@ def test_editing_a_paused_bots_config_launches_it_again(
 def test_the_same_failure_is_reported_once_over_consecutive_runs(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
 
     with caplog.at_level(logging.ERROR):
@@ -517,14 +533,14 @@ def test_the_same_failure_is_reported_once_over_consecutive_runs(
 
     assert mock_subprocess.await_count == 3
     assert [record.getMessage() for record in caplog.records] == [
-        "bot.toml exited 78, paused, next attempt at 09:08 UTC"
+        "pilot exited 78, paused, next attempt at 09:08 UTC"
     ]
 
 
 def test_a_bot_running_again_is_reported_once(
     create_registry, bot_config, mock_subprocess, candle_boundary_clock, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
     run_scheduler(registry_file)
     mock_subprocess.return_value.wait = AsyncMock(return_value=0)
@@ -538,14 +554,14 @@ def test_a_bot_running_again_is_reported_once(
             run_scheduler(registry_file)
 
     assert [record.getMessage() for record in caplog.records] == [
-        "bot.toml is running again"
+        "pilot is running again"
     ]
 
 
 def test_deleting_the_logs_leaves_a_pause_standing(
     create_registry, bot_config, mock_subprocess, tmp_path
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
     logs = tmp_path / "logs"
     logs.mkdir()
@@ -561,7 +577,7 @@ def test_deleting_the_logs_leaves_a_pause_standing(
 def test_a_memory_that_cannot_be_read_counts_as_absent(
     create_registry, bot_config, mock_subprocess, tmp_path, caplog
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
 
     run_scheduler(registry_file)
@@ -576,7 +592,7 @@ def test_a_memory_that_cannot_be_read_counts_as_absent(
 def test_a_deleted_bot_leaves_no_memory_of_its_pause(
     create_registry, bot_config, mock_subprocess, tmp_path
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
 
     run_scheduler(registry_file)
@@ -591,14 +607,15 @@ def test_a_deleted_bot_leaves_no_memory_of_its_pause(
 def test_a_deleted_bot_leaves_no_lock_file_behind(
     create_registry, bot_config, mock_subprocess, tmp_path
 ):
-    registry_file = create_registry('[[bot]]\nconfig = "bot.toml"\n')
+    registry_file = create_registry('[[bot]]\nconfig = "pilot"\n')
+    (tmp_path / ".rtlab").mkdir()
     with hold_instance_lock(bot_config):
         pass
     bot_config.unlink()
 
     run_scheduler(registry_file)
 
-    assert not (tmp_path / ".rtlab" / "bot.lock").exists()
+    assert not (tmp_path / ".rtlab" / "pilot" / "bot.lock").exists()
 
 
 def test_a_deleted_bot_loses_its_lock_under_its_own_tool_directory(
@@ -606,12 +623,13 @@ def test_a_deleted_bot_loses_its_lock_under_its_own_tool_directory(
 ):
     folder = tmp_path / "pilot"
     (folder / ".rtlab").mkdir(parents=True)
-    gone = folder / "gone.toml"
-    gone.write_text("[strategy]\n")
-    staying = folder / "staying.toml"
-    staying.write_text("[strategy]\n")
+    gone = folder / "gone" / "bot.toml"
+    staying = folder / "staying" / "bot.toml"
+    for config in (gone, staying):
+        config.parent.mkdir()
+        config.write_text("[strategy]\n")
     registry_file = create_registry(
-        '[[bot]]\nconfig = "pilot/gone.toml"\n[[bot]]\nconfig = "pilot/staying.toml"\n'
+        '[[bot]]\nconfig = "pilot/gone"\n[[bot]]\nconfig = "pilot/staying"\n'
     )
     with hold_instance_lock(gone):
         pass
@@ -619,18 +637,19 @@ def test_a_deleted_bot_loses_its_lock_under_its_own_tool_directory(
 
     run_scheduler(registry_file)
 
-    assert not (folder / ".rtlab" / "gone.lock").exists()
+    assert not (folder / ".rtlab" / "gone" / "bot.lock").exists()
 
 
 def test_a_bot_still_there_keeps_its_pause_when_another_is_deleted(
     create_registry, mock_subprocess, tmp_path
 ):
-    deleted = tmp_path / "deleted.toml"
-    deleted.write_text("[strategy]\n")
-    staying = tmp_path / "staying.toml"
-    staying.write_text("[strategy]\n")
+    deleted = tmp_path / "deleted" / "bot.toml"
+    staying = tmp_path / "staying" / "bot.toml"
+    for config in (deleted, staying):
+        config.parent.mkdir()
+        config.write_text("[strategy]\n")
     registry_file = create_registry(
-        '[[bot]]\nconfig = "deleted.toml"\n[[bot]]\nconfig = "staying.toml"\n'
+        '[[bot]]\nconfig = "deleted"\n[[bot]]\nconfig = "staying"\n'
     )
     mock_subprocess.return_value.wait = AsyncMock(return_value=EX_CONFIG)
 
@@ -644,10 +663,10 @@ def test_a_bot_still_there_keeps_its_pause_when_another_is_deleted(
 def test_two_bots_sharing_a_name_and_an_account_are_not_launched(
     create_registry, write_bot, mock_subprocess
 ):
-    write_bot("first.toml", name="grid", account="main")
-    write_bot("second.toml", name="grid", account="main")
+    write_bot("first", name="grid", account="main")
+    write_bot("second", name="grid", account="main")
     registry_file = create_registry(
-        '[[bot]]\nconfig = "first.toml"\n[[bot]]\nconfig = "second.toml"\n'
+        '[[bot]]\nconfig = "first/grid"\n[[bot]]\nconfig = "second/grid"\n'
     )
 
     with pytest.raises(BotCriticalError, match="same bot digest"):
@@ -659,10 +678,10 @@ def test_two_bots_sharing_a_name_and_an_account_are_not_launched(
 def test_two_bots_sharing_a_name_on_different_accounts_are_both_launched(
     create_registry, write_bot, mock_subprocess
 ):
-    write_bot("first.toml", name="grid", account="main")
-    write_bot("second.toml", name="grid", account="spare")
+    write_bot("first", name="grid", account="main")
+    write_bot("second", name="grid", account="spare")
     registry_file = create_registry(
-        '[[bot]]\nconfig = "first.toml"\n[[bot]]\nconfig = "second.toml"\n'
+        '[[bot]]\nconfig = "first/grid"\n[[bot]]\nconfig = "second/grid"\n'
     )
 
     run_scheduler(registry_file)

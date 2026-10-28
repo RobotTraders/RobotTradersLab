@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from robottraderslab._core import (
@@ -30,6 +32,7 @@ from robottraderslab.bootstrap import (
 from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.exchanges import FuturesExchangeProtocol
 from robottraderslab.futures import FuturesAccount
+from robottraderslab.reporting import report_folder, timestamp_now
 from robottraderslab.strategies import StrategyRequirements, TradingMode, TradingSystem
 
 from ..runners import require_live_config
@@ -37,9 +40,10 @@ from ..runners import require_live_config
 logger = logging.getLogger(__name__)
 
 _SYMBOL_KEY = "symbol"
+_TEMPORARY_PREFIX = "robottraderslab-report-"
 
 
-def run_report(bot_config: BotConfig, days: int) -> None:
+def run_report(bot_config: BotConfig, days: int, save: bool) -> None:
     """Chart the account's performance over the window against the strategy's indicators.
 
     Candles and indicators are recomputed from the configuration, and the
@@ -53,6 +57,8 @@ def run_report(bot_config: BotConfig, days: int) -> None:
         bot_config: Loaded configuration, carrying the `[strategy]` and
             `[live]` sections.
         days: How many days back the reported window starts.
+        save: Whether the page is kept under the bot's `reports/` folder;
+            unsaved, the same page is written to a temporary folder.
     """
     profiles = _profiles(bot_config)
     live_config = require_live_config(bot_config)
@@ -85,10 +91,22 @@ def run_report(bot_config: BotConfig, days: int) -> None:
         report_config=bot_config.report,
         profiles=profiles,
     )
-    analyser.plot_candlesticks(
-        indicators_name=bot_config.strategy.strategy_class,
-        start_date=_date_string(since),
+    indicators_name = bot_config.strategy.strategy_class
+    timestamp = timestamp_now()
+    analyser.save_report(
+        _report_directory(bot_config, timestamp, save),
+        bot_config,
+        indicators_name,
+        timestamp,
+        _date_string(since),
     )
+    analyser.plot_candlesticks(indicators_name=indicators_name)
+
+
+def _report_directory(bot_config: BotConfig, timestamp: str, save: bool) -> Path:
+    if save:
+        return report_folder(bot_config.config_dir or Path(), timestamp)
+    return Path(tempfile.mkdtemp(prefix=_TEMPORARY_PREFIX))
 
 
 def _profiles(bot_config: BotConfig) -> list[dict[str, Any]]:

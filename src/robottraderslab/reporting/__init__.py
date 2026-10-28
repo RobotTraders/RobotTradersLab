@@ -1,4 +1,10 @@
-from .run_folder import create_run_folder, run_folder_name, timestamp_now
+from .run_folder import (
+    backtest_folder,
+    create_run_folder,
+    optimisation_folder,
+    report_folder,
+    timestamp_now,
+)
 from .summaries import (
     print_filtered_analysis,
     print_long_short_comparison,
@@ -7,11 +13,13 @@ from .summaries import (
 )
 
 __all__ = [
+    "backtest_folder",
     "create_run_folder",
+    "optimisation_folder",
     "print_filtered_analysis",
     "print_long_short_comparison",
     "print_performance_summary",
     "print_symbol_analysis",
-    "run_folder_name",
+    "report_folder",
     "timestamp_now",
 ]

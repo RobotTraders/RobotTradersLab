@@ -27,19 +27,17 @@ class TestListExamples:
 
 
 class TestCopyExample:
-    def test_copies_example_files_into_suffixed_folder(
+    def test_copies_example_files_into_the_named_folder(
         self, register_example, tmp_path
     ):
         examples_dir = register_example("momentum_demo", "fake_momentum_plugin")
-        (examples_dir / "momentum-bot-example.toml").write_text('strategy = "momentum"')
+        (examples_dir / "bot.toml").write_text('strategy = "momentum"')
         workspace = tmp_path / "workspace"
 
-        destination = copy_example("momentum_demo", workspace)
+        destination = copy_example("momentum_demo", workspace, "first-bot")
 
-        assert destination == workspace / "momentum_demo-bot-example"
-        assert (
-            destination / "momentum-bot-example.toml"
-        ).read_text() == 'strategy = "momentum"'
+        assert destination == workspace / "first-bot"
+        assert (destination / "bot.toml").read_text() == 'strategy = "momentum"'
 
     def test_copies_nested_example_files(self, register_example, tmp_path):
         examples_dir = register_example("momentum_demo", "fake_momentum_plugin")
@@ -47,7 +45,7 @@ class TestCopyExample:
         (examples_dir / "data" / "candles.csv").write_text("ts,open,close")
         workspace = tmp_path / "workspace"
 
-        destination = copy_example("momentum_demo", workspace)
+        destination = copy_example("momentum_demo", workspace, "first-bot")
 
         assert (destination / "data" / "candles.csv").read_text() == "ts,open,close"
 
@@ -57,9 +55,17 @@ class TestCopyExample:
         register_example("momentum_demo", "fake_momentum_plugin")
         workspace = tmp_path / "workspace"
 
-        copy_example("momentum_demo", workspace)
+        copy_example("momentum_demo", workspace, "first-bot")
 
         assert (workspace / ".rtlab").is_dir()
+
+    def test_writes_the_workspace_gitignore(self, register_example, tmp_path):
+        register_example("momentum_demo", "fake_momentum_plugin")
+        workspace = tmp_path / "workspace"
+
+        copy_example("momentum_demo", workspace, "first-bot")
+
+        assert "backtests/" in (workspace / ".gitignore").read_text(encoding="utf-8")
 
     def test_a_second_example_joins_the_marked_workspace(
         self, register_example, tmp_path
@@ -67,11 +73,11 @@ class TestCopyExample:
         register_example("momentum_demo", "fake_momentum_plugin")
         register_example("breakout_demo", "fake_breakout_plugin")
         workspace = tmp_path / "workspace"
-        copy_example("momentum_demo", workspace)
+        copy_example("momentum_demo", workspace, "first-bot")
         kept = workspace / ".rtlab" / "kept.json"
         kept.write_text("{}")
 
-        copy_example("breakout_demo", workspace)
+        copy_example("breakout_demo", workspace, "second-bot")
 
         assert kept.read_text() == "{}"
 
@@ -79,17 +85,17 @@ class TestCopyExample:
         register_example("momentum_demo", "fake_momentum_plugin")
 
         with pytest.raises(ExampleError, match="momentum_demo"):
-            copy_example("unknown_demo", tmp_path / "workspace")
+            copy_example("unknown_demo", tmp_path / "workspace", "first-bot")
 
     def test_with_existing_destination(self, register_example, tmp_path):
         register_example("momentum_demo", "fake_momentum_plugin")
-        (tmp_path / "workspace" / "momentum_demo-bot-example").mkdir(parents=True)
+        (tmp_path / "workspace" / "first-bot").mkdir(parents=True)
 
         with pytest.raises(ExampleError, match="already exists"):
-            copy_example("momentum_demo", tmp_path / "workspace")
+            copy_example("momentum_demo", tmp_path / "workspace", "first-bot")
 
     def test_with_package_shipping_no_example_files(self, register_example, tmp_path):
         register_example("bare_demo", "fake_bare_plugin", with_examples=False)
 
         with pytest.raises(ExampleError, match="no example files"):
-            copy_example("bare_demo", tmp_path / "workspace")
+            copy_example("bare_demo", tmp_path / "workspace", "first-bot")

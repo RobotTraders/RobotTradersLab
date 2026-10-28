@@ -42,6 +42,7 @@ from robottraderslab._core import (
 from robottraderslab.exceptions import BotCriticalError
 
 from ..ohlcv_sources import keeps_candles
+from .bot_folder import bot_file, bot_name
 
 type AccountConfig = dict[str, Any]
 
@@ -79,8 +80,9 @@ class LiveLoggingConfig(LoggingConfig):
 
 
 TRADING_ACCOUNT_SECTION = "live.trading_account"
+_NAME_KEY = "name"
 EXCHANGE_ENTRY_POINT_GROUP = "robot_traders_lab.exchanges"
-_MOVED_TO_REPORT = ("reference_symbol", "reports_dir")
+_MOVED_TO_REPORT = ("reference_symbol",)
 
 
 class BacktestConfig(BaseModel):
@@ -163,7 +165,6 @@ class ReportConfig(BaseModel):
     risk_free_rate: float = DEFAULT_RISK_FREE_RATE
     annualization_factor: float = DEFAULT_ANNUALIZATION_FACTOR
     calculation_method: CalculationMethod = DEFAULT_CALCULATION_METHOD
-    reports_dir: Path | None = None
 
     @field_validator("reference_symbol")
     @classmethod
@@ -295,16 +296,17 @@ class BotConfig(BaseSettings):
         """Build the bot a config file declares, with no environment variable
         or dotenv file able to add to it.
 
-        The secrets file, the OHLCV file and store, the log files and the
-        reports directory are anchored to the config file's directory when
-        given as relative paths, so a config means the same thing whatever
+        The secrets file, the OHLCV file and store and the log files are
+        anchored to the config file's directory when given as relative paths, so a config means the same thing whatever
         directory a run starts from; a relative path in the overlay is not
         anchored. An overlay merges key by key into nested tables, so a caller
         varying one value restates nothing else, and a list in it replaces the
         file's list whole. A bot naming no secrets file takes the
-        `secrets.toml` beside its config file, or else the one in the directory
-        above it. A bot declaring no `name` takes its file's stem, which keeps
-        its orders identified the same way across cycles.
+        nearest `secrets.toml` from its folder up to its workspace root, the
+        directory holding `.rtlab`, or one directory above its folder when no
+        `.rtlab` sits above it. The bot is named after its folder, which keeps
+        its orders identified the same way across cycles, and a file or an
+        overlay declaring a `name` of its own is refused.
 
         Args:
             config_file: TOML file declaring the bot.
@@ -317,7 +319,8 @@ class BotConfig(BaseSettings):
 
         Raises:
             BotCriticalError: If the named file is not there, is not valid
-                TOML, or declares something other than a bot the engine can run.
+                TOML, declares a `name` or is overlaid with one, or declares
+                something other than a bot the engine can run.
             tomllib.TOMLDecodeError: If the overlay is not valid TOML.
             UnicodeDecodeError: If the file is not valid UTF-8.
             OSError: If the file exists but cannot be read.
@@ -335,22 +338,43 @@ class BotConfig(BaseSettings):
             raise BotCriticalError(
                 f"the config at `{config_file}` is not valid TOML: {e}"
             ) from e
+        _refuse_a_name(declared, f"`{config_file}`", base_dir)
         _resolve_relative_paths(declared, base_dir)
         _default_storage(declared, Path(config_file))
         if declared.get("secrets_file") is None:
-            discovered = _discover_secrets_file(base_dir)
+            discovered = _discover_secrets_file(Path(config_file))
             if discovered is not None:
                 logger.debug(f"Discovered secrets file at `{discovered}`")
             declared["secrets_file"] = discovered
         declared["config_dir"] = base_dir
         declared["config_file"] = Path(config_file)
-        declared.setdefault("name", Path(config_file).stem)
+        declared[_NAME_KEY] = bot_name(Path(config_file))
 
         if overlay is not None:
-            declared = _deep_merge(declared, tomllib.loads(overlay))
+            overlaid = tomllib.loads(overlay)
+            _refuse_a_name(overlaid, "the overlay", base_dir)
+            declared = _deep_merge(declared, overlaid)
 
         logger.debug("Config declares: %s", _DeclaredShape(declared))
         return cls._validated(declared, config_file)
+
+    @classmethod
+    def from_folder(cls, folder: str | Path) -> "BotConfig":
+        """Build the bot a folder holds, read from its `bot.toml`, so a caller
+        names the bot the way every command does.
+
+        Args:
+            folder: The bot's folder.
+
+        Raises:
+            BotCriticalError: If the path names a file, or the folder holds no
+                `bot.toml`, or if `from_file` refuses that file.
+            UnicodeDecodeError: If `bot.toml` is not valid UTF-8.
+            OSError: If `bot.toml` exists but cannot be read.
+            TypeError: If a path `bot.toml` declares, such as `secrets_file`,
+                is not a string.
+        """
+        return cls.from_file(bot_file(Path(folder)))
 
     @classmethod
     def from_text(cls, toml_config: str) -> "BotConfig":
@@ -463,7 +487,6 @@ _RELATIVE_PATHS = (
     "live.ohlcv_provider.storage.dir",
     "live.ohlcv_provider.storage_dir",
     "live.logging.logfile",
-    "report.reports_dir",
 )
 
 
@@ -526,19 +549,6 @@ def _set_dotted_value(data: dict[str, Any], dotted_key: str, value: Any) -> None
 _DEFAULT_SECRETS_FILENAME = "secrets.toml"
 
 
-def _discover_secrets_file(config_dir: Path) -> str | None:
-    """Find the secrets file a bot named none of its own.
-
-    A bot missing its own secrets file may share one with its siblings, so the
-    search reaches one directory up before giving up.
-    """
-    for candidate_dir in (config_dir, config_dir.parent):
-        candidate = candidate_dir / _DEFAULT_SECRETS_FILENAME
-        if candidate.is_file():
-            return str(candidate)
-    return None
-
-
 _PROVIDER_SECTIONS = ("backtest.ohlcv_provider", "live.ohlcv_provider")
 _DECLARED_STORAGE = ("storage_dir", "storage")
 _DEFAULT_STORE = Path("data") / "ohlcvs"
@@ -562,6 +572,27 @@ def _default_storage(data: dict[str, Any], config_file: Path) -> None:
         if any(key in provider for key in _DECLARED_STORAGE):
             continue
         provider["storage_dir"] = str(workspace / _DEFAULT_STORE)
+
+
+def _discover_secrets_file(config_file: Path) -> str | None:
+    config_dir = config_file.resolve().parent
+    workspace = tool_root(config_file).parent
+    top = config_dir.parent if workspace == config_dir else workspace
+    for candidate_dir in (config_dir, *config_dir.parents):
+        candidate = candidate_dir / _DEFAULT_SECRETS_FILENAME
+        if candidate.is_file():
+            return str(candidate)
+        if candidate_dir == top:
+            break
+    return None
+
+
+def _refuse_a_name(declared: dict[str, Any], source: str, folder: Path) -> None:
+    if _NAME_KEY in declared:
+        raise BotCriticalError(
+            f"{source} declares a `name`; a bot is named after its folder, "
+            f"`{folder.name}`, so rename the folder instead"
+        )
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:

@@ -1,0 +1,7 @@
+.rtlab/
+data/
+logs/
+backtests/
+reports/
+optimisations/
+secrets.toml

@@ -6,12 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from robottraderslab._core import bot_leading_bytes, bot_segment
-from robottraderslab.bootstrap import SECRET_REFERENCE_KEY
+from robottraderslab.bootstrap import SECRET_REFERENCE_KEY, bot_name
 from robottraderslab.exceptions import BotCriticalError
 
 logger = logging.getLogger(__name__)
 
-_NAME_KEY = "name"
 _LIVE_KEY = "live"
 _TRADING_ACCOUNT_KEY = "trading_account"
 _EXCHANGE_KEY = "exchange"
@@ -29,11 +28,11 @@ _SYMBOL_KIND = "symbol"
 _REFUSALS = {
     _SEGMENT_KIND: (
         "under the same bot digest `{}`",
-        "give each a distinct top-level `name`",
+        "give each a folder of a distinct name",
     ),
     _LEADING_BYTES_KIND: (
         "under bot digests sharing their two leading bytes `{}`",
-        "give each a distinct top-level `name`",
+        "give each a folder of a distinct name",
     ),
     _SYMBOL_KIND: (
         "and both declare the symbol `{}`",
@@ -77,12 +76,7 @@ def _claims_of(config: Path) -> tuple[_Account, tuple[_Claim, ...]] | None:
     declaration = _declaration_of(config)
     if declaration is None:
         return None
-    name = declaration.get(_NAME_KEY, config.stem)
-    if not isinstance(name, str):
-        logger.error(
-            "The `name` of %s is not a string, comparing nothing for it", config
-        )
-        return None
+    name = bot_name(config)
     account = _account_of(declaration)
     if account is None:
         logger.debug("%s names no account, comparing nothing for it", config)

@@ -368,7 +368,7 @@ class TestDottedPathFeature:
 
         captured_config = []
 
-        def capture_and_return_result(bot_config):
+        def capture_and_return_result(bot_config, record_log):
             captured_config.append(bot_config.model_dump())
             return Mock()
 
@@ -446,7 +446,7 @@ class TestDottedPathFeature:
 
         swept_envelopes = []
 
-        def capture_and_return_outputs(patched_config):
+        def capture_and_return_outputs(patched_config, record_log):
             swept_envelopes.append(
                 [profile["envelopes"] for profile in patched_config.strategy.profiles]
             )
@@ -523,7 +523,7 @@ class TestDottedPathFeature:
 
         captured_config = []
 
-        def capture_and_return_result(bot_config):
+        def capture_and_return_result(bot_config, record_log):
             captured_config.append(bot_config.model_dump())
             return Mock()
 

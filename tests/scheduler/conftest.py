@@ -17,7 +17,7 @@ def create_registry(tmp_path: Path) -> Callable[[str], Path]:
 @pytest.fixture
 def write_bot(tmp_path: Path) -> Callable[..., Path]:
     def _write_bot(
-        file: str,
+        folder: str,
         *,
         name: str | None = None,
         exchange: str | None = "bitget",
@@ -25,9 +25,10 @@ def write_bot(tmp_path: Path) -> Callable[..., Path]:
         secret: str | None = None,
         symbols: tuple[str, ...] = (),
     ) -> Path:
-        config = tmp_path / file
+        bot_folder = tmp_path / folder if name is None else tmp_path / folder / name
+        config = bot_folder / "bot.toml"
         config.parent.mkdir(parents=True, exist_ok=True)
-        lines = [f'name = "{name}"'] if name is not None else []
+        lines: list[str] = []
         declared = {
             "exchange": exchange,
             "account_name": account,

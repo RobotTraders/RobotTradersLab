@@ -1,5 +1,6 @@
 from .analyser import Analyser
 from .analysis_inputs import AnalysisInputs
+from .backtest_report import resolve_run_folder
 from .summary_metrics import SummaryMetrics
 from .trade_aggregator import create_trade_aggregation
 from .trade_filter import TradeFilter
@@ -10,4 +11,5 @@ __all__ = [
     "SummaryMetrics",
     "TradeFilter",
     "create_trade_aggregation",
+    "resolve_run_folder",
 ]
