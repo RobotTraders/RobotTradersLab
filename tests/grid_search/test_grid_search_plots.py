@@ -4,8 +4,8 @@ import pytest
 from robottraderslab.grid_search import GridSearchResults
 from robottraderslab.grid_search.plots import plot_heatmap, plot_heatmap_summary
 
-_TRIX_LENGTH = "strategy.profiles.trix_length"
-_SIGNAL_LENGTH = "strategy.profiles.signal_length"
+_TRIX_LENGTH = "trix_length"
+_SIGNAL_LENGTH = "signal_length"
 
 
 @pytest.fixture

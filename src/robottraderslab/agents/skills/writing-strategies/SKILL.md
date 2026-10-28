@@ -50,7 +50,7 @@ The guides carry the concepts:
    uv add --editable ../my-strategy
    ```
    An edit to a `.py` file reaches the next run as it is; an edit to the package's `pyproject.toml` needs `uv sync --reinstall-package my-strategy`.
-4. **Backtest it** with the commands `AGENTS.md` gives under Set up a workspace and Backtest, `my_strategy` being the example: `rtlab scaffold my_strategy my_strategy-bot-example` copies it to `workspace/my_strategy-bot-example/`.
+4. **Backtest it** with the commands `AGENTS.md` gives under Set up a workspace and Backtest, `my_strategy` being the example: `rtlab new my_strategy my_strategy-bot-example` copies it to `workspace/my_strategy-bot-example/`.
 5. **Fix and rerun step 4 until the backtest completes.** The error names the profile, the key or the slot at fault. The work is done when the backtest completes and its report shows the trades the strategy was meant to take.
 
 ## The contract

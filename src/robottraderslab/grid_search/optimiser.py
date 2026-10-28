@@ -23,30 +23,36 @@ _BACKTESTER_LOGGER_NAME = "robottraderslab.backtester"
 class GridSearchOptimiser:
     """Orchestrates grid search optimisation over strategy parameters."""
 
-    def __init__(self, bot_config: BotConfig) -> None:
+    def __init__(self, bot_config: BotConfig, search: OptimisationConfig) -> None:
         self._bot_config = bot_config
-        self._optimisation_config = OptimisationConfig.from_config(
-            _require_optimisation_config(bot_config)
-        )
+        self._optimisation_config = search
 
     def run(self) -> list[OptimisationResult]:
-        parameters = self._optimisation_config.to_parameters(self._current_values())
+        config_dict = self._bot_config.model_dump()
+        profiles = config_dict["strategy"]["profiles"]
+        profile_index = self._optimisation_config.profile.index_in(profiles)
+        parameters = self._optimisation_config.to_parameters(
+            self._current_values(profiles[profile_index])
+        )
         grid_points = _generate_grid(parameters)
         max_workers = self._optimisation_config.max_workers
 
         if max_workers == 1:
-            return self._run_sequential(grid_points)
-        return self._run_parallel(grid_points, max_workers)
+            return self._run_sequential(config_dict, profile_index, grid_points)
+        return self._run_parallel(config_dict, profile_index, grid_points, max_workers)
 
-    def _current_values(self) -> dict[str, ParameterValue]:
-        config_dict = self._bot_config.model_dump()
+    def _current_values(self, profile: dict[str, Any]) -> dict[str, ParameterValue]:
         return {
-            declared.parameter: _read_nested_value(config_dict, declared.parameter)
+            declared.parameter: _read_nested_value(profile, declared.parameter)
             for declared in self._optimisation_config.parameter_configs
         }
 
     def _run_parallel(
-        self, grid_points: list[GridPoint], max_workers: int
+        self,
+        config_dict: dict[str, Any],
+        profile_index: int,
+        grid_points: list[GridPoint],
+        max_workers: int,
     ) -> list[OptimisationResult]:
         """A range samples from `min` to `max`, so the last point holds the
         largest values: its backtest, run before the pool starts, fetches the
@@ -55,7 +61,6 @@ class GridSearchOptimiser:
         fetches the difference itself.
         """
         total_points = len(grid_points)
-        config_dict = self._bot_config.model_dump()
 
         logger.info(
             f"Starting parallel grid search: {total_points} points, "
@@ -63,10 +68,10 @@ class GridSearchOptimiser:
         )
 
         last = total_points - 1
-        warm_up = _measure_point(config_dict, grid_points[last])
+        warm_up = _measure_point(config_dict, profile_index, grid_points[last])
         log_outcome(warm_up, last + 1, total_points)
         results_by_index = measure_pooled(
-            partial(_measure_point, config_dict),
+            partial(_measure_point, config_dict, profile_index),
             dict(enumerate(grid_points[:last])),
             max_workers,
             total_points,
@@ -76,15 +81,19 @@ class GridSearchOptimiser:
         logger.info(f"Grid search completed. {total_points} results")
         return [results_by_index[i] for i in range(total_points)]
 
-    def _run_sequential(self, grid_points: list[GridPoint]) -> list[OptimisationResult]:
+    def _run_sequential(
+        self,
+        config_dict: dict[str, Any],
+        profile_index: int,
+        grid_points: list[GridPoint],
+    ) -> list[OptimisationResult]:
         total_points = len(grid_points)
-        config_dict = self._bot_config.model_dump()
         results: list[OptimisationResult] = []
 
         for i, grid_point in enumerate(grid_points, start=1):
             logger.info(f"Evaluating grid point {i}/{total_points}: {grid_point}")
 
-            result = _measure_point(config_dict, grid_point)
+            result = _measure_point(config_dict, profile_index, grid_point)
             results.append(result)
 
             log_outcome(result, i, total_points)
@@ -130,20 +139,23 @@ def _wrong_count(declared: int) -> str:
     """Only a config declaring too many has parameters left over to place."""
     refused = (
         f"A sweep declares exactly {REQUIRED_PARAMETER_COUNT} parameters and "
-        f"`[optimisation]` declares {declared}. No other count is supported"
+        f"`grid-search.toml` declares {declared}. No other count is supported"
     )
     if declared < REQUIRED_PARAMETER_COUNT:
         return refused
-    return f"{refused}; the rest stay under `[strategy]` at the value they hold"
+    return f"{refused}; the rest stay in `bot.toml` at the value they hold"
 
 
 def _measure_point(
     config_dict: dict[str, Any],
+    profile_index: int,
     grid_point: GridPoint,
 ) -> OptimisationResult:
     """Measure one point apart from the sweep, so a failure costs that point alone."""
     try:
-        bot_config = _apply_grid_point_to_config(copy.deepcopy(config_dict), grid_point)
+        bot_config = _apply_grid_point_to_config(
+            copy.deepcopy(config_dict), profile_index, grid_point
+        )
         with logger_levels(
             {logging.getLogger(_BACKTESTER_LOGGER_NAME): logging.WARNING}
         ):
@@ -156,31 +168,33 @@ def _measure_point(
 
 
 def _apply_grid_point_to_config(
-    config_dict: dict[str, Any], grid_point: GridPoint
+    config_dict: dict[str, Any], profile_index: int, grid_point: GridPoint
 ) -> BotConfig:
-    """Patch one point's values into a config and validate what comes out.
+    """Patch one point's values into the swept profile and validate the config.
 
     Args:
         config_dict: Mutable config dictionary to modify in place.
+        profile_index: Place of the swept profile in `strategy.profiles`.
 
     Returns:
         The bot config a single point is measured by.
     """
+    profile = config_dict["strategy"]["profiles"][profile_index]
     for parameter_path, value in grid_point.parameters.items():
-        _set_nested_value(config_dict, parameter_path, value)
+        _set_nested_value(profile, parameter_path, value)
 
     return BotConfig.model_validate(config_dict)
 
 
 def _set_nested_value(
-    config_dict: dict[str, Any], path: str, value: ParameterValue
+    profile: dict[str, Any], path: str, value: ParameterValue
 ) -> None:
-    """A path is checked against the config before any point is measured on it.
+    """A path is checked against the profile before any point is measured on it.
 
     Raises:
         BotCriticalError: If a segment names nothing the config declares.
     """
-    _assign(config_dict, path.split("."), value, path)
+    _assign(profile, path.split("."), value, path)
 
 
 def _assign(target: Any, segments: list[str], value: ParameterValue, path: str) -> None:
@@ -226,15 +240,15 @@ def _assign_in_table(
         target[segment] = value
 
 
-def _read_nested_value(config_dict: dict[str, Any], path: str) -> ParameterValue:
-    """A path is read before any point is measured, so a setting the config
-    does not spell out stops the sweep before a backtest runs.
+def _read_nested_value(profile: dict[str, Any], path: str) -> ParameterValue:
+    """A path is read in the swept profile before any point is measured, so a
+    setting the profile does not spell out stops the sweep before a backtest runs.
 
     Raises:
         BotCriticalError: If a segment names nothing the config declares,
             or the path lands on a table, a list or an unset value.
     """
-    value = _read(config_dict, path.split("."), path)
+    value = _read(profile, path.split("."), path)
     if isinstance(value, dict | list):
         raise BotCriticalError(
             f"Optimisation parameter `{path}` names a table or a list, which "
@@ -297,16 +311,3 @@ def _under_a_single_value(path: str, segment: str) -> BotCriticalError:
         f"Optimisation parameter `{path}` reaches `{segment}` under a "
         f"single value, which holds nothing to address"
     )
-
-
-def _require_optimisation_config(bot_config: BotConfig) -> dict[str, Any]:
-    """Read the section a sweep cannot run without.
-
-    Raises:
-        BotCriticalError: If the bot declares no `[optimisation]` section.
-    """
-    if bot_config.optimisation is None:
-        raise BotCriticalError(
-            "`[optimisation]` section is required to run a grid search"
-        )
-    return bot_config.optimisation

@@ -278,7 +278,6 @@ class BotConfig(BaseSettings):
     live: LiveConfig | None = None
     report: ReportConfig = ReportConfig()
     orders: OrdersConfig = OrdersConfig()
-    optimisation: dict[str, Any] | None = None
 
     @classmethod
     def _validated(

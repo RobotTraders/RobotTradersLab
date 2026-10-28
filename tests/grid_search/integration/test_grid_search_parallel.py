@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from robottraderslab.bootstrap import BotConfig
@@ -28,19 +30,23 @@ available_balance_ratio = 0.5
 fast_ma_length = 3
 slow_ma_length = 7
 long_only = true
+"""
 
-[optimisation]
-max_workers = 2
+SEARCH_TOML = """max_workers = 2
 
-[[optimisation.parameter_configs]]
-parameter = "strategy.profiles.fast_ma_length"
+[profile]
+symbol = "BTC/USDT:USDT"
+timeframe = "4h"
+
+[[parameter_configs]]
+parameter = "fast_ma_length"
 sampling = "linear"
 min = 3
 max = 5
 num_samples = 2
 
-[[optimisation.parameter_configs]]
-parameter = "strategy.profiles.slow_ma_length"
+[[parameter_configs]]
+parameter = "slow_ma_length"
 sampling = "linear"
 min = 7
 max = 10
@@ -56,8 +62,8 @@ class TestParallelGridSearch:
         return BotConfig.from_text(TOML_CONFIG)
 
     @pytest.fixture(scope="class")
-    def results(self, bot_config: BotConfig) -> GridSearchResults:
-        return run_grid_search(bot_config)
+    def results(self, bot_config: BotConfig, tmp_path_factory) -> GridSearchResults:
+        return run_grid_search(bot_config, _search_file(tmp_path_factory.mktemp("s")))
 
     def test_all_grid_points_return_results(self, results):
         assert len(results.dataframe) == EXPECTED_GRID_SIZE
@@ -73,16 +79,16 @@ class TestParallelGridSearch:
     def test_parameter_columns_present(self, results):
         df = results.dataframe
 
-        assert "strategy.profiles.fast_ma_length" in df.columns
-        assert "strategy.profiles.slow_ma_length" in df.columns
+        assert "fast_ma_length" in df.columns
+        assert "slow_ma_length" in df.columns
 
     def test_results_follow_the_grid_order(self, results):
         df = results.dataframe
 
         measured_points = list(
             zip(
-                df["strategy.profiles.fast_ma_length"],
-                df["strategy.profiles.slow_ma_length"],
+                df["fast_ma_length"],
+                df["slow_ma_length"],
                 strict=True,
             )
         )
@@ -90,27 +96,39 @@ class TestParallelGridSearch:
         assert measured_points == [(3, 7), (3, 10), (5, 7), (5, 10)]
 
 
-def test_an_undeclared_setting_stops_the_sweep_before_any_point_is_measured(caplog):
-    bot_config = BotConfig.from_text(
-        TOML_CONFIG.replace("max_workers = 2", "max_workers = 1").replace(
-            'parameter = "strategy.profiles.fast_ma_length"',
-            'parameter = "strategy.profiles.no_such_setting"',
-        )
+def _search_file(folder: Path, search_toml: str = SEARCH_TOML) -> Path:
+    search_file = folder / "grid-search.toml"
+    search_file.write_text(search_toml, encoding="utf-8")
+    return search_file
+
+
+def test_an_undeclared_setting_stops_the_sweep_before_any_point_is_measured(
+    caplog, tmp_path
+):
+    bot_config = BotConfig.from_text(TOML_CONFIG)
+    search_file = _search_file(
+        tmp_path,
+        SEARCH_TOML.replace("max_workers = 2", "max_workers = 1").replace(
+            'parameter = "fast_ma_length"',
+            'parameter = "no_such_setting"',
+        ),
     )
 
     with pytest.raises(BotCriticalError, match="no_such_setting"):
-        run_grid_search(bot_config)
+        run_grid_search(bot_config, search_file)
 
     assert not [record for record in caplog.records if "Grid point" in record.message]
 
 
-def test_a_critical_stops_the_parallel_sweep():
-    bot_config = BotConfig.from_text(
-        TOML_CONFIG.replace(
-            'parameter = "strategy.profiles.fast_ma_length"',
-            'parameter = "strategy.profiles.no_such_setting"',
-        )
+def test_a_critical_stops_the_parallel_sweep(tmp_path):
+    bot_config = BotConfig.from_text(TOML_CONFIG)
+    search_file = _search_file(
+        tmp_path,
+        SEARCH_TOML.replace(
+            'parameter = "fast_ma_length"',
+            'parameter = "no_such_setting"',
+        ),
     )
 
     with pytest.raises(BotCriticalError, match="no_such_setting"):
-        run_grid_search(bot_config)
+        run_grid_search(bot_config, search_file)

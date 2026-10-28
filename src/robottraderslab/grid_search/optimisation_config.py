@@ -1,8 +1,10 @@
 import os
-from collections.abc import Mapping
+import tomllib
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from robottraderslab.exceptions import BotCriticalError
 
@@ -30,20 +32,104 @@ class ParameterConfig(BaseModel):
     values: list[ParameterValue] | None = None
 
 
-class OptimisationConfig(BaseModel):
-    """Configuration for grid search optimisation from TOML."""
+class ProfileSelector(BaseModel):
+    """The keys that single out the profile of `bot.toml` a search sweeps.
+
+    A profile is known by its identity, never by its place in the list, so a
+    reordered `bot.toml` sweeps the same profile.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    symbol: str | None = None
+    timeframe: str | None = None
+    tag: str | None = None
+
+    @model_validator(mode="after")
+    def _names_a_key(self) -> "ProfileSelector":
+        if not self._given():
+            raise ValueError("`[profile]` gives none of `symbol`, `timeframe`, `tag`")
+        return self
+
+    def index_in(self, profiles: Sequence[Mapping[str, Any]]) -> int:
+        """Find the one profile every key given agrees with.
+
+        Raises:
+            BotCriticalError: If no profile matches, or more than one does.
+        """
+        given = self._given()
+        matches = [
+            index
+            for index, profile in enumerate(profiles)
+            if all(profile.get(key) == value for key, value in given.items())
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        outcome = "matches no profile" if not matches else "matches more than one"
+        held = "; ".join(_identity(profile) for profile in profiles) or "none"
+        raise BotCriticalError(
+            f"`[profile]` of `grid-search.toml` ({_identity(given)}) {outcome} "
+            f"of `bot.toml`, which holds: {held}"
+        )
+
+    def _given(self) -> dict[str, str]:
+        return self.model_dump(exclude_none=True)
+
+
+def _identity(profile: Mapping[str, Any]) -> str:
+    keys = ("symbol", "timeframe", "tag")
+    return ", ".join(f"{key} = {profile[key]}" for key in keys if key in profile)
+
+
+_BOT_SECTIONS = ("strategy", "backtest", "live", "report", "orders")
+
+
+class OptimisationConfig(BaseModel):
+    """What a grid search declares: the profile it sweeps, its parameters,
+    their ranges and its settings, and nothing else of the bot.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profile: ProfileSelector
     parameter_configs: list[ParameterConfig]
     max_workers: int = Field(default_factory=lambda: os.cpu_count() or 1, ge=1)
 
     @classmethod
-    def from_config(cls, config_dict: dict[str, Any]) -> "OptimisationConfig":
-        """Validate what a bot declared for its sweep.
+    def from_file(cls, search_file: str | Path) -> "OptimisationConfig":
+        """Read the search a `grid-search.toml` declares.
 
         Args:
-            config_dict: The `[optimisation]` section the bot declares.
+            search_file: The TOML file declaring the search.
+
+        Raises:
+            BotCriticalError: If the file is not there, is not valid TOML,
+                carries a section of the bot, which belongs in `bot.toml`, or
+                declares what `from_config` refuses.
+            UnicodeDecodeError: If the file is not valid UTF-8.
+            OSError: If the file exists but cannot be read.
+        """
+        path = Path(search_file)
+        if not path.is_file():
+            raise BotCriticalError(f"There is no grid search file at `{path}`")
+        try:
+            declared = tomllib.loads(path.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as e:
+            raise BotCriticalError(f"`{path}` is not valid TOML: {e}") from e
+        carried = [f"[{name}]" for name in _BOT_SECTIONS if name in declared]
+        if carried:
+            raise BotCriticalError(
+                f"`{path.name}` holds the search alone and carries "
+                f"{', '.join(carried)}; the bot belongs in `bot.toml`"
+            )
+        return cls.from_config(declared)
+
+    @classmethod
+    def from_config(cls, config_dict: dict[str, Any]) -> "OptimisationConfig":
+        """Validate what a grid search declared.
+
+        Args:
+            config_dict: The keys the grid search file declares.
 
         Raises:
             BotCriticalError: If the section declares a key the sweep
@@ -54,7 +140,7 @@ class OptimisationConfig(BaseModel):
             return cls(**config_dict)
         except ValidationError as e:
             raise BotCriticalError(
-                f"`[optimisation]` is not a sweep the engine can run: {e}"
+                f"The grid search is not one the engine can run: {e}"
             ) from e
 
     def to_parameters(

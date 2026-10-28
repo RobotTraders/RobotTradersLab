@@ -1,6 +1,6 @@
 import pytest
 
-from robottraderslab.bootstrap import bot_file, optimisation_file
+from robottraderslab.bootstrap import bot_file, grid_search_file
 from robottraderslab.exceptions import BotCriticalError
 
 
@@ -37,14 +37,14 @@ def test_a_toml_path_whose_file_is_gone_is_refused_naming_its_folder(tmp_path):
     assert f"`{config.parent}`" in str(refusal.value)
 
 
-def test_a_folder_holding_optimisation_toml_gives_its_file(tmp_path):
-    (tmp_path / "optimisation.toml").write_text("", encoding="utf-8")
+def test_a_folder_holding_grid_search_toml_gives_its_file(tmp_path):
+    (tmp_path / "grid-search.toml").write_text("", encoding="utf-8")
 
-    assert optimisation_file(tmp_path) == tmp_path / "optimisation.toml"
+    assert grid_search_file(tmp_path) == tmp_path / "grid-search.toml"
 
 
-def test_a_folder_without_optimisation_toml_names_the_file(tmp_path):
+def test_a_folder_without_grid_search_toml_names_the_file(tmp_path):
     (tmp_path / "bot.toml").write_text("", encoding="utf-8")
 
-    with pytest.raises(BotCriticalError, match="optimisation.toml"):
-        optimisation_file(tmp_path)
+    with pytest.raises(BotCriticalError, match="grid-search.toml"):
+        grid_search_file(tmp_path)

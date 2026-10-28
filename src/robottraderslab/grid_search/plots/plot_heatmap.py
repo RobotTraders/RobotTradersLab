@@ -23,7 +23,6 @@ _SUMMARY_TITLE_FONT_SIZE = 16
 _COLOUR_MAP = "RdYlGn"
 _MAX_TICKS = 10
 _LABEL_ROTATION = 45
-_PROFILE_PREFIX = "strategy.profiles."
 
 
 def plot_heatmap(
@@ -93,16 +92,12 @@ def _draw_heatmap(
         ha="right",
     )
     ax.set_yticks(range(0, len(pivot.index), y_step), pivot.index[::y_step])
-    ax.set_xlabel(_short_name(param2), fontsize=AXIS_LABEL_FONT_SIZE)
-    ax.set_ylabel(_short_name(param1), fontsize=AXIS_LABEL_FONT_SIZE)
+    ax.set_xlabel(param2, fontsize=AXIS_LABEL_FONT_SIZE)
+    ax.set_ylabel(param1, fontsize=AXIS_LABEL_FONT_SIZE)
     ax.set_title(
         title or _display_name(metric), fontsize=TITLE_FONT_SIZE, fontweight="bold"
     )
     ax.tick_params(axis="both", which="major", labelsize=TICK_FONT_SIZE)
-
-
-def _short_name(param: str) -> str:
-    return param.removeprefix(_PROFILE_PREFIX)
 
 
 def _display_name(metric: str) -> str:

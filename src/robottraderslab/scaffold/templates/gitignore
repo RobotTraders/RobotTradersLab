@@ -3,5 +3,5 @@ data/
 logs/
 backtests/
 reports/
-optimisations/
+grid-searches/
 secrets.toml

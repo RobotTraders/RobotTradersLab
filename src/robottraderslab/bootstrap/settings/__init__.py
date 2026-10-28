@@ -1,9 +1,9 @@
 from .bot_folder import (
     bot_file,
     bot_name,
+    grid_search_file,
     names_a_file,
     not_a_bot,
-    optimisation_file,
 )
 from .load_secrets import (
     SECRET_REFERENCE_KEY,
@@ -39,7 +39,7 @@ __all__ = [
     "load_secrets",
     "names_a_file",
     "not_a_bot",
-    "optimisation_file",
+    "grid_search_file",
     "refuse_credentials_in_notifiers",
     "resolve_path",
     "resolve_secret_references",
