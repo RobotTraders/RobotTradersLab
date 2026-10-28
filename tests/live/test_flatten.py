@@ -136,15 +136,17 @@ def config_file(tmp_path: Path, exchange: AsyncMock) -> Path:
 
 
 def _write_bot(directory: Path, exchange: str) -> Path:
-    (directory / "creds.toml").write_text(_CREDENTIALS)
-    path = directory / "impulse-bot-example.toml"
+    folder = directory / "impulse-bot-example"
+    folder.mkdir()
+    (folder / "creds.toml").write_text(_CREDENTIALS)
+    path = folder / "bot.toml"
     path.write_text(_bot(exchange))
     return path
 
 
 def _run(config_file: Path, **overrides: Any) -> int:
     arguments: dict[str, Any] = {
-        "config": config_file,
+        "folder": config_file.parent,
         "symbol": None,
         "external": False,
     }
@@ -207,7 +209,7 @@ def test_a_config_trading_in_another_process_is_left_alone(
 
     assert exit_code == EX_TEMPFAIL
     assert exchange.mock_calls == []
-    assert "impulse-bot-example.toml is already trading" in caplog.text
+    assert f"{config_file.parent.name} is already trading" in caplog.text
 
 
 def test_omitting_symbol_targets_the_union_of_orders_and_positions(
@@ -271,23 +273,19 @@ def test_the_account_is_the_one_the_configuration_file_trades(config_file):
 
 
 def test_a_bot_without_a_live_section_is_refused(tmp_path):
-    backtest_only = tmp_path / "backtest-only.toml"
-    backtest_only.write_text('[strategy]\nstrategy_class = "impulse"\n')
+    backtest_only = tmp_path / "backtest-only"
+    backtest_only.mkdir()
+    (backtest_only / "bot.toml").write_text('[strategy]\nstrategy_class = "impulse"\n')
 
     with pytest.raises(BotCriticalError, match=r"\[live\]"):
-        main(config=backtest_only, symbol=None, external=False)
-
-
-def test_a_missing_configuration_file_is_refused(tmp_path):
-    with pytest.raises(BotCriticalError, match="absent.toml"):
-        main(config=tmp_path / "absent.toml", symbol=None, external=False)
+        main(folder=backtest_only, symbol=None, external=False)
 
 
 def test_a_venue_the_engine_cannot_load_is_refused(tmp_path):
     ghost = _write_bot(tmp_path, "ghost")
 
     with pytest.raises(ExchangeCriticalError, match="ghost"):
-        main(config=ghost, symbol=None, external=False)
+        main(folder=ghost.parent, symbol=None, external=False)
 
 
 @pytest.mark.parametrize(
@@ -295,7 +293,7 @@ def test_a_venue_the_engine_cannot_load_is_refused(tmp_path):
     [([], []), ([_order(_BTC)], []), ([_order(_BTC)], [_order(_BTC)])],
     ids=["already flat", "flat after cancelling", "not flat"],
 )
-def test_every_verdict_names_the_bots_configuration_file(
+def test_every_verdict_names_the_bot(
     exchange, config_file, caplog, open_orders, remaining_orders
 ):
     exchange.get_open_orders.side_effect = [open_orders, remaining_orders]
@@ -303,7 +301,7 @@ def test_every_verdict_names_the_bots_configuration_file(
     with caplog.at_level(logging.INFO):
         _run(config_file)
 
-    assert "impulse-bot-example.toml" in caplog.text
+    assert "impulse-bot-example" in caplog.text
 
 
 class _FillingSimulator(SimulatedFuturesExchange):
@@ -371,8 +369,10 @@ def refusing_simulator() -> Iterator[_RefusingSimulator]:
 @pytest.fixture
 def make_ma_bot(tmp_path: Path) -> _MakeMaBot:
     def _make(profiles: Sequence[tuple[Symbol, str]]) -> Path:
-        (tmp_path / "creds.toml").write_text(_CREDENTIALS)
-        path = tmp_path / "ma-bot-example.toml"
+        folder = tmp_path / "ma-bot-example"
+        folder.mkdir()
+        (folder / "creds.toml").write_text(_CREDENTIALS)
+        path = folder / "bot.toml"
         path.write_text(_ma_bot(profiles))
         return path
 
@@ -516,8 +516,9 @@ async def test_a_venue_settling_short_of_the_profiles_total_fails_the_run(
 
 
 async def test_a_strategy_tracking_no_profile_is_refused(simulator, tmp_path):
-    (tmp_path / "creds.toml").write_text(_CREDENTIALS)
-    untracked = tmp_path / "ma-bot-example.toml"
+    (tmp_path / "ma-bot-example").mkdir()
+    (tmp_path / "ma-bot-example" / "creds.toml").write_text(_CREDENTIALS)
+    untracked = tmp_path / "ma-bot-example" / "bot.toml"
     untracked.write_text(_ma_bot([]))
 
     with pytest.raises(BotCriticalError, match="tracks no profile"):

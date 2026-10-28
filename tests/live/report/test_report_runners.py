@@ -135,7 +135,7 @@ class TestAccountStateIsRequested:
     def test_executions_are_requested_for_every_profile_symbol(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         called_symbols = exchange.get_executions_since.call_args.args[1]
         assert set(called_symbols) == {
@@ -146,7 +146,7 @@ class TestAccountStateIsRequested:
     def test_open_positions_are_requested_for_every_profile_symbol(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         called_symbols = exchange.get_open_positions.call_args.args[0]
         assert set(called_symbols) == {
@@ -157,7 +157,7 @@ class TestAccountStateIsRequested:
     def test_the_window_starts_the_requested_days_back(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=7)
+        run_report(bot_config, days=7, save=False)
 
         since = exchange.get_executions_since.call_args.args[0]
         assert (
@@ -169,7 +169,7 @@ class TestTheBalanceTheWindowOpenedOn:
     def test_the_balance_is_requested_for_every_profile_symbol(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         called_symbols = exchange.get_balances.call_args.args[0]
         assert set(called_symbols) == {
@@ -182,7 +182,7 @@ class TestTheReportWindow:
     def test_the_provider_receives_the_window_unmodified(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         since = exchange.get_executions_since.call_args.args[0]
         fetch_start, fetch_end = collaborators[
@@ -196,7 +196,7 @@ class TestTheReportWindow:
         ) < timedelta(minutes=1)
 
     def test_every_declared_market_is_fetched(self, bot_config, collaborators):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         provider = collaborators["load_ohlcv_provider"].return_value
         fetched_pairs = {
@@ -214,7 +214,7 @@ class TestTheStrategyIsBuilt:
     def test_the_strategy_is_built_for_the_loaded_account_in_live_mode(
         self, bot_config, account, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         call = collaborators["load_strategy"].call_args
         assert call.args[0]["strategy_class"] == "impulse"
@@ -226,7 +226,7 @@ class TestTheStrategyIsBuilt:
     def test_one_venue_connection_serves_the_account_state_and_the_strategy(
         self, bot_config, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         collaborators["load_single_account_with_exchange"].assert_called_once_with(
             bot_config.live.trading_account, {}
@@ -239,7 +239,7 @@ class TestStrategyDeclaredLookback:
     ):
         collaborators["strategy"].setup.side_effect = _setup_declaring({"4h": 330})
 
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         provider = collaborators["load_ohlcv_provider"].return_value
         provider.set_required_lookbacks.assert_called_once_with({"4h": 330})
@@ -247,7 +247,7 @@ class TestStrategyDeclaredLookback:
     def test_no_declared_lookback_sets_no_lookback_on_the_provider(
         self, bot_config, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         provider = collaborators["load_ohlcv_provider"].return_value
         provider.set_required_lookbacks.assert_not_called()
@@ -257,7 +257,7 @@ class TestAnalysisIsBuilt:
     def test_the_analyser_is_built_from_the_configured_provider(
         self, bot_config, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         handed = _handed_to_the_analyser(collaborators)
         assert (
@@ -268,7 +268,7 @@ class TestAnalysisIsBuilt:
     def test_the_analyser_is_built_with_the_configured_profiles_as_profiles(
         self, bot_config, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         assert _handed_to_the_analyser(collaborators)["profiles"] == _PROFILES
 
@@ -287,7 +287,7 @@ class TestAnalysisIsBuilt:
             }
         )
 
-        run_report(declared, days=30)
+        run_report(declared, days=30, save=False)
 
         handed = _handed_to_the_analyser(collaborators)["report_config"]
         assert handed.reference_symbol == "BTC/USDT:USDT"
@@ -295,7 +295,7 @@ class TestAnalysisIsBuilt:
     def test_the_window_read_is_the_window_measured(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         handed = _handed_to_the_analyser(collaborators)
         assert handed["since"] == exchange.get_executions_since.call_args.args[0]
@@ -306,19 +306,19 @@ class TestChartIsDrawn:
     def test_the_chart_is_drawn_with_the_configured_indicators(
         self, bot_config, analyser, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         assert analyser.plot_candlesticks.call_args.kwargs["indicators_name"] == (
             "impulse"
         )
 
-    def test_the_window_start_reaches_the_chart(
+    def test_the_window_start_reaches_the_page(
         self, bot_config, exchange, analyser, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         since = exchange.get_executions_since.call_args.args[0]
-        assert analyser.plot_candlesticks.call_args.kwargs["start_date"] == (
+        assert analyser.save_report.call_args.args[4] == (
             since.replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
         )
 
@@ -327,7 +327,7 @@ def test_without_profiles_there_is_nothing_to_chart(bot_config, collaborators):
     bot_config.strategy.profiles = []
 
     with pytest.raises(BotCriticalError, match="strategy.profiles"):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
     collaborators["load_single_account_with_exchange"].assert_not_called()
 
@@ -335,7 +335,7 @@ def test_without_profiles_there_is_nothing_to_chart(bot_config, collaborators):
 def test_the_chart_service_draws_from_the_configured_provider(
     bot_config, collaborators
 ):
-    run_report(bot_config, days=30)
+    run_report(bot_config, days=30, save=False)
 
     collaborators["load_ohlcv_provider"].assert_called_once_with(
         {"ohlcv_provider": "mock"}
@@ -346,7 +346,7 @@ class TestReadingTheWindowOnce:
     def test_executions_are_read_once(self, bot_config, exchange, collaborators):
         exchange.get_executions_since.return_value = []
 
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         assert exchange.get_executions_since.call_count == 1
 
@@ -356,14 +356,14 @@ class TestReadingTheWindowOnce:
         close_with_nothing_open = _execution(side=OrderSide.SELL, realised_profit=5.0)
         exchange.get_executions_since.return_value = [close_with_nothing_open]
 
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         assert exchange.get_executions_since.call_count == 1
 
     def test_the_window_is_read_from_the_requested_start(
         self, bot_config, exchange, collaborators
     ):
-        run_report(bot_config, days=30)
+        run_report(bot_config, days=30, save=False)
 
         since = exchange.get_executions_since.call_args.args[0]
         assert (datetime.now(UTC) - since).days == 30
@@ -374,7 +374,7 @@ class TestTheCoveredWindowIsStated:
         self, bot_config, exchange, collaborators, caplog
     ):
         with caplog.at_level(logging.INFO):
-            run_report(bot_config, days=30)
+            run_report(bot_config, days=30, save=False)
 
         assert "Covered" in caplog.text
 
@@ -386,7 +386,7 @@ class TestTheCoveredWindowIsStated:
         ]
 
         with caplog.at_level(logging.INFO):
-            run_report(bot_config, days=30)
+            run_report(bot_config, days=30, save=False)
 
         assert f"reaching back to {INSIDE_THE_WINDOW:%Y-%m-%d}" in caplog.text
 
@@ -396,6 +396,6 @@ class TestTheCoveredWindowIsStated:
         exchange.get_executions_since.return_value = []
 
         with caplog.at_level(logging.INFO):
-            run_report(bot_config, days=30)
+            run_report(bot_config, days=30, save=False)
 
         assert "with no execution in reach" in caplog.text

@@ -7,12 +7,12 @@ from robottraderslab._core import PlacementReserve, TimeInForce, TriggerType
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.exceptions import BotCriticalError
 
+NAME = 'name = "test-bot"\n'
+
 
 @pytest.fixture
 def toml_string() -> str:
     return """\
-name = "test-bot"
-
 [strategy]
 strategy_class = "dummy"
 lookback = 5432
@@ -27,8 +27,6 @@ def toml_filename() -> str:
 @pytest.fixture
 def backtest_preamble() -> str:
     return """\
-name = "test-bot"
-
 [strategy]
 strategy_class = "dummy"
 
@@ -44,8 +42,6 @@ initial_balance = { USDT = 1000.0 }
 @pytest.fixture
 def live_preamble() -> str:
     return """\
-name = "test-bot"
-
 [strategy]
 strategy_class = "dummy"
 
@@ -56,13 +52,13 @@ ohlcv_provider = {}
 
 
 def test_a_live_bot_cleans_removed_profiles_unless_it_says_not(live_preamble):
-    assert BotConfig.from_text(live_preamble).live.clean_removed_profiles is True
+    assert BotConfig.from_text(NAME + live_preamble).live.clean_removed_profiles is True
 
 
 def test_a_live_bot_turns_the_removed_profile_cleanup_off(live_preamble):
     text = live_preamble + "clean_removed_profiles = false\n"
 
-    assert BotConfig.from_text(text).live.clean_removed_profiles is False
+    assert BotConfig.from_text(NAME + text).live.clean_removed_profiles is False
 
 
 def test_load_from_file(toml_filename):
@@ -71,7 +67,7 @@ def test_load_from_file(toml_filename):
 
 
 def test_load_from_string(toml_string):
-    bot_config = BotConfig.from_text(toml_string)
+    bot_config = BotConfig.from_text(NAME + toml_string)
     assert bot_config.strategy.lookback == 5432
 
 
@@ -263,7 +259,8 @@ def test_absolute_storage_dir_unchanged(tmp_path, backtest_preamble):
 
 def test_a_backtest_naming_no_fee_convention(backtest_preamble):
     bot_config = BotConfig.from_text(
-        backtest_preamble
+        NAME
+        + backtest_preamble
         + """ohlcv_provider = {}
 """
     )
@@ -274,7 +271,8 @@ def test_a_backtest_naming_no_fee_convention(backtest_preamble):
 
 def test_a_backtest_naming_the_exchange_convention_and_its_reserve(backtest_preamble):
     bot_config = BotConfig.from_text(
-        backtest_preamble
+        NAME
+        + backtest_preamble
         + """ohlcv_provider = {}
 fee_mode = "exchange"
 
@@ -287,8 +285,9 @@ margin_markup = 0.01
     assert bot_config.backtest.placement_reserve.margin_markup == 0.01
 
 
-def test_a_bot_declaring_no_name_is_named_after_its_file(tmp_path):
-    toml_file = tmp_path / "impulse-kraken.toml"
+def test_a_bot_declaring_no_name_is_named_after_its_folder(tmp_path):
+    toml_file = tmp_path / "impulse-kraken" / "bot.toml"
+    toml_file.parent.mkdir()
     toml_file.write_text("[strategy]\nstrategy_class = 'dummy'\n")
 
     bot_config = BotConfig.from_file(str(toml_file))
@@ -296,13 +295,47 @@ def test_a_bot_declaring_no_name_is_named_after_its_file(tmp_path):
     assert bot_config.name == "impulse-kraken"
 
 
-def test_a_declared_name_wins_over_the_file_stem(tmp_path):
-    toml_file = tmp_path / "impulse-kraken.toml"
+def test_a_folder_builds_the_bot_its_bot_toml_declares(tmp_path):
+    folder = tmp_path / "impulse-kraken"
+    folder.mkdir()
+    (folder / "bot.toml").write_text("[strategy]\nstrategy_class = 'dummy-99'\n")
+
+    bot_config = BotConfig.from_folder(folder)
+
+    assert bot_config.strategy.strategy_class == "dummy-99"
+    assert bot_config.config_file == folder / "bot.toml"
+
+
+def test_a_toml_path_is_refused_by_from_folder_naming_its_folder(tmp_path):
+    config = tmp_path / "trend" / "bot_b.toml"
+
+    with pytest.raises(BotCriticalError, match="a bot is a folder") as refusal:
+        BotConfig.from_folder(config)
+
+    assert f"`{config.parent}`" in str(refusal.value)
+
+
+def test_a_folder_without_bot_toml_is_refused_by_from_folder(tmp_path):
+    with pytest.raises(BotCriticalError, match="There is no `bot.toml`"):
+        BotConfig.from_folder(tmp_path)
+
+
+def test_a_declared_name_is_refused_naming_the_folder(tmp_path):
+    toml_file = tmp_path / "impulse-kraken" / "bot.toml"
+    toml_file.parent.mkdir()
     toml_file.write_text("name = 'xrp-pilot'\n[strategy]\nstrategy_class = 'dummy'\n")
 
-    bot_config = BotConfig.from_file(str(toml_file))
+    with pytest.raises(BotCriticalError, match="`impulse-kraken`"):
+        BotConfig.from_file(str(toml_file))
 
-    assert bot_config.name == "xrp-pilot"
+
+def test_an_overlay_declaring_a_name_is_refused_naming_the_folder(tmp_path):
+    toml_file = tmp_path / "impulse-kraken" / "bot.toml"
+    toml_file.parent.mkdir()
+    toml_file.write_text("[strategy]\nstrategy_class = 'dummy'\n")
+
+    with pytest.raises(BotCriticalError, match="the overlay .*`impulse-kraken`"):
+        BotConfig.from_file(str(toml_file), overlay="name = 'xrp-pilot'\n")
 
 
 def test_a_bot_declared_from_text_states_its_name():
@@ -318,21 +351,6 @@ def test_config_dir_set_to_toml_parent(tmp_path):
     bot_config = BotConfig.from_file(str(toml_file))
 
     assert bot_config.config_dir == toml_file.resolve().parent
-
-
-def test_relative_reports_dir_resolved_against_toml_directory(
-    tmp_path, backtest_preamble
-):
-    toml_file = tmp_path / "workspace" / "my_strategy" / "bot-example.toml"
-    toml_file.parent.mkdir(parents=True)
-    toml_file.write_text(
-        backtest_preamble
-        + 'ohlcv_provider = {}\n\n[report]\nreports_dir = "my_reports"\n'
-    )
-
-    bot_config = BotConfig.from_file(str(toml_file))
-
-    assert bot_config.report.reports_dir == toml_file.parent / "my_reports"
 
 
 def test_relative_backtest_logfile_resolved_against_toml_directory(
@@ -453,7 +471,7 @@ def test_missing_paths_do_not_cause_errors(tmp_path):
 
 
 def test_config_dir_not_set_when_loading_from_string_only(toml_string):
-    bot_config = BotConfig.from_text(toml_string)
+    bot_config = BotConfig.from_text(NAME + toml_string)
 
     assert bot_config.config_dir is None
 
@@ -465,7 +483,7 @@ def test_config_file_set_to_the_file_it_was_loaded_from(toml_filename):
 
 
 def test_config_file_not_set_when_loading_from_string_only(toml_string):
-    bot_config = BotConfig.from_text(toml_string)
+    bot_config = BotConfig.from_text(NAME + toml_string)
 
     assert bot_config.config_file is None
 
@@ -484,8 +502,6 @@ def test_the_environment_cannot_replace_a_declared_field(tmp_path, monkeypatch):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text(
         """\
-name = "test-bot"
-
 secrets_file = "declared.toml"
 
 [strategy]
@@ -503,8 +519,6 @@ def test_the_retired_flat_notifiers_table(tmp_path):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text(
         """\
-name = "test-bot"
-
 [strategy]
 strategy_class = "dummy"
 
@@ -523,8 +537,6 @@ def test_the_retired_custom_handlers_table(tmp_path):
     toml_file = tmp_path / "bot-example.toml"
     toml_file.write_text(
         """\
-name = "test-bot"
-
 [strategy]
 strategy_class = "dummy"
 
@@ -548,16 +560,6 @@ def test_the_retired_backtest_reference_symbol(tmp_path, backtest_preamble):
     )
 
     with pytest.raises(BotCriticalError, match=r"declare it under `\[report\]`"):
-        BotConfig.from_file(str(toml_file))
-
-
-def test_the_retired_backtest_reports_dir(tmp_path, backtest_preamble):
-    toml_file = tmp_path / "bot-example.toml"
-    toml_file.write_text(
-        backtest_preamble + 'ohlcv_provider = {}\nreports_dir = "reports"\n'
-    )
-
-    with pytest.raises(BotCriticalError, match=r"`backtest.reports_dir` is not read"):
         BotConfig.from_file(str(toml_file))
 
 
@@ -702,7 +704,8 @@ def test_a_config_that_is_not_valid_toml_names_the_file(tmp_path):
 
 def test_the_orders_section_sets_each_role(toml_string):
     bot_config = BotConfig.from_text(
-        toml_string
+        NAME
+        + toml_string
         + """
 [orders.entry]
 time_in_force = "post_only"
@@ -720,19 +723,22 @@ venueOnly = "99"
 
 def test_an_orders_key_the_engine_does_not_set(toml_string):
     with pytest.raises(BotCriticalError, match="time_in_forse"):
-        BotConfig.from_text(toml_string + '\n[orders.entry]\ntime_in_forse = "ioc"\n')
+        BotConfig.from_text(
+            NAME + toml_string + '\n[orders.entry]\ntime_in_forse = "ioc"\n'
+        )
 
 
 def test_orders_params_naming_no_installed_connector(toml_string):
     with pytest.raises(BotCriticalError, match="bitgte"):
         BotConfig.from_text(
-            toml_string + '\n[orders.entry.params.bitgte]\nvenueOnly = "99"\n'
+            NAME + toml_string + '\n[orders.entry.params.bitgte]\nvenueOnly = "99"\n'
         )
 
 
 def test_the_orders_section_sets_the_protections_trigger_types(toml_string):
     bot_config = BotConfig.from_text(
-        toml_string
+        NAME
+        + toml_string
         + """
 [orders.stop_loss]
 trigger_type = "mark_price"
@@ -750,4 +756,6 @@ trigger_type = "last_price"
 
 def test_an_orders_trigger_type_outside_its_values(toml_string):
     with pytest.raises(BotCriticalError, match="trigger_type"):
-        BotConfig.from_text(toml_string + '\n[orders.exit]\ntrigger_type = "close"\n')
+        BotConfig.from_text(
+            NAME + toml_string + '\n[orders.exit]\ntrigger_type = "close"\n'
+        )

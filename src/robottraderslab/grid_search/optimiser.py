@@ -1,12 +1,10 @@
 import copy
 import itertools
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
 from functools import partial
 from typing import Any, cast
 
-from robottraderslab.backtester import run_backtest
+from robottraderslab.backtester import logger_levels, run_backtest
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.exceptions import BotCriticalError
 
@@ -146,8 +144,10 @@ def _measure_point(
     """Measure one point apart from the sweep, so a failure costs that point alone."""
     try:
         bot_config = _apply_grid_point_to_config(copy.deepcopy(config_dict), grid_point)
-        with _silenced_backtest_logs():
-            backtest_outputs = run_backtest(bot_config)
+        with logger_levels(
+            {logging.getLogger(_BACKTESTER_LOGGER_NAME): logging.WARNING}
+        ):
+            backtest_outputs = run_backtest(bot_config, record_log=False)
         return OptimisationResult.from_backtest(grid_point, backtest_outputs)
 
     except Exception as e:
@@ -170,17 +170,6 @@ def _apply_grid_point_to_config(
         _set_nested_value(config_dict, parameter_path, value)
 
     return BotConfig.model_validate(config_dict)
-
-
-@contextmanager
-def _silenced_backtest_logs() -> Iterator[None]:
-    backtest_logger = logging.getLogger(_BACKTESTER_LOGGER_NAME)
-    previous_level = backtest_logger.level
-    backtest_logger.setLevel(logging.WARNING)
-    try:
-        yield
-    finally:
-        backtest_logger.setLevel(previous_level)
 
 
 def _set_nested_value(

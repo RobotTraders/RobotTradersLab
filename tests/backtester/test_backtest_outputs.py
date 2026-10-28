@@ -35,7 +35,6 @@ strategy_class = "impulse"
 """
 
 PROFILE_CONFIG_TOML = """
-name = "test-bot"
 [strategy]
 strategy_class = "impulse"
 
@@ -1024,7 +1023,7 @@ class TestCreateAnalyser:
             trade_equity_snapshots=equity_snapshots,
             fills=fills_with_complete_trade,
             ohlcv_provider=Mock(spec=OHLCVProviderProtocol),
-            bot_config=BotConfig.from_text(PROFILE_CONFIG_TOML),
+            bot_config=BotConfig.from_text('name = "test-bot"\n' + PROFILE_CONFIG_TOML),
         )
         analyser = outputs.create_analyser()
 
@@ -1074,7 +1073,9 @@ class TestCreateAnalyser:
 class TestSavedRunFolder:
     @pytest.fixture
     def bot_config(self, tmp_path: Path) -> BotConfig:
-        toml_file = tmp_path / "impulse-bot-example.toml"
+        bot_folder = tmp_path / "impulse-bot-example"
+        bot_folder.mkdir()
+        toml_file = bot_folder / "bot.toml"
         toml_file.write_bytes(PROFILE_CONFIG_TOML.encode("utf-8"))
         return BotConfig.from_file(toml_file)
 
@@ -1127,7 +1128,7 @@ class TestSavedRunFolder:
         )
 
     def _run_folder(self, bot_config: BotConfig) -> Path:
-        reports_root = cast(Path, bot_config.config_dir) / "reports"
+        reports_root = cast(Path, bot_config.config_dir) / "backtests"
         [folder] = list(reports_root.iterdir())
         return folder
 
@@ -1136,10 +1137,10 @@ class TestSavedRunFolder:
 
         run_folder = self._run_folder(bot_config)
         assert re.match(
-            r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_backtest_impulse-bot-example",
+            r"\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}",
             run_folder.name,
         )
-        assert (run_folder / "impulse-bot-example.toml").read_bytes() == cast(
+        assert (run_folder / "bot.toml").read_bytes() == cast(
             Path, bot_config.config_file
         ).read_bytes()
         assert (run_folder / "report.txt").exists()
@@ -1169,12 +1170,12 @@ class TestSavedRunFolder:
         assert drawn["configuration"] == cast(Path, bot_config.config_file).read_text(
             encoding="utf-8"
         )
-        assert drawn["title"].startswith("impulse-bot-example")
+        assert drawn["title"].startswith(bot_config.name)
 
-    def test_save_false_leaves_no_reports_directory(self, outputs, bot_config):
+    def test_save_false_leaves_no_backtests_directory(self, outputs, bot_config):
         outputs.create_analyser(save=False)
 
-        assert not (cast(Path, bot_config.config_dir) / "reports").exists()
+        assert not (cast(Path, bot_config.config_dir) / "backtests").exists()
 
     def test_plot_candlesticks_on_a_saved_run_opens_without_rendering_again(
         self, outputs, bot_config, browser_openings
@@ -1198,7 +1199,7 @@ class TestSavedRunFolder:
 
         written = analyser.plot_candlesticks(indicators_name="impulse")
 
-        assert not (cast(Path, bot_config.config_dir) / "reports").exists()
+        assert not (cast(Path, bot_config.config_dir) / "backtests").exists()
         assert len(written) == 2
 
     def test_a_chart_failure_still_saves_the_configuration_and_report(
@@ -1214,7 +1215,7 @@ class TestSavedRunFolder:
             outputs.create_analyser()
 
         run_folder = self._run_folder(bot_config)
-        assert (run_folder / "impulse-bot-example.toml").exists()
+        assert (run_folder / "bot.toml").exists()
         assert (run_folder / "report.txt").exists()
         assert not list(run_folder.glob("*.html"))
         assert [record.levelno for record in caplog.records] == [logging.ERROR]
@@ -1225,4 +1226,4 @@ class TestSavedRunFolder:
 
         flat_outputs.create_analyser()
 
-        assert not (cast(Path, bot_config.config_dir) / "reports").exists()
+        assert not (cast(Path, bot_config.config_dir) / "backtests").exists()

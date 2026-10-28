@@ -131,12 +131,8 @@ class ChartService:
             title=_display_title(indicators_name, None),
             markets=[market],
             report=report,
-            equity_curve=equity_curve[
-                _window_mask(equity_curve.index, start_date, end_date)
-            ],
-            drawdown_curve=drawdown_curve[
-                _window_mask(drawdown_curve.index, start_date, end_date)
-            ],
+            equity_curve=_windowed(equity_curve, start_date, end_date),
+            drawdown_curve=_windowed(drawdown_curve, start_date, end_date),
             drawdown_unit=drawdown_unit,
             links=[],
         )
@@ -256,12 +252,8 @@ class ChartService:
                     )
                 ],
                 report=report,
-                equity_curve=equity_curve[
-                    _window_mask(equity_curve.index, start_date, end_date)
-                ],
-                drawdown_curve=drawdown_curve[
-                    _window_mask(drawdown_curve.index, start_date, end_date)
-                ],
+                equity_curve=_windowed(equity_curve, start_date, end_date),
+                drawdown_curve=_windowed(drawdown_curve, start_date, end_date),
                 drawdown_unit=drawdown_unit,
                 links=[
                     sibling.link(current=position == index)
@@ -284,6 +276,7 @@ class ChartService:
         trades_df: pd.DataFrame,
         destination: Path,
         run_label: str,
+        start_date: str,
         configuration: str = "",
     ) -> Path:
         """Draw every requested market into one page, switching between them
@@ -300,6 +293,9 @@ class ChartService:
             trades_df: The run's trades, drawn as entry and exit markers.
             destination: File the page is written to.
             run_label: The page's title.
+            start_date: First day the page shows (ISO format); the candles
+                fetched before it for the indicators' lookback stay off the
+                page.
             configuration: The TOML text of the run this page was made from,
                 shown beside the trades. Empty when there is none.
         """
@@ -308,13 +304,18 @@ class ChartService:
             title=_display_title(indicators_name, run_label),
             markets=[
                 self._build_market_view(
-                    indicators_name, spec, trades_df, spec.profile_name, None, None
+                    indicators_name,
+                    spec,
+                    trades_df,
+                    spec.profile_name,
+                    start_date,
+                    None,
                 )
                 for spec in specs
             ],
             report=report,
-            equity_curve=equity_curve,
-            drawdown_curve=drawdown_curve,
+            equity_curve=_windowed(equity_curve, start_date, None),
+            drawdown_curve=_windowed(drawdown_curve, start_date, None),
             drawdown_unit=drawdown_unit,
             links=[],
             configuration=configuration,
@@ -369,6 +370,12 @@ def _to_candles(ohlcv: pd.DataFrame) -> Candles:
         close=ohlcv["close"].to_numpy(),
         volume=ohlcv["volume"].to_numpy(),
     )
+
+
+def _windowed(
+    curve: pd.Series, start_date: str | None, end_date: str | None
+) -> pd.Series:
+    return curve[_window_mask(curve.index, start_date, end_date)]
 
 
 def _window_mask(

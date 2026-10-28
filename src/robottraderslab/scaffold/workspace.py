@@ -5,6 +5,8 @@ from robottraderslab._core import mark_root
 
 _TEMPLATES_DIR_NAME = "templates"
 _EXAMPLE_FILES = ("secrets.example.toml", "registry.example.toml")
+_GITIGNORE_TEMPLATE = "gitignore"
+_GITIGNORE_NAME = ".gitignore"
 
 
 def lay_out_workspace(root: Path) -> list[Path]:
@@ -20,8 +22,19 @@ def lay_out_workspace(root: Path) -> list[Path]:
         target = root / name
         target.write_text(_template(name), encoding="utf-8")
         written.append(target)
-    mark_root(root)
+    mark_workspace(root)
     return written
+
+
+def mark_workspace(root: Path) -> None:
+    """The workspace's `.gitignore` keeps what the engine writes and the
+    secrets file out of a commit, and is written once so the user's own lines
+    survive every later scaffold.
+    """
+    mark_root(root)
+    gitignore = root / _GITIGNORE_NAME
+    if not gitignore.exists():
+        gitignore.write_text(_template(_GITIGNORE_TEMPLATE), encoding="utf-8")
 
 
 def main(workspace: Path) -> None:

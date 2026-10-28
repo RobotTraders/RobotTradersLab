@@ -58,11 +58,12 @@ _INIT_SUBPACKAGES = {
 }
 
 
-_ConfigFile = Annotated[
+_BotFolder = Annotated[
     Path,
     typer.Argument(
-        metavar="CONFIG",
-        help="The bot's configuration file",
+        metavar="BOT",
+        help="The bot's folder, holding its `bot.toml`; a path to a `.toml` "
+        "file is refused, naming the folder to pass",
     ),
 ]
 _LogFile = Annotated[
@@ -70,7 +71,7 @@ _LogFile = Annotated[
     typer.Option(
         "--log-file",
         "-l",
-        help="Where to write this run's log, overriding the configuration file",
+        help="Where to write this run's log, overriding `bot.toml`",
     ),
 ]
 _ConsoleFlag = Annotated[
@@ -106,6 +107,13 @@ _ExampleName = Annotated[
     str | None,
     typer.Argument(
         metavar="NAME", help="Example to copy; pass --list to see the installed ones"
+    ),
+]
+_ExampleFolder = Annotated[
+    Path | None,
+    typer.Argument(
+        metavar="FOLDER",
+        help="The bot's folder to create in the workspace, its name the bot's",
     ),
 ]
 _ListExamplesFlag = Annotated[
@@ -200,7 +208,7 @@ def root(
 
 @app.command()
 def backtest(
-    config: _ConfigFile,
+    bot: _BotFolder,
     logfile_override: _LogFile = None,
     console: _ConsoleFlag = False,
     chart: Annotated[
@@ -214,15 +222,17 @@ def backtest(
         bool,
         typer.Option(
             "--save/--no-save",
-            help="Keep the run under reports/ beside the bot: its "
-            "configuration file, the printed report and the HTML report",
+            help="Keep the run under `backtests/<time>/` in the bot's folder: "
+            "its `bot.toml`, its `backtest.log` unless a log file is named, "
+            "`report.txt` and `report.html`; --no-save writes no run folder "
+            "and shows the log in the terminal unless a log file is named",
         ),
     ] = True,
 ) -> None:
     """Replay a bot over past candles and report how it would have performed."""
     _run(
         "backtest",
-        config=config,
+        folder=bot,
         logfile_override=logfile_override,
         console=console,
         chart=chart,
@@ -258,11 +268,10 @@ def check(
 
 
 @app.command(
-    epilog="Examples: `rtlab flatten workspace/first-bot/impulse-bot-example.toml "
-    "BTC/USDT:USDT` flattens one symbol; `rtlab flatten "
-    "workspace/first-bot/impulse-bot-example.toml --all` flattens every symbol "
-    "the account carries; `rtlab flatten "
-    "workspace/first-bot/impulse-bot-example.toml --external` reads ninety days "
+    epilog="Examples: `rtlab flatten workspace/first-bot BTC/USDT:USDT` flattens "
+    "one symbol; `rtlab flatten workspace/first-bot --all` flattens every symbol "
+    "the account carries; `rtlab flatten workspace/first-bot --external` reads "
+    "ninety days "
     "of fills, gives each to the profile whose tag it carries and closes the "
     "difference on each market, open orders untouched. A market a hand holds on "
     "the other side of the bot's own position is left alone and named, since "
@@ -271,7 +280,7 @@ def check(
 )
 def flatten(
     ctx: typer.Context,
-    config: _ConfigFile,
+    bot: _BotFolder,
     symbol: _Symbol = None,
     all_symbols: _AllSymbolsFlag = False,
     external: _ExternalFlag = False,
@@ -281,21 +290,25 @@ def flatten(
     """
     if [symbol is not None, all_symbols, external].count(True) != 1:
         ctx.fail("Give exactly one of SYMBOL, --all or --external")
-    if _run("flatten", config=config, symbol=symbol, external=external):
+    if _run("flatten", folder=bot, symbol=symbol, external=external):
         raise typer.Exit(1)
 
 
 @app.command("grid-search")
 def grid_search(
-    config: _ConfigFile,
+    bot: _BotFolder,
     output_csv: Annotated[
-        Path | None, typer.Option(help="Where to write the scored combinations")
+        Path | None,
+        typer.Option(
+            help="Where to write the scored combinations, "
+            "`optimisations/<time>/results.csv` in the bot's folder unless given"
+        ),
     ] = None,
 ) -> None:
-    """Backtest every parameter combination the configuration file's
-    `[optimisation]` section declares, and score each.
+    """Backtest every parameter combination the `[optimisation]` section of the
+    bot's `optimisation.toml` declares, and score each.
     """
-    _run("grid-search", config=config, output_csv=output_csv)
+    _run("grid-search", folder=bot, output_csv=output_csv)
 
 
 @app.command()
@@ -337,27 +350,27 @@ def init(
 
 @app.command()
 def live(
-    config: _ConfigFile,
+    bot: _BotFolder,
     logfile_override: _LogFile = None,
     console: _ConsoleFlag = False,
     logfiles_retention_days: Annotated[
         int | None,
         typer.Option(
             "--log-retention-days",
-            help="How many days of log files to keep, overriding the configuration file",
+            help="How many days of log files to keep, overriding `bot.toml`",
         ),
     ] = None,
 ) -> None:
     """Trade one cycle on the candles that have just closed, placing real
-    orders on the accounts the configuration file declares.
+    orders on the accounts the bot's `bot.toml` declares, and log to the
+    bot's `logs/live.log`.
 
     One instance of a bot trades at a time, so a second `rtlab live` on the
-    same configuration file logs one warning and exits without touching the
-    venue.
+    same bot logs one warning and exits without touching the venue.
     """
     exit_code = _run(
         "live",
-        config=config,
+        folder=bot,
         logfile_override=logfile_override,
         console=console,
         logfiles_retention_days=logfiles_retention_days,
@@ -368,34 +381,47 @@ def live(
 
 @app.command()
 def report(
-    config: _ConfigFile,
+    bot: _BotFolder,
     days: Annotated[
         int, typer.Option(help="How many days back the report covers")
     ] = _DEFAULT_REPORT_DAYS,
+    save: Annotated[
+        bool,
+        typer.Option(
+            "--save/--no-save",
+            help="Keep the report as `reports/<time>/report.html` in the bot's "
+            "folder; --no-save only opens it",
+        ),
+    ] = True,
 ) -> None:
     """Open the interactive report of a live account, its trades drawn over the
     strategy's indicators.
     """
-    _run("report", config=config, days=days)
+    _run("report", folder=bot, days=days, save=save)
 
 
 @app.command(
     epilog="Examples: `rtlab scaffold --list` names the examples the installed plugins "
-    "ship; `rtlab scaffold impulse` copies that one into "
-    "`workspace/impulse-bot-example/`."
+    "ship; `rtlab scaffold impulse first-bot` copies that one into "
+    "`workspace/first-bot/`, the bot's folder holding its `bot.toml`."
 )
 def scaffold(
     ctx: typer.Context,
     name: _ExampleName = None,
+    folder: _ExampleFolder = None,
     list_examples: _ListExamplesFlag = False,
     workspace: _Workspace = None,
 ) -> None:
-    """Copy a packaged example into the workspace, or list the installed ones."""
-    if (name is not None) == list_examples:
-        ctx.fail("Give exactly one of NAME or --list")
-    folder = _workspace(workspace)
+    """Copy a packaged example into the workspace as a bot's folder, or list
+    the installed ones.
+    """
+    if list_examples:
+        if name is not None or folder is not None:
+            ctx.fail("--list takes no NAME or FOLDER")
+    elif name is None or folder is None:
+        ctx.fail("Give NAME and FOLDER, or --list")
     try:
-        _run("scaffold", name=name, workspace=folder)
+        _run("scaffold", name=name, folder=folder, workspace=_workspace(workspace))
     except ExampleError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
@@ -407,7 +433,7 @@ def scheduler(
         Path,
         typer.Argument(
             metavar="REGISTRY",
-            help="Registry file listing the bots and their timeframes",
+            help="Registry file listing the bots' folders and their timeframes",
         ),
     ],
 ) -> None:

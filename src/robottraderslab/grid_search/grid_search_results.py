@@ -4,11 +4,14 @@ from typing import Any
 
 import pandas as pd
 
+from robottraderslab.reporting import optimisation_folder, timestamp_now
+
 from .optimisation_result import SUMMARY_METRICS, OptimisationResult
 
 ERROR_COLUMN = "error"
 _NON_PARAMETER_COLUMNS = (*SUMMARY_METRICS, ERROR_COLUMN)
 _SWEPT_PARAMETER_COUNT = 2
+_RESULTS_FILENAME = "results.csv"
 
 
 class GridSearchResults:
@@ -81,19 +84,20 @@ class GridSearchResults:
         return self._df[[p1, p2, *SUMMARY_METRICS, ERROR_COLUMN]]
 
     def to_csv(self, path: str | Path | None = None) -> Path:
-        """Export results to CSV.
+        """Write the scored combinations to a CSV file.
 
         Args:
-            path: Defaults to `grid_search/results.csv` under `config_dir`,
-                or under the working directory when the results carry none.
+            path: Defaults to `optimisations/<moment>/results.csv` under
+                `config_dir`, or under the working directory when the results
+                carry none.
 
         Returns:
             The file written, which `from_csv` reads back.
         """
         if path is None:
-            grid_dir = (self._config_dir or Path()) / "grid_search"
-            grid_dir.mkdir(parents=True, exist_ok=True)
-            path = grid_dir / "results.csv"
+            folder = optimisation_folder(self._config_dir or Path(), timestamp_now())
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / _RESULTS_FILENAME
         else:
             path = Path(path)
         self.dataframe.to_csv(path, index=False)

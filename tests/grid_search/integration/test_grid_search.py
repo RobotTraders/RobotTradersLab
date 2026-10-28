@@ -11,8 +11,8 @@ from robottraderslab.grid_search.optimiser import GridSearchOptimiser
 
 CSV_PATH = "../../ma_strategy/integration/single_symbol_pipeline/data/btc_usdt_binance_2024.csv"
 
+NAME = 'name = "test-bot"\n'
 TEST_CONFIG_TOML = f"""
-name = "test-bot"
 [strategy]
 strategy_class = "futures_ma"
 
@@ -61,7 +61,7 @@ EXPECTED_GRID_SIZE = 6
 class TestGridSearchIntegration:
     @pytest.fixture(scope="class")
     def results(self) -> GridSearchResults:
-        bot_config = BotConfig.from_text(TEST_CONFIG_TOML)
+        bot_config = BotConfig.from_text(NAME + TEST_CONFIG_TOML)
         assert bot_config.backtest is not None
         csv_file = Path(__file__).parent / bot_config.backtest.ohlcv_provider["file"]
         bot_config.backtest.ohlcv_provider["file"] = str(csv_file)
@@ -176,8 +176,14 @@ class TestSweepOutcome:
         assert "ERROR" not in console
         assert "Grid search completed: 6/6 successful" in console
 
-    def test_a_grid_with_scored_points_runs_to_the_end(self, config_every_point_scores):
+    def test_a_sweep_given_no_path_keeps_its_scores_under_optimisations(
+        self, config_every_point_scores
+    ):
         grid_search_main(config_every_point_scores, None)
+
+        (sweep,) = (config_every_point_scores / "optimisations").iterdir()
+        scored = pd.read_csv(sweep / "results.csv")
+        assert len(scored) == EXPECTED_GRID_SIZE
 
     def test_the_run_stops_when_no_point_scored(self, config_no_point_can_score):
         with pytest.raises(
@@ -198,9 +204,10 @@ class TestSweepOutcome:
 
 
 def test_a_sweep_returns_the_same_results_at_one_worker_and_at_two():
-    one_worker = BotConfig.from_text(_with_resolved_file(TEST_CONFIG_TOML))
+    one_worker = BotConfig.from_text(NAME + _with_resolved_file(TEST_CONFIG_TOML))
     two_workers = BotConfig.from_text(
-        _with_resolved_file(TEST_CONFIG_TOML).replace(
+        NAME
+        + _with_resolved_file(TEST_CONFIG_TOML).replace(
             "max_workers = 1", "max_workers = 2"
         )
     )
@@ -224,7 +231,6 @@ def _on_a_symbol_the_provider_refuses(toml: str) -> str:
     return before + header + profiles.replace('"BTC/USDT:USDT"', '"ETH/USDT:USDT"', 1)
 
 
-def _written(config_dir: Path, toml: str) -> Path:
-    config = config_dir / "grid.toml"
-    config.write_text(toml, encoding="utf-8")
-    return config
+def _written(bot_folder: Path, toml: str) -> Path:
+    (bot_folder / "optimisation.toml").write_text(toml, encoding="utf-8")
+    return bot_folder

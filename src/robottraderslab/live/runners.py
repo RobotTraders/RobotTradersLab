@@ -17,6 +17,7 @@ from robottraderslab.bootstrap import (
     BotConfig,
     LiveConfig,
     SecretsByName,
+    bot_name,
     load_notifiers,
     load_ohlcv_provider,
     load_secrets,
@@ -40,7 +41,8 @@ def run_alone(config: Path, run: Callable[[], int]) -> int:
     with hold_instance_lock(config) as held:
         if not held:
             logger.warning(
-                "%s is already trading in another process, exiting", config.name
+                "%s is already trading in another process, exiting",
+                bot_name(config),
             )
             return EX_TEMPFAIL
         return run()

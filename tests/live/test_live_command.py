@@ -30,6 +30,9 @@ def bot_config() -> BotConfig:
 @pytest.fixture(autouse=True)
 def _workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
+    for name in ("bot-example", "my-folder"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "bot.toml").write_text("")
 
 
 @pytest.fixture(autouse=True)
@@ -67,14 +70,8 @@ def test_logging_falls_back_to_the_config_file(setup_logging):
         retention_days=60,
         custom_handlers={},
         config_dir=None,
-        log_name="live_bot-example",
+        log_name="live",
     )
-
-
-def test_the_default_log_is_named_after_the_bot_file(setup_logging):
-    _run(config=Path("impulse-bitget.toml"))
-
-    assert setup_logging.call_args.kwargs["log_name"] == "live_impulse-bitget"
 
 
 def test_the_given_logfile_wins_over_the_config_file(setup_logging):
@@ -108,10 +105,10 @@ def test_the_given_retention_wins_over_the_config_file(read_bot_config, setup_lo
     assert setup_logging.call_args.kwargs["retention_days"] == 3
 
 
-def test_the_config_comes_from_the_given_file(read_bot_config):
-    _run(config=Path("my-filename.toml"))
+def test_the_config_comes_from_the_bot_toml_of_the_given_folder(read_bot_config):
+    _run(folder=Path("my-folder"))
 
-    read_bot_config.assert_called_once_with(Path("my-filename.toml"))
+    read_bot_config.assert_called_once_with(Path("my-folder") / "bot.toml")
 
 
 def test_run_livebot_is_called_with_the_loaded_config(bot_config, run_livebot):
@@ -179,13 +176,16 @@ def test_a_completed_cycle(run_livebot):
 
 
 def test_a_config_already_trading_in_another_process(run_livebot, caplog, tmp_path):
-    with hold_instance_lock(Path("bot-example.toml")), caplog.at_level(logging.WARNING):
+    with (
+        hold_instance_lock(Path("bot-example") / "bot.toml"),
+        caplog.at_level(logging.WARNING),
+    ):
         exit_code = _run()
 
     assert exit_code == EX_TEMPFAIL
     run_livebot.assert_not_called()
-    assert "bot-example.toml is already trading in another process" in caplog.text
-    assert (tmp_path / ".rtlab" / "bot-example.lock").is_file()
+    assert "bot-example is already trading in another process" in caplog.text
+    assert (tmp_path / "bot-example" / ".rtlab" / "bot.lock").is_file()
 
 
 def test_the_next_cycle_after_a_crash(run_livebot):
@@ -200,7 +200,7 @@ def test_the_next_cycle_after_a_crash(run_livebot):
 
 def _run(**overrides: Any) -> int:
     arguments: dict[str, Any] = {
-        "config": Path("bot-example.toml"),
+        "folder": Path("bot-example"),
         "logfile_override": None,
         "console": False,
         "logfiles_retention_days": None,

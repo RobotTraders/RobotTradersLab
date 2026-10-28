@@ -1,4 +1,3 @@
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,18 +9,18 @@ from robottraderslab._core import OHLCVProviderProtocol
 from robottraderslab.analyser import Analyser
 from robottraderslab.bootstrap import BotConfig, ReportConfig
 from robottraderslab.exchanges import Balance, Currency
+from robottraderslab.reporting import timestamp_now
 
+from .backtest_logging import RUN_LOG_FILENAME
 from .simulator import EquitySnapshot
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
 class BacktestOutputs:
-    """What a backtest produced: closing balances, equity over time, and fills.
+    """What a backtest produced, ready to analyse.
 
-    The accessors turn those into the curves and the analyser a report is
-    built from.
+    `run_log` holds the run's log for a run `run_backtest` started, and is None
+    for any other.
     """
 
     final_balance: dict[Currency, float]
@@ -32,17 +31,19 @@ class BacktestOutputs:
     ohlcv_provider: OHLCVProviderProtocol
     bot_config: BotConfig | None = None
     config_dir: Path | None = None
+    run_log: str | None = None
 
     def create_analyser(self, save: bool = True) -> Analyser:
         """Build the analyser the performance report and the figures are
         read from.
 
         Args:
-            save: Write the run's folder under `reports/` beside the
-                configuration file: its configuration, its performance
-                report and one page drawing every configured market.
-                `plot_candlesticks` then opens the saved page without
-                rendering a new one. A run that closed no trade saves nothing.
+            save: Write the run's folder under `backtests/` in the bot's
+                folder: its configuration, its log as `backtest.log` when the
+                run recorded one, its performance report and, when the bot
+                declares profiles, one page drawing every configured market,
+                which `plot_candlesticks` then opens without rendering a new
+                one. A run that closed no trade saves nothing.
 
         Returns:
             The analyser, reading every summary metric at 0.0 for a run that
@@ -60,11 +61,18 @@ class BacktestOutputs:
             and analyser.closed_trades_count > 0
             and self.bot_config is not None
             and self.bot_config.config_file is not None
+            and self.bot_config.backtest is not None
         ):
             directory = analyser.save_run(
-                self.bot_config, self.bot_config.strategy.strategy_class
+                self.bot_config,
+                self.bot_config.strategy.strategy_class,
+                timestamp_now(),
+                self.bot_config.backtest.start_date,
             )
-            logger.info("Run saved to %s", directory)
+            if self.run_log is not None:
+                (directory / RUN_LOG_FILENAME).write_text(
+                    self.run_log, encoding="utf-8"
+                )
 
         return analyser
 

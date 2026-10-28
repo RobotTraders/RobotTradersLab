@@ -24,6 +24,7 @@ from robottraderslab.bootstrap import (
     BotConfig,
     LiveConfig,
     SecretsByName,
+    bot_file,
     load_secrets,
     load_single_account_with_exchange,
     load_single_exchange,
@@ -49,12 +50,12 @@ _VENUE_FILL_RETENTION = timedelta(days=90)
 _ONLY_PROFILES = "The account of `%s` holds only what its profiles own"
 
 
-def main(config: Path, symbol: str | None, external: bool) -> int:
+def main(folder: Path, symbol: str | None, external: bool) -> int:
     """Clear the bot's account, of all it carries or of what it never opened.
 
     Args:
-        config: The bot's configuration file, whose `[live.trading_account]`
-            names the account and whose secrets file holds its key.
+        folder: The bot's folder, whose `bot.toml` names the account in
+            `[live.trading_account]` and whose secrets file holds its key.
         symbol: Single symbol to flatten; every symbol is flattened when omitted.
         external: Close, on every symbol the bot's profiles declare, the
             quantity no profile of that bot owns, leaving every profile's own
@@ -75,13 +76,14 @@ def main(config: Path, symbol: str | None, external: bool) -> int:
         ExchangeCriticalError: If the account cannot be loaded.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    config = bot_file(folder)
     bot_config = BotConfig.from_file(config)
     live_config = require_live_config(bot_config)
     secrets_by_name = load_secrets(bot_config.secrets_file)
     return run_alone(
         config,
         lambda: _flatten_named(
-            bot_config, live_config, secrets_by_name, config.name, symbol, external
+            bot_config, live_config, secrets_by_name, symbol, external
         ),
     )
 
@@ -90,18 +92,22 @@ def _flatten_named(
     bot_config: BotConfig,
     live_config: LiveConfig,
     secrets_by_name: SecretsByName,
-    bot_name: str,
     symbol: str | None,
     external: bool,
 ) -> int:
     name_process(bot_config.name, datetime.now(UTC))
     if external:
         return run_async(
-            _flatten_external(bot_config, live_config, secrets_by_name, bot_name)
+            _flatten_external(bot_config, live_config, secrets_by_name, bot_config.name)
         )
     target_symbol = Symbol.create(symbol) if symbol is not None else None
     return run_async(
-        _flatten(live_config.trading_account, secrets_by_name, target_symbol, bot_name)
+        _flatten(
+            live_config.trading_account,
+            secrets_by_name,
+            target_symbol,
+            bot_config.name,
+        )
     )
 
 

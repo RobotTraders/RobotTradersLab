@@ -4,6 +4,7 @@ import pandas as pd
 
 from robottraderslab._core import BacktestReport, PerformanceReport
 from robottraderslab.bootstrap import BotConfig
+from robottraderslab.reporting import backtest_folder
 
 from .analysis_tables import build_reason_tables, build_symbol_analysis
 
@@ -21,13 +22,9 @@ def build_backtest_report(
     )
 
 
-def resolve_reports_dir(bot_config: BotConfig) -> Path:
-    """A bot declaring no directory of its own keeps its reports beside the
-    config that produced them, so a run started from anywhere writes to the
-    same place.
+def resolve_run_folder(bot_config: BotConfig, timestamp: str) -> Path:
+    """A run that logs into this folder opens it before the run starts, and the
+    reports complete it afterwards, so both name it from the same `timestamp`,
+    in the format `timestamp_now` gives.
     """
-    if bot_config.report.reports_dir is not None:
-        return bot_config.report.reports_dir
-    if bot_config.config_dir is not None:
-        return bot_config.config_dir / "reports"
-    return Path("reports")
+    return backtest_folder(bot_config.config_dir or Path(), timestamp)

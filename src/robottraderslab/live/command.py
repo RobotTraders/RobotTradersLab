@@ -5,6 +5,7 @@ from typing import Any
 from robottraderslab.bootstrap import (
     BotConfig,
     LiveConfig,
+    bot_file,
     load_log_handlers,
     load_secrets,
     report_unavailable_notifiers,
@@ -17,9 +18,11 @@ logger = logging.getLogger(__name__)
 
 type _CustomHandlers = dict[str, dict[str, Any]]
 
+_LIVE_LOG_NAME = "live"
+
 
 def main(
-    config: Path,
+    folder: Path,
     logfile_override: Path | None,
     console: bool,
     logfiles_retention_days: int | None,
@@ -36,6 +39,7 @@ def main(
         BotCriticalError: If the config is unusable.
         ExchangeCriticalError: If the venue cannot be traded on.
     """
+    config = bot_file(folder)
     bot_config = BotConfig.from_file(config)
     live_config = require_live_config(bot_config)
 
@@ -49,7 +53,6 @@ def main(
         console,
         logfiles_retention_days,
         handlers,
-        f"live_{config.stem}",
     )
     report_unavailable_notifiers(unavailable)
     return run_alone(config, lambda: _run(bot_config))
@@ -62,7 +65,6 @@ def _start_logging(
     console: bool,
     retention_days_override: int | None,
     custom_handlers: _CustomHandlers,
-    log_name: str,
 ) -> None:
     logging_config = live_config.logging
     setup_live_logging(
@@ -78,7 +80,7 @@ def _start_logging(
         ),
         custom_handlers=custom_handlers,
         config_dir=config_dir,
-        log_name=log_name,
+        log_name=_LIVE_LOG_NAME,
     )
 
 

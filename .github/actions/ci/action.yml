@@ -53,9 +53,9 @@ runs:
     - name: CI Smoke Test - Backtest
       shell: bash
       working-directory: ${{ inputs.directory }}
-      run: uv run rtlab backtest tests/ma_strategy/ci_smoke_test.toml --no-chart
+      run: uv run rtlab backtest tests/ma_strategy/ci_smoke_test --no-chart
 
     - name: CI Smoke Test - LiveBot
       shell: bash
       working-directory: ${{ inputs.directory }}
-      run: uv run rtlab live tests/ma_strategy/ci_smoke_test.toml
+      run: uv run rtlab live tests/ma_strategy/ci_smoke_test

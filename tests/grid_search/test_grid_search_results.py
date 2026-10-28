@@ -45,6 +45,16 @@ class TestGridSearchResults:
 
         assert pd.read_csv(exported)["error"].tolist() == [FAILURE]
 
+    def test_a_file_named_by_no_path_lands_under_the_bots_optimisations(self, tmp_path):
+        results = GridSearchResults.from_results(
+            [_scored(5, 20, closed_trades=12, roi=0.31)], config_dir=tmp_path
+        )
+
+        exported = results.to_csv()
+
+        assert exported.name == "results.csv"
+        assert exported.parent.parent == tmp_path / "optimisations"
+
     def test_a_point_that_scored_is_marked_by_no_error(self):
         results = GridSearchResults.from_results(
             [

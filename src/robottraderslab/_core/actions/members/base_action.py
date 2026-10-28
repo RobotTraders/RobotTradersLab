@@ -77,7 +77,7 @@ def name_process(bot_name: str, launched_at: datetime) -> None:
     running one instance at a time leaves to a run lasting less than a second.
 
     Args:
-        bot_name: The configuration's `name`.
+        bot_name: The bot's name, its folder's.
         launched_at: The moment the run starts.
     """
     global _order_id_prefix, _process_bot_bytes, _process_bot_segment
@@ -126,7 +126,7 @@ def bot_leading_bytes(bot_name: str) -> bytes:
     bot by these bytes.
 
     Args:
-        bot_name: The configuration's `name`.
+        bot_name: The bot's name, its folder's.
     """
     return _bot_digest(bot_name)[:_BOT_LEADING_BYTES]
 

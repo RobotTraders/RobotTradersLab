@@ -26,21 +26,22 @@ each with its install line.
 
 ```bash
 uv run rtlab scaffold --list
-uv run rtlab scaffold <example>
+uv run rtlab scaffold <example> <example>-bot-example
 ```
 
 The first line lists the examples the installed plugins ship; the second copies one into
-`workspace/<example>-bot-example/`. The folder holds the bot configuration file,
-`impulse-bot-example.toml` for the Impulse example, which declares the strategy and its
+`workspace/<example>-bot-example/`, the folder its last argument names. That folder is the
+bot: it holds `bot.toml`, the bot configuration file, which declares the strategy and its
 parameters, the markets and timeframes it trades, the dates a backtest covers and the
-account it trades live. A bot's log, its lock and the scheduler's lines carry the name of
-that file. Its keys are documented on the strategy's and the connector's pages at
-https://robottraders.io/lab.
+account it trades live. Every command takes the bot's folder, and what the bot produces
+lands inside it: `backtests/`, `reports/` and `logs/`. The bot's name, carried by its
+orders, its log and the scheduler's lines, is the folder's name. Its keys are documented
+on the strategy's and the connector's pages at https://robottraders.io/lab.
 
 ## Backtest
 
 ```bash
-uv run rtlab backtest workspace/<example>-bot-example/<bot>.toml --no-chart
+uv run rtlab backtest workspace/<example>-bot-example --no-chart
 ```
 
 Drop `--no-chart` to open the interactive chart of the run in a browser.
@@ -54,8 +55,8 @@ Follow the `writing-strategies` skill, which ships with the engine beside this f
 ## Live trading
 
 ```bash
-uv run rtlab live workspace/<example>-bot-example/<bot>.toml
+uv run rtlab live workspace/<example>-bot-example
 ```
 
-That places real orders on the live account the same configuration file declares, and
+That places real orders on the live account the same `bot.toml` declares, and
 spends the money in it. Run it only when the user has asked to trade live.

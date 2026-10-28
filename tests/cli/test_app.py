@@ -40,7 +40,7 @@ DISPATCHES = [
         "backtest",
         [
             "backtest",
-            "cfg.toml",
+            "my-bot",
             "--log-file",
             "run.log",
             "--console",
@@ -48,7 +48,7 @@ DISPATCHES = [
             "--no-save",
         ],
         {
-            "config": Path("cfg.toml"),
+            "folder": Path("my-bot"),
             "logfile_override": Path("run.log"),
             "console": True,
             "chart": False,
@@ -57,19 +57,19 @@ DISPATCHES = [
     ),
     (
         "flatten",
-        ["flatten", "cfg.toml", "BTC/USDT:USDT"],
-        {"config": Path("cfg.toml"), "symbol": "BTC/USDT:USDT", "external": False},
+        ["flatten", "my-bot", "BTC/USDT:USDT"],
+        {"folder": Path("my-bot"), "symbol": "BTC/USDT:USDT", "external": False},
     ),
     (
         "grid-search",
-        ["grid-search", "cfg.toml", "--output-csv", "scores.csv"],
-        {"config": Path("cfg.toml"), "output_csv": Path("scores.csv")},
+        ["grid-search", "my-bot", "--output-csv", "scores.csv"],
+        {"folder": Path("my-bot"), "output_csv": Path("scores.csv")},
     ),
     (
         "live",
-        ["live", "cfg.toml", "-l", "run.log", "--log-retention-days", "3"],
+        ["live", "my-bot", "-l", "run.log", "--log-retention-days", "3"],
         {
-            "config": Path("cfg.toml"),
+            "folder": Path("my-bot"),
             "logfile_override": Path("run.log"),
             "console": False,
             "logfiles_retention_days": 3,
@@ -77,8 +77,8 @@ DISPATCHES = [
     ),
     (
         "report",
-        ["report", "cfg.toml", "--days", "7"],
-        {"config": Path("cfg.toml"), "days": 7},
+        ["report", "my-bot", "--days", "7", "--no-save"],
+        {"folder": Path("my-bot"), "days": 7, "save": False},
     ),
     (
         "scheduler",
@@ -91,7 +91,7 @@ DEFAULTS = [
     (
         "backtest",
         {
-            "config": Path("bot-example.toml"),
+            "folder": Path("my-bot"),
             "logfile_override": None,
             "console": False,
             "chart": True,
@@ -101,14 +101,14 @@ DEFAULTS = [
     (
         "live",
         {
-            "config": Path("bot-example.toml"),
+            "folder": Path("my-bot"),
             "logfile_override": None,
             "console": False,
             "logfiles_retention_days": None,
         },
     ),
-    ("report", {"config": Path("bot-example.toml"), "days": 90}),
-    ("grid-search", {"config": Path("bot-example.toml"), "output_csv": None}),
+    ("report", {"folder": Path("my-bot"), "days": 90, "save": True}),
+    ("grid-search", {"folder": Path("my-bot"), "output_csv": None}),
 ]
 
 BOUNDARY_REPORTS = [
@@ -135,7 +135,7 @@ BOUNDARY_REPORTS = [
 
 WORKSPACE_COMMANDS = [
     ("init", ["init", "live"]),
-    ("scaffold", ["scaffold", "impulse"]),
+    ("scaffold", ["scaffold", "impulse", "first-bot"]),
     ("check", ["check", "impulse-example"]),
 ]
 
@@ -171,17 +171,17 @@ def test_command_parses_its_own_arguments(name, argv, expected, cli, replace_com
 
 
 @pytest.mark.parametrize(("name", "expected"), DEFAULTS)
-def test_command_run_with_the_config_alone(name, expected, cli, replace_command):
+def test_command_run_with_the_bot_folder_alone(name, expected, cli, replace_command):
     received: list[dict[str, Any]] = []
     replace_command(name, lambda **kwargs: received.append(kwargs))
 
-    cli.invoke(app, [name, "bot-example.toml"])
+    cli.invoke(app, [name, "my-bot"])
 
     assert received == [expected]
 
 
 @pytest.mark.parametrize("name", [name for name, _ in DEFAULTS])
-def test_command_requires_a_config(name, cli, replace_command):
+def test_command_requires_a_bot_folder(name, cli, replace_command):
     received: list[dict[str, Any]] = []
     replace_command(name, lambda **kwargs: received.append(kwargs))
 
@@ -271,19 +271,21 @@ def test_init_refuses_a_kind_of_run_it_does_not_lay_out(cli, replace_command):
 
 
 @pytest.mark.usefixtures("project")
-def test_scaffold_receives_the_example_name(cli, replace_command):
-    received: list[str | None] = []
-    replace_command("scaffold", lambda name, workspace: received.append(name))
+def test_scaffold_receives_the_example_and_the_folder(cli, replace_command):
+    received: list[tuple[str | None, Path | None]] = []
+    replace_command(
+        "scaffold", lambda name, folder, workspace: received.append((name, folder))
+    )
 
-    cli.invoke(app, ["scaffold", "impulse"])
+    cli.invoke(app, ["scaffold", "impulse", "first-bot"])
 
-    assert received == ["impulse"]
+    assert received == [("impulse", Path("first-bot"))]
 
 
 @pytest.mark.usefixtures("project")
 def test_scaffold_lists_the_installed_examples(cli, replace_command):
     received: list[str | None] = []
-    replace_command("scaffold", lambda name, workspace: received.append(name))
+    replace_command("scaffold", lambda name, folder, workspace: received.append(name))
 
     listed = cli.invoke(app, ["scaffold", "--list"])
 
@@ -353,6 +355,12 @@ def test_scaffold_requires_a_name_or_list_but_not_neither(cli):
     assert invoked.exit_code == 2
 
 
+def test_scaffold_requires_a_folder_with_its_name(cli):
+    invoked = cli.invoke(app, ["scaffold", "impulse"])
+
+    assert invoked.exit_code == 2
+
+
 def test_scaffold_requires_a_name_or_list_but_not_both(cli):
     invoked = cli.invoke(app, ["scaffold", "impulse", "--list"])
 
@@ -378,7 +386,7 @@ def test_the_scheduler_reporting_no_failed_bots(cli, replace_command):
 def test_a_live_instance_that_yielded_to_a_running_one(cli, replace_command):
     replace_command("live", lambda **kwargs: EX_TEMPFAIL)
 
-    invoked = cli.invoke(app, ["live", "cfg.toml"])
+    invoked = cli.invoke(app, ["live", "my-bot"])
 
     assert invoked.exit_code == EX_TEMPFAIL
 
@@ -387,28 +395,28 @@ def test_flatten_run_with_only_the_required_arguments(cli, replace_command):
     received: list[dict[str, Any]] = []
     replace_command("flatten", lambda **kwargs: received.append(kwargs))
 
-    cli.invoke(app, ["flatten", "cfg.toml", "--all"])
+    cli.invoke(app, ["flatten", "my-bot", "--all"])
 
-    assert received == [{"config": Path("cfg.toml"), "symbol": None, "external": False}]
+    assert received == [{"folder": Path("my-bot"), "symbol": None, "external": False}]
 
 
 def test_flatten_external_closes_what_no_profile_owns(cli, replace_command):
     received: list[dict[str, Any]] = []
     replace_command("flatten", lambda **kwargs: received.append(kwargs))
 
-    cli.invoke(app, ["flatten", "cfg.toml", "--external"])
+    cli.invoke(app, ["flatten", "my-bot", "--external"])
 
-    assert received == [{"config": Path("cfg.toml"), "symbol": None, "external": True}]
+    assert received == [{"folder": Path("my-bot"), "symbol": None, "external": True}]
 
 
 @pytest.mark.parametrize(
     "argv",
     [
-        ["flatten", "cfg.toml"],
-        ["flatten", "cfg.toml", "BTC/USDT:USDT", "--all"],
-        ["flatten", "cfg.toml", "BTC/USDT:USDT", "--external"],
-        ["flatten", "cfg.toml", "--all", "--external"],
-        ["flatten", "cfg.toml", "BTC/USDT:USDT", "--all", "--external"],
+        ["flatten", "my-bot"],
+        ["flatten", "my-bot", "BTC/USDT:USDT", "--all"],
+        ["flatten", "my-bot", "BTC/USDT:USDT", "--external"],
+        ["flatten", "my-bot", "--all", "--external"],
+        ["flatten", "my-bot", "BTC/USDT:USDT", "--all", "--external"],
     ],
     ids=["none", "symbol and all", "symbol and external", "all and external", "three"],
 )
@@ -422,7 +430,7 @@ def test_flatten_takes_exactly_one_of_its_three_forms(argv, cli):
 def test_the_flatten_command_reporting_leftovers(cli, replace_command):
     replace_command("flatten", lambda **kwargs: 1)
 
-    invoked = cli.invoke(app, ["flatten", "cfg.toml", "--all"])
+    invoked = cli.invoke(app, ["flatten", "my-bot", "--all"])
 
     assert invoked.exit_code == 1
 
@@ -430,7 +438,7 @@ def test_the_flatten_command_reporting_leftovers(cli, replace_command):
 def test_the_flatten_command_reporting_a_flat_account(cli, replace_command):
     replace_command("flatten", lambda **kwargs: 0)
 
-    invoked = cli.invoke(app, ["flatten", "cfg.toml", "--all"])
+    invoked = cli.invoke(app, ["flatten", "my-bot", "--all"])
 
     assert invoked.exit_code == 0
 
@@ -446,7 +454,7 @@ def test_live_help_states_it_places_real_orders(cli):
 
     normalized = " ".join(help_text.split())
     assert (
-        "placing real orders on the accounts the configuration file declares"
+        "placing real orders on the accounts the bot's `bot.toml` declares"
         in normalized
     )
 
@@ -458,7 +466,7 @@ def test_version_reports_the_installed_distribution(cli):
 
 
 def test_unknown_command(cli):
-    attempted = cli.invoke(app, ["deploy", "cfg.toml"])
+    attempted = cli.invoke(app, ["deploy", "my-bot"])
 
     assert attempted.exit_code == 2
 
@@ -470,7 +478,7 @@ def test_what_stops_the_engine_is_recorded(
     failure, reported, level, exit_code, monkeypatch, caplog, replace_command
 ):
     replace_command("live", _raising(failure))
-    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
+    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "my-bot"])
     monkeypatch.setattr(logging, "shutdown", lambda: None)
 
     with caplog.at_level(logging.ERROR), pytest.raises(SystemExit) as exc_info:
@@ -490,7 +498,7 @@ def test_logging_is_flushed_after_a_fatal_error_escapes(monkeypatch, replace_com
         raise RuntimeError("unexpected failure")
 
     replace_command("live", failing)
-    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
+    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "my-bot"])
     monkeypatch.setattr(logging, "shutdown", lambda: events.append("flushed"))
 
     with pytest.raises(SystemExit):
@@ -507,7 +515,7 @@ def test_logging_is_flushed_after_a_command_completes(monkeypatch, replace_comma
         return 0
 
     replace_command("live", completing)
-    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
+    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "my-bot"])
     monkeypatch.setattr(logging, "shutdown", lambda: events.append("flushed"))
 
     with pytest.raises(SystemExit) as exc_info:
@@ -524,7 +532,7 @@ def test_the_terminal_gets_one_sentence_naming_the_cause(
         "cannot load the configured notifiers: no plugin named 'discrod'"
     )
     replace_command("live", _raising(failure))
-    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "cfg.toml"])
+    monkeypatch.setattr(sys, "argv", ["rtlab", "live", "my-bot"])
 
     with pytest.raises(SystemExit):
         main()
@@ -539,7 +547,7 @@ def test_the_terminal_gets_the_traceback_when_asked(
     monkeypatch, capsys, replace_command
 ):
     replace_command("live", _raising(RuntimeError("unexpected failure")))
-    monkeypatch.setattr(sys, "argv", ["rtlab", "--debug", "live", "cfg.toml"])
+    monkeypatch.setattr(sys, "argv", ["rtlab", "--debug", "live", "my-bot"])
 
     with pytest.raises(SystemExit):
         main()
@@ -558,7 +566,7 @@ def _raising(failure: Exception) -> Callable[..., None]:
 def test_an_example_the_workspace_cannot_be_given(cli, replace_command):
     replace_command("scaffold", _raising(ExampleError("No example named 'ghost'")))
 
-    refused = cli.invoke(app, ["scaffold", "ghost"])
+    refused = cli.invoke(app, ["scaffold", "ghost", "first-bot"])
 
     assert refused.exit_code == 1
     assert "No example named 'ghost'" in refused.stderr
@@ -592,7 +600,7 @@ def test_a_second_live_instance_on_a_locked_config(tmp_path):
 
     with hold_instance_lock(config):
         completed = subprocess.run(
-            [sys.executable, "-m", "robottraderslab", "live", str(config)],
+            [sys.executable, "-m", "robottraderslab", "live", str(config.parent)],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -600,8 +608,8 @@ def test_a_second_live_instance_on_a_locked_config(tmp_path):
         )
 
     assert completed.returncode == EX_TEMPFAIL
-    assert "bot.toml is already trading in another process" in (
-        (tmp_path / "logs" / "live_bot.log").read_text(encoding="utf-8")
+    assert f"{tmp_path.name} is already trading in another process" in (
+        (tmp_path / "logs" / "live.log").read_text(encoding="utf-8")
     )
     assert (tmp_path / ".rtlab" / "bot.lock").is_file()
 
@@ -611,7 +619,7 @@ def test_a_live_config_that_cannot_be_parsed(tmp_path):
     config.write_text("[[bot]\n")
 
     completed = subprocess.run(
-        [sys.executable, "-m", "robottraderslab", "live", str(config)],
+        [sys.executable, "-m", "robottraderslab", "live", str(config.parent)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -620,6 +628,23 @@ def test_a_live_config_that_cannot_be_parsed(tmp_path):
 
     assert completed.returncode == EX_DATAERR
     assert "bot.toml` is not valid TOML" in completed.stderr
+
+
+def test_a_sweep_named_by_its_file_is_refused_before_any_log(tmp_path):
+    sweep = tmp_path / "optimisation.toml"
+    sweep.write_text("", encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "robottraderslab", "grid-search", str(sweep)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert completed.returncode == EX_DATAERR
+    assert f"pass its folder, `{tmp_path}`" in completed.stderr
+    assert "Traceback" not in completed.stdout
 
 
 BACKTEST_CSV_MISSING_KEYS_CONFIG = """
@@ -649,7 +674,7 @@ def test_a_backtest_ohlcv_provider_table_missing_its_keys(tmp_path):
             "-m",
             "robottraderslab",
             "backtest",
-            str(config),
+            str(config.parent),
             "--no-chart",
         ],
         capture_output=True,

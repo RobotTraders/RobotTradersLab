@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from robottraderslab._core import (
@@ -17,22 +18,45 @@ from robottraderslab.bootstrap import (
 from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.strategies import TradingMode, TradingSystem
 
+from .backtest_logging import recorded_log
 from .backtest_outputs import BacktestOutputs
 from .backtester import Backtester
 
 _STRATEGY_ENTRY_POINT_GROUP = "robot_traders_lab.strategies"
 
 
-def run_backtest(bot_config: BotConfig) -> BacktestOutputs:
+def run_backtest(bot_config: BotConfig, record_log: bool = True) -> BacktestOutputs:
     """Replay the configured strategy over history, simulating every fill.
 
+    Args:
+        bot_config: The bot whose `[backtest]` section is replayed.
+        record_log: Whether the run's log is held for its run folder; False
+            replays without holding it, for a caller that sets up the run's
+            logging itself.
+
     Returns:
-        The run's balances, equity snapshots and fills, ready to analyse.
+        The run's balances, equity snapshots, fills and log, ready to analyse.
+        `run_log` holds the records from `[backtest.logging]`'s `file_level`
+        up, and is None when `record_log` or its `enable_file` is false.
 
     Raises:
-        BotCriticalError: If the bot declares no `[backtest]` section.
+        BotCriticalError: If the bot declares no `[backtest]` section, or its
+            strategy or its OHLCV provider refuses its configuration.
+        ExchangeCriticalError: If the venue an exchange-backed
+            `[backtest.ohlcv_provider]` reads from is unusable.
     """
+    if not record_log:
+        return _replay(bot_config)
     auto_configure_notebook_logging()
+    logging_config = require_backtest_config(bot_config).logging
+    if not logging_config.enable_file:
+        return _replay(bot_config)
+    with recorded_log(logging_config.file_level) as log_stream:
+        outputs = _replay(bot_config)
+    return replace(outputs, run_log=log_stream.getvalue())
+
+
+def _replay(bot_config: BotConfig) -> BacktestOutputs:
     name_process(bot_config.name, datetime.now(UTC))
     backtest_config = require_backtest_config(bot_config)
     config_dir = bot_config.config_dir

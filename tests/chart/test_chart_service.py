@@ -164,6 +164,7 @@ def _write_report(
         "trades_df": trades,
         "destination": destination,
         "run_label": "test-bot · 2026-09-20_12-04-33",
+        "start_date": "2024-01-01",
     }
     arguments.update(overrides)
     return service.write_report(**arguments)
@@ -548,6 +549,28 @@ class TestWindowing:
         written = _open(service, tmp_path, start_date="2024-01-02")
 
         assert len(_market(read_payload(written))["candles"]) == 2
+
+    def test_a_report_page_from_its_start_date_clips_candles_and_equity(
+        self, service, tmp_path, profiles, read_payload
+    ):
+        equity = pd.Series(
+            [1000.0, 1010.0, 1020.0], index=pd.date_range("2024-01-01", periods=3)
+        )
+
+        written = _write_report(
+            service,
+            tmp_path / "report.html",
+            profiles,
+            _NO_TRADES,
+            equity_curve=equity,
+            drawdown_curve=equity * 0,
+            start_date="2024-01-03",
+        )
+
+        payload = read_payload(written)
+        assert len(_market(payload)["candles"]) == 1
+        assert [value for _, value in payload["equity"]] == [1020.0]
+        assert len(payload["drawdown"]) == 1
 
     def test_the_end_date_clips_the_candles(self, service, tmp_path, read_payload):
         written = _open(service, tmp_path, end_date="2024-01-02")
