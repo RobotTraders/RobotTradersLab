@@ -29,7 +29,7 @@ def lay_out_workspace(root: Path) -> list[Path]:
 def mark_workspace(root: Path) -> None:
     """The workspace's `.gitignore` keeps what the engine writes and the
     secrets file out of a commit, and is written once so the user's own lines
-    survive every later scaffold.
+    survive every later `rtlab init` or `rtlab new`.
     """
     mark_root(root)
     gitignore = root / _GITIGNORE_NAME

@@ -31,7 +31,7 @@ COMMAND_SUBPACKAGES = {
     "init": "robottraderslab.scaffold.workspace",
     "live": "robottraderslab.live",
     "report": "robottraderslab.live.report",
-    "scaffold": "robottraderslab.scaffold",
+    "new": "robottraderslab.scaffold",
     "scheduler": "robottraderslab.scheduler",
 }
 
@@ -135,7 +135,7 @@ BOUNDARY_REPORTS = [
 
 WORKSPACE_COMMANDS = [
     ("init", ["init", "live"]),
-    ("scaffold", ["scaffold", "impulse", "first-bot"]),
+    ("new", ["new", "impulse", "first-bot"]),
     ("check", ["check", "impulse-example"]),
 ]
 
@@ -271,23 +271,23 @@ def test_init_refuses_a_kind_of_run_it_does_not_lay_out(cli, replace_command):
 
 
 @pytest.mark.usefixtures("project")
-def test_scaffold_receives_the_example_and_the_folder(cli, replace_command):
+def test_new_receives_the_example_and_the_folder(cli, replace_command):
     received: list[tuple[str | None, Path | None]] = []
     replace_command(
-        "scaffold", lambda name, folder, workspace: received.append((name, folder))
+        "new", lambda name, folder, workspace: received.append((name, folder))
     )
 
-    cli.invoke(app, ["scaffold", "impulse", "first-bot"])
+    cli.invoke(app, ["new", "impulse", "first-bot"])
 
     assert received == [("impulse", Path("first-bot"))]
 
 
 @pytest.mark.usefixtures("project")
-def test_scaffold_lists_the_installed_examples(cli, replace_command):
+def test_new_lists_the_installed_examples(cli, replace_command):
     received: list[str | None] = []
-    replace_command("scaffold", lambda name, folder, workspace: received.append(name))
+    replace_command("new", lambda name, folder, workspace: received.append(name))
 
-    listed = cli.invoke(app, ["scaffold", "--list"])
+    listed = cli.invoke(app, ["new", "--list"])
 
     assert listed.exit_code == 0
     assert received == [None]
@@ -349,20 +349,20 @@ def test_a_command_outside_any_project_is_refused(argv, cli, tmp_path, monkeypat
     assert list(tmp_path.iterdir()) == []
 
 
-def test_scaffold_requires_a_name_or_list_but_not_neither(cli):
-    invoked = cli.invoke(app, ["scaffold"])
+def test_new_requires_a_name_or_list_but_not_neither(cli):
+    invoked = cli.invoke(app, ["new"])
 
     assert invoked.exit_code == 2
 
 
-def test_scaffold_requires_a_folder_with_its_name(cli):
-    invoked = cli.invoke(app, ["scaffold", "impulse"])
+def test_new_requires_a_folder_with_its_name(cli):
+    invoked = cli.invoke(app, ["new", "impulse"])
 
     assert invoked.exit_code == 2
 
 
-def test_scaffold_requires_a_name_or_list_but_not_both(cli):
-    invoked = cli.invoke(app, ["scaffold", "impulse", "--list"])
+def test_new_requires_a_name_or_list_but_not_both(cli):
+    invoked = cli.invoke(app, ["new", "impulse", "--list"])
 
     assert invoked.exit_code == 2
 
@@ -564,9 +564,9 @@ def _raising(failure: Exception) -> Callable[..., None]:
 
 @pytest.mark.usefixtures("project")
 def test_an_example_the_workspace_cannot_be_given(cli, replace_command):
-    replace_command("scaffold", _raising(ExampleError("No example named 'ghost'")))
+    replace_command("new", _raising(ExampleError("No example named 'ghost'")))
 
-    refused = cli.invoke(app, ["scaffold", "ghost", "first-bot"])
+    refused = cli.invoke(app, ["new", "ghost", "first-bot"])
 
     assert refused.exit_code == 1
     assert "No example named 'ghost'" in refused.stderr
@@ -631,7 +631,7 @@ def test_a_live_config_that_cannot_be_parsed(tmp_path):
 
 
 def test_a_sweep_named_by_its_file_is_refused_before_any_log(tmp_path):
-    sweep = tmp_path / "optimisation.toml"
+    sweep = tmp_path / "grid-search.toml"
     sweep.write_text("", encoding="utf-8")
 
     completed = subprocess.run(

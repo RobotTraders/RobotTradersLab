@@ -159,7 +159,7 @@ workspace/*
 # What a bot writes in its folder
 backtests/
 reports/
-optimisations/
+grid-searches/
 logs/
 
 # Don't commit your secrets :)

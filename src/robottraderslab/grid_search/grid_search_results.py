@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from robottraderslab.reporting import optimisation_folder, timestamp_now
+from robottraderslab.reporting import grid_search_folder, timestamp_now
 
 from .optimisation_result import SUMMARY_METRICS, OptimisationResult
 
@@ -87,7 +87,7 @@ class GridSearchResults:
         """Write the scored combinations to a CSV file.
 
         Args:
-            path: Defaults to `optimisations/<moment>/results.csv` under
+            path: Defaults to `grid-searches/<moment>/results.csv` under
                 `config_dir`, or under the working directory when the results
                 carry none.
 
@@ -95,7 +95,7 @@ class GridSearchResults:
             The file written, which `from_csv` reads back.
         """
         if path is None:
-            folder = optimisation_folder(self._config_dir or Path(), timestamp_now())
+            folder = grid_search_folder(self._config_dir or Path(), timestamp_now())
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / _RESULTS_FILENAME
         else:

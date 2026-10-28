@@ -10,7 +10,7 @@ from .summaries import write_performance_summary, write_trades_summary
 _REPORT_FILENAME = "report.txt"
 _BACKTESTS_DIR_NAME = "backtests"
 _REPORTS_DIR_NAME = "reports"
-_OPTIMISATIONS_DIR_NAME = "optimisations"
+_GRID_SEARCHES_DIR_NAME = "grid-searches"
 
 
 def timestamp_now() -> str:
@@ -22,8 +22,8 @@ def backtest_folder(bot_folder: Path, timestamp: str) -> Path:
     return bot_folder / _BACKTESTS_DIR_NAME / timestamp
 
 
-def optimisation_folder(bot_folder: Path, timestamp: str) -> Path:
-    return bot_folder / _OPTIMISATIONS_DIR_NAME / timestamp
+def grid_search_folder(bot_folder: Path, timestamp: str) -> Path:
+    return bot_folder / _GRID_SEARCHES_DIR_NAME / timestamp
 
 
 def report_folder(bot_folder: Path, timestamp: str) -> Path:

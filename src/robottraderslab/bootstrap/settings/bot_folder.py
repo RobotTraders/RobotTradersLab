@@ -3,7 +3,7 @@ from pathlib import Path
 from robottraderslab.exceptions import BotCriticalError
 
 _BOT_FILE_NAME = "bot.toml"
-_OPTIMISATION_FILE_NAME = "optimisation.toml"
+_GRID_SEARCH_FILE_NAME = "grid-search.toml"
 _TOML_SUFFIX = ".toml"
 
 
@@ -18,14 +18,14 @@ def bot_file(folder: Path) -> Path:
     return _file_in(folder, _BOT_FILE_NAME)
 
 
-def optimisation_file(folder: Path) -> Path:
-    """A bot's parameter sweep sits beside its `bot.toml` under a fixed name.
+def grid_search_file(folder: Path) -> Path:
+    """A bot's grid search sits beside its `bot.toml` under a fixed name.
 
     Raises:
         BotCriticalError: If the path is a file, or the folder holds no
-            `optimisation.toml`.
+            `grid-search.toml`.
     """
-    return _file_in(folder, _OPTIMISATION_FILE_NAME)
+    return _file_in(folder, _GRID_SEARCH_FILE_NAME)
 
 
 def bot_name(config_file: Path) -> str:

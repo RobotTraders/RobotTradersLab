@@ -11,8 +11,8 @@ FAILURE = "ProfileConfig.__init__() got an unexpected keyword argument '0'"
 def _point(fast: int, slow: int) -> GridPoint:
     return GridPoint(
         parameters={
-            "strategy.profiles.fast_ma_length": fast,
-            "strategy.profiles.slow_ma_length": slow,
+            "fast_ma_length": fast,
+            "slow_ma_length": slow,
         }
     )
 
@@ -45,7 +45,7 @@ class TestGridSearchResults:
 
         assert pd.read_csv(exported)["error"].tolist() == [FAILURE]
 
-    def test_a_file_named_by_no_path_lands_under_the_bots_optimisations(self, tmp_path):
+    def test_a_file_named_by_no_path_lands_under_the_bots_grid_searches(self, tmp_path):
         results = GridSearchResults.from_results(
             [_scored(5, 20, closed_trades=12, roi=0.31)], config_dir=tmp_path
         )
@@ -53,7 +53,7 @@ class TestGridSearchResults:
         exported = results.to_csv()
 
         assert exported.name == "results.csv"
-        assert exported.parent.parent == tmp_path / "optimisations"
+        assert exported.parent.parent == tmp_path / "grid-searches"
 
     def test_a_point_that_scored_is_marked_by_no_error(self):
         results = GridSearchResults.from_results(
@@ -85,17 +85,17 @@ class TestGridSearchResults:
         loaded = GridSearchResults.from_csv(exported)
 
         assert list(loaded.dataframe.columns)[:2] == [
-            "strategy.profiles.fast_ma_length",
-            "strategy.profiles.slow_ma_length",
+            "fast_ma_length",
+            "slow_ma_length",
         ]
         assert loaded.dataframe["error"].isna().tolist() == [True, False]
 
     @pytest.mark.parametrize(
         ("content", "named"),
         [
-            ("strategy.profiles.fast_ma_length,roi\n10,0.95\n", "`error`"),
+            ("fast_ma_length,roi\n10,0.95\n", "`error`"),
             (
-                "strategy.profiles.fast_ma_length,strategy.profiles.slow_ma_length,"
+                "fast_ma_length,slow_ma_length,"
                 "roi,win_rate,max_drawdown,risk_reward_ratio,sharpe_ratio,"
                 "closed_trades,error\n10,20,0.95,0.5,-0.2,1.5,1.8,12,\n",
                 "`sortino_ratio`, `calmar_ratio`",
@@ -116,7 +116,7 @@ class TestGridSearchResults:
     def test_a_file_holding_one_parameter_column_names_it(self, tmp_path):
         one_parameter = tmp_path / "one_parameter_results.csv"
         one_parameter.write_text(
-            "strategy.profiles.fast_ma_length,roi,win_rate,max_drawdown,"
+            "fast_ma_length,roi,win_rate,max_drawdown,"
             "risk_reward_ratio,sharpe_ratio,sortino_ratio,calmar_ratio,"
             "closed_trades,error\n10,0.95,0.5,-0.2,1.5,1.8,2.4,3.1,12,\n",
             encoding="utf-8",

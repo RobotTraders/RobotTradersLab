@@ -26,7 +26,7 @@ class TestGridGeneratorValidation:
 
         with pytest.raises(
             BotCriticalError,
-            match=r"`\[optimisation\]` declares 1\.",
+            match=r"`grid-search.toml` declares 1\.",
         ):
             _generate_grid(params)
 
@@ -60,7 +60,7 @@ class TestGridGeneratorValidation:
 
         with pytest.raises(
             BotCriticalError,
-            match=r"`\[optimisation\]` declares 3\..*`\[strategy\]`",
+            match=r"`grid-search.toml` declares 3\..*`bot.toml`",
         ):
             _generate_grid(params)
 

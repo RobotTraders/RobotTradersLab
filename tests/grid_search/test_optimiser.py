@@ -9,6 +9,7 @@ from robottraderslab import BacktestOutputs
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.exceptions import BotCriticalError
 from robottraderslab.grid_search.grid_point import GridPoint
+from robottraderslab.grid_search.optimisation_config import OptimisationConfig
 from robottraderslab.grid_search.optimisation_result import OptimisationResult
 from robottraderslab.grid_search.optimiser import (
     GridSearchOptimiser,
@@ -18,53 +19,61 @@ from robottraderslab.grid_search.optimiser import (
 )
 
 
+def _optimiser(declared: dict[str, Any]) -> GridSearchOptimiser:
+    """A bot and the grid search beside it, from one declaration of both."""
+    bot = dict(declared)
+    search = bot.pop("optimisation")
+    return GridSearchOptimiser(
+        BotConfig.model_validate(bot), OptimisationConfig.from_config(search)
+    )
+
+
 class TestGridSearchOptimiser:
     @pytest.fixture
-    def mock_bot_config(self) -> BotConfig:
-        return BotConfig.model_validate(
-            {
-                "name": "test-bot",
-                "strategy": {
-                    "strategy_class": "impulse",
-                    "profiles": [
-                        {
-                            "symbol": "BTC/USDT:USDT",
-                            "timeframe": "5m",
-                            "total_balance_ratio": 1.0,
-                            "param1": 0.0,
-                            "param2": 0.0,
-                        }
-                    ],
-                },
-                "backtest": {
-                    "initial_balance": {"USDT": 1000.0},
-                    "maker_fee_rate": 0.0,
-                    "taker_fee_rate": 0.0,
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-01-02",
-                    "ohlcv_provider": {},
-                },
-                "optimisation": {
-                    "parameter_configs": [
-                        {
-                            "parameter": "strategy.profiles.param1",
-                            "sampling": "linear",
-                            "min": 5.0,
-                            "max": 10.0,
-                            "num_samples": 2,
-                        },
-                        {
-                            "parameter": "strategy.profiles.param2",
-                            "sampling": "linear",
-                            "min": 10.0,
-                            "max": 20.0,
-                            "num_samples": 2,
-                        },
-                    ],
-                    "max_workers": 1,
-                },
-            }
-        )
+    def mock_bot_config(self) -> dict[str, Any]:
+        return {
+            "name": "test-bot",
+            "strategy": {
+                "strategy_class": "impulse",
+                "profiles": [
+                    {
+                        "symbol": "BTC/USDT:USDT",
+                        "timeframe": "5m",
+                        "total_balance_ratio": 1.0,
+                        "param1": 0.0,
+                        "param2": 0.0,
+                    }
+                ],
+            },
+            "backtest": {
+                "initial_balance": {"USDT": 1000.0},
+                "maker_fee_rate": 0.0,
+                "taker_fee_rate": 0.0,
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-02",
+                "ohlcv_provider": {},
+            },
+            "optimisation": {
+                "profile": {"symbol": "BTC/USDT:USDT"},
+                "parameter_configs": [
+                    {
+                        "parameter": "param1",
+                        "sampling": "linear",
+                        "min": 5.0,
+                        "max": 10.0,
+                        "num_samples": 2,
+                    },
+                    {
+                        "parameter": "param2",
+                        "sampling": "linear",
+                        "min": 10.0,
+                        "max": 20.0,
+                        "num_samples": 2,
+                    },
+                ],
+                "max_workers": 1,
+            },
+        }
 
     @pytest.fixture
     def mock_backtest_outputs(self):
@@ -91,10 +100,10 @@ class TestGridSearchOptimiser:
         return outputs
 
     def test_initializes_with_bot_config(self, mock_bot_config):
-        optimiser = GridSearchOptimiser(mock_bot_config)
+        optimiser = _optimiser(mock_bot_config)
 
-        assert optimiser._bot_config == mock_bot_config
-        assert optimiser._optimisation_config is not None
+        assert optimiser._bot_config.name == "test-bot"
+        assert len(optimiser._optimisation_config.parameter_configs) == 2
 
     def test_run_evaluates_all_grid_points(
         self, mock_bot_config, mock_backtest_outputs
@@ -121,7 +130,7 @@ class TestGridSearchOptimiser:
 
                 mock_from_backtest.side_effect = create_result
 
-                optimiser = GridSearchOptimiser(mock_bot_config)
+                optimiser = _optimiser(mock_bot_config)
                 results = optimiser.run()
 
                 assert len(results) == 4
@@ -137,7 +146,7 @@ class TestGridSearchOptimiser:
         ) as mock_run_backtest:
             mock_run_backtest.side_effect = Exception("Backtest failed")
 
-            optimiser = GridSearchOptimiser(mock_bot_config)
+            optimiser = _optimiser(mock_bot_config)
             results = optimiser.run()
 
             assert len(results) == 4
@@ -154,7 +163,7 @@ class TestGridSearchOptimiser:
             ),
             pytest.raises(BotCriticalError, match="no candles declared"),
         ):
-            GridSearchOptimiser(mock_bot_config).run()
+            _optimiser(mock_bot_config).run()
 
     def test_run_handles_partial_failures(self, mock_bot_config, mock_backtest_outputs):
         call_count = 0
@@ -187,7 +196,7 @@ class TestGridSearchOptimiser:
             ) as mock_from_backtest:
                 mock_from_backtest.side_effect = create_result
 
-                optimiser = GridSearchOptimiser(mock_bot_config)
+                optimiser = _optimiser(mock_bot_config)
                 results = optimiser.run()
 
                 assert len(results) == 4
@@ -224,18 +233,18 @@ class TestGridSearchOptimiser:
         }
         grid_point = GridPoint(
             parameters={
-                "strategy.profiles.param1": 5,
-                "strategy.profiles.param2": 10,
+                "param1": 5,
+                "param2": 10,
             }
         )
 
-        bot_config = _apply_grid_point_to_config(config_dict, grid_point)
+        bot_config = _apply_grid_point_to_config(config_dict, 0, grid_point)
 
         profile = bot_config.strategy.profiles[0]
         assert profile["param1"] == 5
         assert profile["param2"] == 10
 
-    def test_apply_grid_point_updates_all_profiles(self):
+    def test_apply_grid_point_patches_the_selected_profile_alone(self):
         config_dict = {
             "backtest": {
                 "initial_balance": {"USDT": 1000.0},
@@ -266,18 +275,62 @@ class TestGridSearchOptimiser:
         }
         grid_point = GridPoint(
             parameters={
-                "strategy.profiles.param1": 7,
-                "strategy.profiles.param2": 15,
+                "param1": 7,
+                "param2": 15,
             }
         )
 
-        bot_config = _apply_grid_point_to_config(config_dict, grid_point)
+        bot_config = _apply_grid_point_to_config(config_dict, 1, grid_point)
 
-        profiles = bot_config.strategy.profiles
-        assert len(profiles) == 2
-        for profile in profiles:
-            assert profile["param1"] == 7
-            assert profile["param2"] == 15
+        first, second = bot_config.strategy.profiles
+        assert (first["param1"], first["param2"]) == (0.0, 0.0)
+        assert (second["param1"], second["param2"]) == (7, 15)
+
+    def test_a_profile_matching_none_stops_the_sweep_before_any_backtest(
+        self, mock_bot_config
+    ):
+        declared = {
+            **mock_bot_config,
+            "optimisation": {
+                **mock_bot_config["optimisation"],
+                "profile": {"symbol": "SOL/USDT:USDT"},
+            },
+        }
+
+        with patch(
+            "robottraderslab.grid_search.optimiser.run_backtest"
+        ) as mock_run_backtest:
+            with pytest.raises(BotCriticalError, match="matches no profile"):
+                _optimiser(declared).run()
+
+        mock_run_backtest.assert_not_called()
+
+    def test_a_profile_matching_several_stops_the_sweep_before_any_backtest(
+        self, mock_bot_config
+    ):
+        mock_bot_config["strategy"]["profiles"].append(
+            {**mock_bot_config["strategy"]["profiles"][0], "tag": "beta"}
+        )
+
+        with patch(
+            "robottraderslab.grid_search.optimiser.run_backtest"
+        ) as mock_run_backtest:
+            with pytest.raises(BotCriticalError, match="matches more than one"):
+                _optimiser(mock_bot_config).run()
+
+        mock_run_backtest.assert_not_called()
+
+    def test_the_profile_is_selected_once_per_search(self, mock_bot_config):
+        with (
+            patch("robottraderslab.grid_search.optimiser.run_backtest"),
+            patch(
+                "robottraderslab.grid_search.optimisation_config.ProfileSelector.index_in",
+                return_value=0,
+            ) as selected,
+        ):
+            _optimiser(mock_bot_config).run()
+
+        selected.assert_called_once()
 
     def test_results_contain_grid_point_parameters(
         self, mock_bot_config, mock_backtest_outputs
@@ -287,28 +340,22 @@ class TestGridSearchOptimiser:
         ) as mock_run_backtest:
             mock_run_backtest.return_value = mock_backtest_outputs
 
-            optimiser = GridSearchOptimiser(mock_bot_config)
+            optimiser = _optimiser(mock_bot_config)
             results = optimiser.run()
 
             expected_param1_values = [5.0, 10.0]
             expected_param2_values = [10.0, 20.0]
 
             for result in results:
-                assert (
-                    result.parameters["strategy.profiles.param1"]
-                    in expected_param1_values
-                )
-                assert (
-                    result.parameters["strategy.profiles.param2"]
-                    in expected_param2_values
-                )
+                assert result.parameters["param1"] in expected_param1_values
+                assert result.parameters["param2"] in expected_param2_values
 
             param_combinations = set()
             for result in results:
                 param_combinations.add(
                     (
-                        result.parameters["strategy.profiles.param1"],
-                        result.parameters["strategy.profiles.param2"],
+                        result.parameters["param1"],
+                        result.parameters["param2"],
                     )
                 )
 
@@ -328,43 +375,42 @@ class TestDottedPathFeature:
             risk_reward_ratio=2.0,
         )
 
-    def test_sets_values_in_all_list_items(self, mock_result):
-        bot_config = BotConfig.model_validate(
-            {
-                "name": "test-bot",
-                "strategy": {
-                    "strategy_class": "impulse",
-                    "profiles": [
-                        {"symbol": "BTC/USDT:USDT", "param1": 0, "param2": 0},
-                        {"symbol": "ETH/USDT:USDT", "param1": 0, "param2": 0},
-                        {"symbol": "SOL/USDT:USDT", "param1": 0, "param2": 0},
-                    ],
-                },
-                "backtest": {
-                    "initial_balance": {"USDT": 1000.0},
-                    "maker_fee_rate": 0.0,
-                    "taker_fee_rate": 0.0,
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-01-02",
-                    "ohlcv_provider": {},
-                },
-                "optimisation": {
-                    "parameter_configs": [
-                        {
-                            "parameter": "strategy.profiles.param1",
-                            "sampling": "explicit",
-                            "values": [10.0, 20.0],
-                        },
-                        {
-                            "parameter": "strategy.profiles.param2",
-                            "sampling": "explicit",
-                            "values": [30.0, 40.0],
-                        },
-                    ],
-                    "max_workers": 1,
-                },
-            }
-        )
+    def test_sets_values_in_the_selected_profile_only(self, mock_result):
+        declared = {
+            "name": "test-bot",
+            "strategy": {
+                "strategy_class": "impulse",
+                "profiles": [
+                    {"symbol": "BTC/USDT:USDT", "param1": 0, "param2": 0},
+                    {"symbol": "ETH/USDT:USDT", "param1": 0, "param2": 0},
+                    {"symbol": "SOL/USDT:USDT", "param1": 0, "param2": 0},
+                ],
+            },
+            "backtest": {
+                "initial_balance": {"USDT": 1000.0},
+                "maker_fee_rate": 0.0,
+                "taker_fee_rate": 0.0,
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-02",
+                "ohlcv_provider": {},
+            },
+            "optimisation": {
+                "profile": {"symbol": "ETH/USDT:USDT"},
+                "parameter_configs": [
+                    {
+                        "parameter": "param1",
+                        "sampling": "explicit",
+                        "values": [10.0, 20.0],
+                    },
+                    {
+                        "parameter": "param2",
+                        "sampling": "explicit",
+                        "values": [30.0, 40.0],
+                    },
+                ],
+                "max_workers": 1,
+            },
+        }
 
         captured_config = []
 
@@ -382,16 +428,18 @@ class TestDottedPathFeature:
             ) as mock_from_backtest:
                 mock_from_backtest.return_value = mock_result
 
-                optimiser = GridSearchOptimiser(bot_config)
+                optimiser = _optimiser(declared)
                 optimiser.run()
 
                 first_call = captured_config[0]
                 profiles = first_call["strategy"]["profiles"]
 
                 assert len(profiles) == 3
-                for profile in profiles:
-                    assert profile["param1"] == 10
-                    assert profile["param2"] == 30
+                assert [(p["param1"], p["param2"]) for p in profiles] == [
+                    (0, 0),
+                    (10, 30),
+                    (0, 0),
+                ]
 
     @pytest.fixture
     def envelope_config_dict(self) -> dict[str, Any]:
@@ -423,26 +471,25 @@ class TestDottedPathFeature:
         }
 
     def test_sweeps_both_rungs_of_a_list_valued_setting(self, envelope_config_dict):
-        bot_config = BotConfig.model_validate(
-            {
-                **envelope_config_dict,
-                "optimisation": {
-                    "parameter_configs": [
-                        {
-                            "parameter": "strategy.profiles.envelopes.0",
-                            "sampling": "explicit",
-                            "values": [0.01, 0.015],
-                        },
-                        {
-                            "parameter": "strategy.profiles.envelopes.1",
-                            "sampling": "explicit",
-                            "values": [0.025, 0.04],
-                        },
-                    ],
-                    "max_workers": 1,
-                },
-            }
-        )
+        declared = {
+            **envelope_config_dict,
+            "optimisation": {
+                "profile": {"symbol": "HYPE/USDT:USDT"},
+                "parameter_configs": [
+                    {
+                        "parameter": "envelopes.0",
+                        "sampling": "explicit",
+                        "values": [0.01, 0.015],
+                    },
+                    {
+                        "parameter": "envelopes.1",
+                        "sampling": "explicit",
+                        "values": [0.025, 0.04],
+                    },
+                ],
+                "max_workers": 1,
+            },
+        }
 
         swept_envelopes = []
 
@@ -456,19 +503,19 @@ class TestDottedPathFeature:
             "robottraderslab.grid_search.optimiser.run_backtest",
             side_effect=capture_and_return_outputs,
         ):
-            GridSearchOptimiser(bot_config).run()
+            _optimiser(declared).run()
 
         assert swept_envelopes == [
-            [[0.01, 0.025], [0.01, 0.025]],
-            [[0.01, 0.04], [0.01, 0.04]],
-            [[0.015, 0.025], [0.015, 0.025]],
-            [[0.015, 0.04], [0.015, 0.04]],
+            [[0.01, 0.025], [0.02, 0.03]],
+            [[0.01, 0.04], [0.02, 0.03]],
+            [[0.015, 0.025], [0.02, 0.03]],
+            [[0.015, 0.04], [0.02, 0.03]],
         ]
 
     def test_sweeps_one_list_element_named_by_its_index(self, envelope_config_dict):
-        grid_point = GridPoint(parameters={"strategy.profiles.1.envelopes.0": 0.05})
+        grid_point = GridPoint(parameters={"envelopes.0": 0.05})
 
-        bot_config = _apply_grid_point_to_config(envelope_config_dict, grid_point)
+        bot_config = _apply_grid_point_to_config(envelope_config_dict, 1, grid_point)
 
         assert bot_config.strategy.profiles[0]["envelopes"] == [0.02, 0.03]
         assert bot_config.strategy.profiles[1]["envelopes"] == [0.05, 0.03]
@@ -476,10 +523,10 @@ class TestDottedPathFeature:
     @pytest.mark.parametrize(
         "parameter_path",
         [
-            "strategy.nonexistent",
-            "strategy.profiles.nonexistent.4",
-            "strategy.profiles.envelopes.5",
-            "strategy.profiles.envelopes.0.7",
+            "nonexistent",
+            "nonexistent.4",
+            "envelopes.5",
+            "envelopes.0.7",
         ],
     )
     def test_path_matching_nothing_in_the_config(
@@ -488,38 +535,42 @@ class TestDottedPathFeature:
         grid_point = GridPoint(parameters={parameter_path: 0.05})
 
         with pytest.raises(BotCriticalError, match=re.escape(parameter_path)):
-            _apply_grid_point_to_config(envelope_config_dict, grid_point)
+            _apply_grid_point_to_config(envelope_config_dict, 0, grid_point)
 
     def test_works_with_deeply_nested_structures(self, mock_result):
-        bot_config = BotConfig.model_validate(
-            {
-                "name": "test-bot",
-                "strategy": {"strategy_class": "impulse", "profiles": []},
-                "backtest": {
-                    "initial_balance": {"USDT": 1000.0},
-                    "maker_fee_rate": 0.0,
-                    "taker_fee_rate": 0.0,
-                    "start_date": "2024-01-01",
-                    "end_date": "2024-01-02",
-                    "ohlcv_provider": {"lookback_days": 0, "batch_size": 0},
-                },
-                "optimisation": {
-                    "parameter_configs": [
-                        {
-                            "parameter": "backtest.ohlcv_provider.lookback_days",
-                            "sampling": "explicit",
-                            "values": [30.0, 60.0],
-                        },
-                        {
-                            "parameter": "backtest.ohlcv_provider.batch_size",
-                            "sampling": "explicit",
-                            "values": [100.0, 200.0],
-                        },
-                    ],
-                    "max_workers": 1,
-                },
-            }
-        )
+        declared = {
+            "name": "test-bot",
+            "strategy": {
+                "strategy_class": "impulse",
+                "profiles": [
+                    {"symbol": "BTC/USDT:USDT", "stops": {"entry": 0, "exit": 0}}
+                ],
+            },
+            "backtest": {
+                "initial_balance": {"USDT": 1000.0},
+                "maker_fee_rate": 0.0,
+                "taker_fee_rate": 0.0,
+                "start_date": "2024-01-01",
+                "end_date": "2024-01-02",
+                "ohlcv_provider": {},
+            },
+            "optimisation": {
+                "profile": {"symbol": "BTC/USDT:USDT"},
+                "parameter_configs": [
+                    {
+                        "parameter": "stops.entry",
+                        "sampling": "explicit",
+                        "values": [30.0, 60.0],
+                    },
+                    {
+                        "parameter": "stops.exit",
+                        "sampling": "explicit",
+                        "values": [100.0, 200.0],
+                    },
+                ],
+                "max_workers": 1,
+            },
+        }
 
         captured_config = []
 
@@ -537,15 +588,15 @@ class TestDottedPathFeature:
             ) as mock_from_backtest:
                 mock_from_backtest.return_value = mock_result
 
-                optimiser = GridSearchOptimiser(bot_config)
+                optimiser = _optimiser(declared)
                 optimiser.run()
 
                 lookback_values = [
-                    c["backtest"]["ohlcv_provider"]["lookback_days"]
+                    c["strategy"]["profiles"][0]["stops"]["entry"]
                     for c in captured_config
                 ]
                 batch_values = [
-                    c["backtest"]["ohlcv_provider"]["batch_size"]
+                    c["strategy"]["profiles"][0]["stops"]["exit"]
                     for c in captured_config
                 ]
 
@@ -560,8 +611,8 @@ class TestMeasurePoint:
     def grid_point(self) -> GridPoint:
         return GridPoint(
             parameters={
-                "strategy.profiles.param1": 5.0,
-                "strategy.profiles.param2": 10.0,
+                "param1": 5.0,
+                "param2": 10.0,
             }
         )
 
@@ -611,7 +662,7 @@ class TestMeasurePoint:
                 return_value=backtest_result,
             ),
         ):
-            worker_result = _measure_point(config_dict, grid_point)
+            worker_result = _measure_point(config_dict, 0, grid_point)
 
         assert worker_result.sharpe_ratio == 2.1
         assert worker_result.roi == 0.35
@@ -625,7 +676,7 @@ class TestMeasurePoint:
             "robottraderslab.grid_search.optimiser.run_backtest",
             side_effect=RuntimeError("boom"),
         ):
-            worker_result = _measure_point(config_dict, grid_point)
+            worker_result = _measure_point(config_dict, 0, grid_point)
 
         assert not worker_result.is_successful
         assert worker_result.error == "boom"
@@ -638,15 +689,13 @@ class TestMeasurePoint:
             ),
             pytest.raises(BotCriticalError, match="no candles declared"),
         ):
-            _measure_point(config_dict, grid_point)
+            _measure_point(config_dict, 0, grid_point)
 
     def test_a_critical_crosses_the_process_boundary_with_its_class(self, config_dict):
-        unknown_setting = GridPoint(
-            parameters={"strategy.profiles.no_such_setting": 1.0}
-        )
+        unknown_setting = GridPoint(parameters={"no_such_setting": 1.0})
 
         with ProcessPoolExecutor(max_workers=1) as workers:
-            measured = workers.submit(_measure_point, config_dict, unknown_setting)
+            measured = workers.submit(_measure_point, config_dict, 0, unknown_setting)
 
             with pytest.raises(BotCriticalError, match="no_such_setting"):
                 measured.result()
@@ -658,61 +707,51 @@ class TestMeasurePoint:
             "robottraderslab.grid_search.optimiser.run_backtest",
             side_effect=RuntimeError("irrelevant"),
         ):
-            _measure_point(config_dict, grid_point)
+            _measure_point(config_dict, 0, grid_point)
 
         assert config_dict["strategy"]["profiles"][0] == original_profiles
 
 
 class TestReadingTheSweptValue:
     @pytest.fixture
-    def config_dict(self) -> dict[str, Any]:
+    def profile(self) -> dict[str, Any]:
         return {
-            "name": "test-bot",
-            "strategy": {
-                "strategy_class": "impulse",
-                "profiles": [
-                    {
-                        "symbol": "BTC/USDT:USDT",
-                        "trix_length": 8,
-                        "bands": [0.02, 0.03],
-                    },
-                    {
-                        "symbol": "ETH/USDT:USDT",
-                        "trix_length": 12,
-                        "bands": [0.04, 0.05],
-                    },
-                ],
-            },
+            "symbol": "BTC/USDT:USDT",
+            "trix_length": 8,
+            "bands": [0.02, 0.03],
+            "tag": None,
+            "legs": [{"length": 4}, {"length": 6}],
         }
 
-    def test_a_path_fanning_out_over_a_list_reads_the_first_item(self, config_dict):
-        assert _read_nested_value(config_dict, "strategy.profiles.trix_length") == 8
+    def test_a_path_in_the_profile_reads_its_value(self, profile):
+        assert _read_nested_value(profile, "trix_length") == 8
 
-    def test_a_numeric_segment_reads_that_element(self, config_dict):
-        assert _read_nested_value(config_dict, "strategy.profiles.1.bands.0") == 0.04
+    def test_a_path_fanning_out_over_a_list_reads_the_first_item(self, profile):
+        assert _read_nested_value(profile, "legs.length") == 4
 
-    def test_a_path_landing_on_a_table_is_refused(self, config_dict):
+    def test_a_numeric_segment_reads_that_element(self, profile):
+        assert _read_nested_value(profile, "bands.1") == 0.03
+
+    def test_a_path_landing_on_a_list_is_refused(self, profile):
         with pytest.raises(BotCriticalError, match="holds no single value"):
-            _read_nested_value(config_dict, "strategy.profiles")
+            _read_nested_value(profile, "bands")
 
     def test_a_path_fanning_out_over_an_empty_list_is_refused(self):
         with pytest.raises(BotCriticalError, match="empty list"):
-            _read_nested_value(
-                {"strategy": {"profiles": []}}, "strategy.profiles.trix_length"
-            )
+            _read_nested_value({"legs": []}, "legs.length")
 
-    def test_an_unset_setting_is_refused(self):
-        with pytest.raises(BotCriticalError, match="leaves unset"):
-            _read_nested_value({"strategy": {"tag": None}}, "strategy.tag")
+    def test_an_unset_setting_is_refused(self, profile):
+        with pytest.raises(BotCriticalError, match="leaves"):
+            _read_nested_value(profile, "tag")
 
     @pytest.mark.parametrize(
         ("path", "refusal"),
         [
-            ("strategy.profiles.no_such_setting", "does not declare"),
-            ("strategy.profiles.5.trix_length", "element 5 of a list holding 2"),
-            ("strategy.profiles.trix_length.deeper", "under a single value"),
+            ("no_such_setting", "does not declare"),
+            ("bands.5", "element 5 of a list holding 2"),
+            ("trix_length.deeper", "under a single value"),
         ],
     )
-    def test_a_path_matching_nothing_is_refused(self, config_dict, path, refusal):
+    def test_a_path_matching_nothing_is_refused(self, profile, path, refusal):
         with pytest.raises(BotCriticalError, match=refusal):
-            _read_nested_value(config_dict, path)
+            _read_nested_value(profile, path)

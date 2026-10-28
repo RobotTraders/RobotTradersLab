@@ -4,7 +4,7 @@ Backtesting and live trading engine for algorithmic trading strategies. The stra
 you trade and the exchange you trade it on are plugins, installed separately.
 
 The CLI is the reference: `rtlab --help` lists the commands, `rtlab <command> --help`
-what each takes, and `rtlab scaffold --list` the examples the installed plugins ship.
+what each takes, and `rtlab new --list` the examples the installed plugins ship.
 
 ## Install
 
@@ -25,8 +25,8 @@ each with its install line.
 ## Set up a workspace
 
 ```bash
-uv run rtlab scaffold --list
-uv run rtlab scaffold <example> <example>-bot-example
+uv run rtlab new --list
+uv run rtlab new <example> <example>-bot-example
 ```
 
 The first line lists the examples the installed plugins ship; the second copies one into

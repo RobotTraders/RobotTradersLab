@@ -35,7 +35,7 @@ def test_the_gitignore_covers_what_the_engine_writes_and_the_secrets(workspace):
         "logs/",
         "backtests/",
         "reports/",
-        "optimisations/",
+        "grid-searches/",
         "secrets.toml",
     }
 

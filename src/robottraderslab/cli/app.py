@@ -38,7 +38,7 @@ _SUBPACKAGES = {
     "grid-search": "robottraderslab.grid_search",
     "live": "robottraderslab.live",
     "report": "robottraderslab.live.report",
-    "scaffold": "robottraderslab.scaffold",
+    "new": "robottraderslab.scaffold",
     "scheduler": "robottraderslab.scheduler",
 }
 
@@ -300,13 +300,14 @@ def grid_search(
     output_csv: Annotated[
         Path | None,
         typer.Option(
-            help="Where to write the scored combinations, "
-            "`optimisations/<time>/results.csv` in the bot's folder unless given"
+            help="Also write the scored combinations to this file, beside the "
+            "`results.csv` the run folder holds"
         ),
     ] = None,
 ) -> None:
-    """Backtest every parameter combination the `[optimisation]` section of the
-    bot's `optimisation.toml` declares, and score each.
+    """Backtest every parameter combination the bot's `grid-search.toml`
+    declares, and score each, in a `grid-searches/<time>/` folder of the bot
+    holding the two files it ran, its log and `results.csv`.
     """
     _run("grid-search", folder=bot, output_csv=output_csv)
 
@@ -401,11 +402,11 @@ def report(
 
 
 @app.command(
-    epilog="Examples: `rtlab scaffold --list` names the examples the installed plugins "
-    "ship; `rtlab scaffold impulse first-bot` copies that one into "
+    epilog="Examples: `rtlab new --list` names the examples the installed plugins "
+    "ship; `rtlab new impulse first-bot` copies that one into "
     "`workspace/first-bot/`, the bot's folder holding its `bot.toml`."
 )
-def scaffold(
+def new(
     ctx: typer.Context,
     name: _ExampleName = None,
     folder: _ExampleFolder = None,
@@ -421,7 +422,7 @@ def scaffold(
     elif name is None or folder is None:
         ctx.fail("Give NAME and FOLDER, or --list")
     try:
-        _run("scaffold", name=name, folder=folder, workspace=_workspace(workspace))
+        _run("new", name=name, folder=folder, workspace=_workspace(workspace))
     except ExampleError as e:
         typer.echo(str(e), err=True)
         raise typer.Exit(1) from e
