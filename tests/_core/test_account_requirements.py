@@ -10,11 +10,15 @@ from robottraderslab._core import (
     AccountProtocol,
     AccountRequirements,
     AccountSnapshot,
+    AccountState,
+    AccountStateRequest,
     MarginMode,
     MarginSettings,
     fetch_account_snapshots,
 )
 from robottraderslab.exceptions import BotCriticalError
+from robottraderslab.exchanges import FuturesExchangeProtocol
+from robottraderslab.futures import FuturesAccount
 from robottraderslab.strategies.futures import (
     EquityRatio,
     Margin,
@@ -41,6 +45,14 @@ def _account_needing_a_snapshot(name: str) -> Mock:
     account.name = name
     account._snapshot.return_value = Mock(spec=AccountSnapshot)
     return account
+
+
+def _venue_answering_nothing() -> Mock:
+    exchange = Mock(spec=FuturesExchangeProtocol)
+    exchange.get_account_state.return_value = AccountState(
+        equities={}, conversion_rates={}
+    )
+    return exchange
 
 
 class TestDeclarations:
@@ -223,10 +235,13 @@ class TestFetchAccountSnapshots:
 
         account._snapshot.assert_awaited_once_with(
             requirements._get_all()[0],
+            AccountStateRequest(
+                symbols=(BTCUSDT,),
+                executions=True,
+                max_attempts=MAX_ATTEMPTS,
+                base_delay=BASE_DELAY_SECONDS,
+            ),
             executions_since=EXECUTIONS_SINCE,
-            report_fills=True,
-            max_attempts=MAX_ATTEMPTS,
-            base_delay=BASE_DELAY_SECONDS,
         )
 
     async def test_without_report_fills_an_account_declaring_only_a_symbol_is_skipped(
@@ -250,3 +265,82 @@ class TestFetchAccountSnapshots:
         )
 
         account._snapshot.assert_not_awaited()
+
+
+class TestStateRequestHandedToTheConnector:
+    @pytest.fixture
+    def exchange(self) -> Mock:
+        return _venue_answering_nothing()
+
+    async def test_the_same_request_object_on_every_candle(self, exchange):
+        requirements = AccountRequirements()
+        requirements.add(FuturesAccount(exchange), symbols=[BTCUSDT], positions=True)
+
+        for _ in range(3):
+            await fetch_account_snapshots(
+                requirements, executions_since=EXECUTIONS_SINCE
+            )
+
+        handed = [call.args[0] for call in exchange.get_account_state.await_args_list]
+        assert len(handed) == 3
+        assert handed[1] is handed[0]
+        assert handed[2] is handed[0]
+
+    async def test_an_account_declared_after_a_read_is_read_on_the_next_candle(
+        self, exchange
+    ):
+        hedge_exchange = _venue_answering_nothing()
+        requirements = AccountRequirements()
+        requirements.add(FuturesAccount(exchange, name="main"), positions=True)
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        requirements.add(
+            FuturesAccount(hedge_exchange, name="hedge"),
+            symbols=[BTCUSDT],
+            balances=True,
+        )
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        hedge_request = hedge_exchange.get_account_state.await_args.args[0]
+        assert hedge_request.balances is True
+
+    async def test_a_tracker_position_need_after_a_read_is_in_the_next_request(
+        self, exchange
+    ):
+        requirements = AccountRequirements()
+        requirements.add(FuturesAccount(exchange, name="main"), balances=True)
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        requirements._require_positions("main", (BTCUSDT,))
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        after = exchange.get_account_state.await_args.args[0]
+        assert after.positions is True
+        assert after.symbols == (BTCUSDT,)
+
+    async def test_a_tracker_execution_need_after_a_read_is_in_the_next_request(
+        self, exchange
+    ):
+        requirements = AccountRequirements()
+        requirements.add(FuturesAccount(exchange, name="main"), balances=True)
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        requirements._require_executions("main")
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        after = exchange.get_account_state.await_args.args[0]
+        assert after.executions is True
+
+    async def test_a_run_without_fill_reports_reads_no_executions_after_one_with(
+        self, exchange
+    ):
+        requirements = AccountRequirements()
+        requirements.add(FuturesAccount(exchange), symbols=[BTCUSDT], positions=True)
+        await fetch_account_snapshots(
+            requirements, executions_since=EXECUTIONS_SINCE, report_fills=True
+        )
+
+        await fetch_account_snapshots(requirements, executions_since=EXECUTIONS_SINCE)
+
+        last_request = exchange.get_account_state.await_args.args[0]
+        assert last_request.executions is False

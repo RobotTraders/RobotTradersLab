@@ -82,6 +82,8 @@ class SimulatedPosition:
             entry_time=self.entry_time,
             leverage=self.leverage,
             liquidation_price=self.liquidation_price,
+            stop_loss_price=None,
+            take_profit_price=None,
         )
 
     def _update_liquidation_price(self) -> None:

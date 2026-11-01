@@ -508,6 +508,8 @@ def _removed_profile_cycle(
             entry_time=datetime(2026, 1, 1, tzinfo=UTC),
             leverage=1.0,
             liquidation_price=0.0,
+            stop_loss_price=None,
+            take_profit_price=None,
         )
     }
     rung = Mock(spec=OrderProtocol)
@@ -1356,6 +1358,8 @@ def _hold_a_position_opened_by_hand(
             entry_time=timestamp,
             leverage=1.0,
             liquidation_price=0.0,
+            stop_loss_price=None,
+            take_profit_price=None,
         )
     }
     exchange.get_executions_since = AsyncMock(
@@ -1465,6 +1469,8 @@ def _long_position(symbol: Symbol, quantity: float) -> PositionSnapshot:
         entry_time=datetime(2024, 1, 1, tzinfo=UTC),
         leverage=1.0,
         liquidation_price=1.0,
+        stop_loss_price=None,
+        take_profit_price=None,
     )
 
 

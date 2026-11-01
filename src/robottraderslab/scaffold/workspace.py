@@ -3,6 +3,8 @@ from pathlib import Path
 
 from robottraderslab._core import mark_root
 
+from .report import report_written
+
 _TEMPLATES_DIR_NAME = "templates"
 _EXAMPLE_FILES = ("secrets.example.toml", "registry.example.toml")
 _GITIGNORE_TEMPLATE = "gitignore"
@@ -38,8 +40,7 @@ def mark_workspace(root: Path) -> None:
 
 
 def main(workspace: Path) -> None:
-    for path in lay_out_workspace(workspace):
-        print(f"Wrote {path}")
+    report_written(lay_out_workspace(workspace))
 
 
 def _template(name: str) -> str:

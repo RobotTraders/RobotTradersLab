@@ -1,9 +1,12 @@
+import asyncio
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Protocol
 
 from robottraderslab._core import (
     NO_VENUE_PARAMS,
+    AccountState,
+    AccountStateRequest,
     Balance,
     Currency,
     Execution,
@@ -41,6 +44,35 @@ class FuturesExchangeProtocol(Protocol):
         """
         return 1 / leverage
 
+    async def get_account_state(
+        self, request: AccountStateRequest, executions_since: datetime
+    ) -> AccountState:
+        """The state a request names is read as one unit.
+
+        Every read of the unit starts together, and the executions are read
+        only once the positions have answered, so a position the state shows
+        closed by a stop-loss carries that stop-loss among its executions. A
+        connector serving several reads from one venue request overrides this
+        and keeps both guarantees.
+
+        Args:
+            request: The attempts and delay each venue request retries a
+                transient failure with ride in it.
+            executions_since: Executions booked before this instant are left
+                out, and the venue may cap how far back the window reaches.
+
+        Returns:
+            The state, a field the request did not ask for left None, or empty
+            for a mapping; the positions are read whenever the executions are.
+
+        Raises:
+            ExchangeRecoverableError: If a read still fails once its attempts
+                are spent.
+            ExchangeCriticalError: If the venue is unusable on any read, as
+                when it refuses the account's credentials.
+        """
+        return await read_account_state(self, request, executions_since)
+
     async def get_balances(self, symbols: Iterable[Symbol]) -> dict[Currency, Balance]:
         """Return the balance of each margin currency the venue reports.
 
@@ -71,12 +103,17 @@ class FuturesExchangeProtocol(Protocol):
         ...
 
     async def get_open_positions(
-        self, symbols: Iterable[Symbol]
+        self, symbols: Iterable[Symbol], *, with_protections: bool = False
     ) -> dict[Symbol, PositionSnapshot]:
         """Return the open positions of the account, keyed by symbol.
 
         Args:
             symbols: Symbols the read is scoped to; none means every one.
+            with_protections: Whether each position carries the levels of
+                its stop-loss and take-profit. A venue that lists the
+                protections apart from the position reads them in a request
+                beside it; False leaves both levels None and sends no such
+                request.
         """
         ...
 
@@ -90,14 +127,34 @@ class FuturesExchangeProtocol(Protocol):
         """
         ...
 
+    async def get_price_increment(self, symbol: Symbol, price: float) -> float:
+        """Return the smallest price step the venue accepts around the price given.
+
+        A venue whose tick follows the price answers for the price given.
+
+        Args:
+            symbol: A symbol the venue lists.
+            price: The price the step is read at, above zero; a venue whose
+                tick is fixed does not use it.
+
+        Returns:
+            The step, in the symbol's quote currency, always above zero.
+
+        Raises:
+            SymbolNotListedError: If the venue lists no contract for the symbol.
+        """
+        ...
+
     async def get_quote(self, symbol: Symbol) -> Quote:
-        """Return the best bid and the best ask of the symbol at the moment of the read.
+        """Return the best bid, the best ask and the last traded price of the symbol
+        at the moment of the read.
 
         A program deciding on a price reads it here; the engine decides on
         candle closes and never calls it.
 
         Returns:
-            The top level of each side of the book.
+            A quote whose last price is None on a symbol the venue lists but
+            records no trade of.
 
         Raises:
             SymbolNotListedError: If the venue lists no contract for the symbol.
@@ -363,3 +420,125 @@ class FuturesExchangeProtocol(Protocol):
             BotCriticalError: If the venue offers no trigger on the
                 trigger type; no request is sent.
         """
+
+
+async def read_account_state(
+    exchange: FuturesExchangeProtocol,
+    request: AccountStateRequest,
+    executions_since: datetime,
+) -> AccountState:
+    """The read a connector gets from `get_account_state` unless it overrides
+    that method.
+
+    Args:
+        exchange: The connector whose venue methods are called, one per read.
+        request: The reads to send; each retries with the request's attempts
+            and delay.
+        executions_since: Executions booked before this instant are left out,
+            and the venue may cap how far back the window reaches.
+
+    Returns:
+        The requested fields answered, the others None, or empty for a
+        mapping.
+
+    Raises:
+        ExchangeRecoverableError: If a read still fails once its attempts are
+            spent.
+        ExchangeCriticalError: If the venue is unusable on any read, as when it
+            refuses the account's credentials.
+    """
+    symbols = request.symbols
+    open_orders_read = (
+        request.started(exchange.get_open_orders, symbols)
+        if request.open_orders
+        else None
+    )
+    positions_read, executions_read = _positions_then_executions(
+        exchange, request, executions_since
+    )
+    balances_read, rates_reads = _wallet_reads(exchange, request)
+    margin_settings_read = (
+        request.started(exchange.get_margin_settings, symbols)
+        if request.margin_settings
+        else None
+    )
+    equities_reads = {
+        currency: request.started(exchange.get_equity, currency)
+        for currency in request.equity
+    }
+    await asyncio.gather(
+        *_in_flight(
+            open_orders_read,
+            positions_read,
+            balances_read,
+            margin_settings_read,
+            executions_read,
+            *rates_reads.values(),
+            *equities_reads.values(),
+        )
+    )
+    return AccountState(
+        positions=_answer(positions_read),
+        open_orders=_answer(open_orders_read),
+        balances=_answer(balances_read),
+        margin_settings=_answer(margin_settings_read),
+        equities={currency: read.result() for currency, read in equities_reads.items()},
+        conversion_rates={
+            symbol: read.result() for symbol, read in rates_reads.items()
+        },
+        executions=_answer(executions_read),
+    )
+
+
+def _positions_then_executions(
+    exchange: FuturesExchangeProtocol,
+    request: AccountStateRequest,
+    executions_since: datetime,
+) -> tuple[
+    asyncio.Future[dict[Symbol, PositionSnapshot]] | None,
+    asyncio.Future[list[Execution]] | None,
+]:
+    """A position seen closed by a stop-loss carries that stop-loss among its
+    executions.
+    """
+    if not request.reads_positions:
+        return None, None
+    positions_read = request.started(exchange.get_open_positions, request.symbols)
+    if not request.executions:
+        return positions_read, None
+    executions_read = asyncio.ensure_future(
+        request.retried_after(
+            positions_read,
+            exchange.get_executions_since,
+            executions_since,
+            request.symbols,
+        )
+    )
+    return positions_read, executions_read
+
+
+def _wallet_reads(
+    exchange: FuturesExchangeProtocol, request: AccountStateRequest
+) -> tuple[
+    asyncio.Future[dict[Currency, Balance]] | None,
+    dict[Symbol, asyncio.Future[float]],
+]:
+    """A balance in one currency is worth reading with the rate converting
+    each symbol quoted in another.
+    """
+    if not request.balances:
+        return None, {}
+    balances_read = request.started(exchange.get_balances, request.symbols)
+    rates_reads = {
+        symbol: request.started(exchange.get_quote_conversion_rate, symbol)
+        for symbol in request.cross_quoted
+    }
+    return balances_read, rates_reads
+
+
+def _in_flight(*reads: asyncio.Future[Any] | None) -> list[asyncio.Future[Any]]:
+    return [read for read in reads if read is not None]
+
+
+def _answer[T](read: asyncio.Future[T] | None) -> T | None:
+    return None if read is None else read.result()

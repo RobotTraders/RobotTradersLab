@@ -5,6 +5,7 @@ from .account_requirements import (
     fetch_account_snapshots,
 )
 from .account_snapshot import AccountSnapshot
+from .account_state import AccountState, AccountStateRequest
 from .actions import BookKeeper, execute_trading_actions
 from .actions.members import (
     ENGINE_TAGS,
@@ -163,6 +164,8 @@ __all__ = [
     "AccountRequirement",
     "AccountRequirements",
     "AccountSnapshot",
+    "AccountState",
+    "AccountStateRequest",
     "ActionBuilder",
     "ActionResult",
     "assemble_all_ohlcvs_from_requirements",

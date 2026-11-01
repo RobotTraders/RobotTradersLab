@@ -1,4 +1,5 @@
 import logging
+import math
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, Self, cast
@@ -18,6 +19,8 @@ from robottraderslab.exceptions import (
     NoOpenPositionError,
 )
 from robottraderslab.exchanges import (
+    AccountState,
+    AccountStateRequest,
     Balance,
     Currency,
     Execution,
@@ -120,6 +123,38 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
     def placement_requirement_rate(self, leverage: float) -> float:
         return self.simulation_engine.placement_requirement_rate(leverage)
 
+    async def get_account_state(
+        self, request: AccountStateRequest, executions_since: datetime
+    ) -> AccountState:
+        """Every read answers from memory and nothing moves between two reads
+        of a candle, so the reads follow one another with no retry.
+        """
+        symbols = request.symbols
+        positions = (
+            await self.get_open_positions(symbols) if request.reads_positions else None
+        )
+        return AccountState(
+            positions=positions,
+            open_orders=(
+                await self.get_open_orders(symbols) if request.open_orders else None
+            ),
+            balances=await self.get_balances(symbols) if request.balances else None,
+            margin_settings=(
+                await self.get_margin_settings(symbols)
+                if request.margin_settings
+                else None
+            ),
+            equities={
+                currency: await self.get_equity(currency) for currency in request.equity
+            },
+            conversion_rates=await self._conversion_rates(request),
+            executions=(
+                await self.get_executions_since(executions_since, symbols)
+                if request.executions
+                else None
+            ),
+        )
+
     async def get_balances(self, symbols: Iterable[Symbol]) -> dict[Currency, Balance]:
         return self.simulation_engine.get_balances()
 
@@ -148,8 +183,10 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         )
 
     async def get_open_positions(
-        self, symbols: Iterable[Symbol]
+        self, symbols: Iterable[Symbol], *, with_protections: bool = False
     ) -> dict[Symbol, PositionSnapshot]:
+        if with_protections:
+            return self.simulation_engine.protected_positions()
         return self.simulation_engine.open_positions
 
     async def get_instrument(self, symbol: Symbol) -> Instrument:
@@ -158,10 +195,17 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
         """
         return _INSTRUMENT
 
+    async def get_price_increment(self, symbol: Symbol, price: float) -> float:
+        """A candle fills at any price."""
+        self.simulation_engine.require_listed(symbol)
+        return math.ulp(price)
+
     async def get_quote(self, symbol: Symbol) -> Quote:
-        """A candle holds no book, so its close is both the bid and the ask."""
+        """A candle holds no book and no trade, so its close stands for the bid,
+        the ask and the last price.
+        """
         close = self.simulation_engine.get_last_price(symbol)
-        return Quote(bid=close, ask=close)
+        return Quote(bid=close, ask=close, last=close)
 
     async def round_price(self, symbol: Symbol, price: float) -> float:
         """A candle fills at any price."""
@@ -407,6 +451,16 @@ class SimulatedFuturesExchange(FuturesExchangeProtocol):
             )
         take_profit_order.trigger_price = trigger_price
         return PlacedOrder(order_id=take_profit_order.order_id)
+
+    async def _conversion_rates(
+        self, request: AccountStateRequest
+    ) -> dict[Symbol, float]:
+        if not request.balances:
+            return {}
+        return {
+            symbol: await self.get_quote_conversion_rate(symbol)
+            for symbol in request.cross_quoted
+        }
 
     def _get_open_position(self, symbol: Symbol) -> PositionSnapshot:
         position = self.simulation_engine.open_positions.get(symbol)

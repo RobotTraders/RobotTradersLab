@@ -5,3 +5,4 @@ from dataclasses import dataclass
 class Quote:
     bid: float
     ask: float
+    last: float | None

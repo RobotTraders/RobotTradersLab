@@ -1,4 +1,5 @@
 import asyncio
+import math
 from datetime import datetime
 
 import pytest
@@ -10,6 +11,7 @@ from robottraderslab.backtester.simulator import (
 )
 from robottraderslab.exceptions import BotCriticalError, SymbolNotListedError
 from robottraderslab.exchanges import (
+    AccountStateRequest,
     Instrument,
     OrderModifyRequest,
     OrderRequest,
@@ -19,6 +21,7 @@ from robottraderslab.exchanges import (
     TriggerType,
     VenueFill,
 )
+from robottraderslab.futures import read_account_state
 from robottraderslab.futures.futures_market_order import FuturesMarketOrderAction
 
 
@@ -85,14 +88,14 @@ class TestModifyOrders:
 
 
 class TestGetQuote:
-    async def test_the_close_of_the_candle_stood_on_is_bid_and_ask(
+    async def test_the_close_of_the_candle_stood_on_is_bid_ask_and_last(
         self, sim, btc_usdt_perp
     ):
         sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
 
         quote = await sim.exchange.get_quote(btc_usdt_perp)
 
-        assert quote == Quote(bid=101.5, ask=101.5)
+        assert quote == Quote(bid=101.5, ask=101.5, last=101.5)
 
     async def test_the_next_candle_moves_the_quote(self, sim, btc_usdt_perp):
         sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
@@ -100,7 +103,7 @@ class TestGetQuote:
 
         quote = await sim.exchange.get_quote(btc_usdt_perp)
 
-        assert quote == Quote(bid=99.0, ask=99.0)
+        assert quote == Quote(bid=99.0, ask=99.0, last=99.0)
 
     async def test_a_symbol_with_no_candle_seen(self, sim, btc_usdt_perp):
         with pytest.raises(SymbolNotListedError):
@@ -142,9 +145,20 @@ class TestInstrument:
 
         assert rounded_price == 101.123456789
 
+    async def test_a_price_increment_one_float_step_wide(self, sim, btc_usdt_perp):
+        sim.simulate_on_current_ohlcvs(btc_usdt_perp, close=101.5)
+
+        increment = await sim.exchange.get_price_increment(btc_usdt_perp, 101.5)
+
+        assert 101.5 + increment == math.nextafter(101.5, math.inf)
+
     @pytest.mark.parametrize(
         ("read", "arguments"),
-        [("round_price", (1.0,)), ("round_quantity", (1.0,))],
+        [
+            ("get_price_increment", (1.0,)),
+            ("round_price", (1.0,)),
+            ("round_quantity", (1.0,)),
+        ],
     )
     async def test_a_symbol_with_no_candle_seen(
         self, sim, btc_usdt_perp, read, arguments
@@ -158,6 +172,65 @@ class TestGetExecutionsSince:
         executions = await sim.exchange.get_executions_since(datetime.now(), [])
 
         assert executions == []
+
+
+class TestGetAccountState:
+    async def test_every_field_equals_the_default_read_of_the_same_simulator(
+        self, holding_sim
+    ):
+        sim, symbols = holding_sim
+        request = AccountStateRequest(
+            symbols=symbols,
+            positions=True,
+            open_orders=True,
+            balances=True,
+            margin_settings=True,
+            equity=("USDT",),
+            executions=True,
+        )
+
+        account_state = await sim.exchange.get_account_state(request, datetime.min)
+
+        default_state = await read_account_state(sim.exchange, request, datetime.min)
+        assert account_state.positions == default_state.positions
+        assert account_state.open_orders == default_state.open_orders
+        assert account_state.balances == default_state.balances
+        assert account_state.margin_settings == default_state.margin_settings
+        assert account_state.equities == default_state.equities
+        assert account_state.conversion_rates == default_state.conversion_rates
+        assert account_state.executions == default_state.executions
+        assert set(account_state.positions) == {symbols[0]}
+        assert len(account_state.open_orders) == 1
+        assert account_state.equities == {
+            "USDT": sim.simulation_engine.get_equity("USDT")
+        }
+        assert account_state.conversion_rates == {symbols[2]: 1.1}
+        assert account_state.executions
+
+    async def test_fields_left_out_of_the_request(self, holding_sim):
+        sim, symbols = holding_sim
+        request = AccountStateRequest(symbols=symbols, open_orders=True)
+
+        account_state = await sim.exchange.get_account_state(request, datetime.min)
+
+        assert account_state.positions is None
+        assert account_state.balances is None
+        assert account_state.margin_settings is None
+        assert account_state.executions is None
+        assert account_state.equities == {}
+        assert account_state.conversion_rates == {}
+        assert account_state.open_orders
+
+    async def test_executions_without_positions_still_carry_the_positions(
+        self, holding_sim
+    ):
+        sim, symbols = holding_sim
+        request = AccountStateRequest(symbols=symbols, executions=True)
+
+        account_state = await sim.exchange.get_account_state(request, datetime.min)
+
+        assert set(account_state.positions) == {symbols[0]}
+        assert account_state.executions
 
 
 class TestSimlatedExchange:

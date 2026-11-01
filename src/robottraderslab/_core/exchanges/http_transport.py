@@ -15,6 +15,11 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 10.0
 MAX_CONNECTIONS = 100
 MAX_KEEPALIVE_CONNECTIONS = 50
 KEEPALIVE_EXPIRY_SECONDS = 60.0
+_LIMITS = httpx.Limits(
+    max_connections=MAX_CONNECTIONS,
+    max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
+    keepalive_expiry=KEEPALIVE_EXPIRY_SECONDS,
+)
 
 type JsonLike = dict[str, Any]
 type ResponseClassifier = Callable[[HttpResponse, JsonLike], None]
@@ -81,8 +86,7 @@ class HttpTransport:
         headers: dict[str, str] | None = None,
         timeout: float = DEFAULT_HTTP_TIMEOUT_SECONDS,
     ) -> "HttpTransport":
-        """Create a transport with its own session.
-
+        """
         Args:
             base_url: Base URL prepended to every request path.
             classify_response: Called with each response and its parsed JSON
@@ -101,11 +105,7 @@ class HttpTransport:
             headers=headers,
             timeout=timeout,
             verify=_ssl_context(),
-            limits=httpx.Limits(
-                max_connections=MAX_CONNECTIONS,
-                max_keepalive_connections=MAX_KEEPALIVE_CONNECTIONS,
-                keepalive_expiry=KEEPALIVE_EXPIRY_SECONDS,
-            ),
+            limits=_LIMITS,
         )
         return cls(
             session,

@@ -15,6 +15,8 @@ def _position(**overrides: object) -> PositionSnapshot:
         "entry_time": datetime(2026, 8, 1, tzinfo=UTC),
         "leverage": 5.0,
         "liquidation_price": 50.0,
+        "stop_loss_price": None,
+        "take_profit_price": None,
     }
     arguments.update(overrides)
     return PositionSnapshot(**arguments)  # type: ignore[arg-type]

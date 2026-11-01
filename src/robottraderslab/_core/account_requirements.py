@@ -6,6 +6,7 @@ from types import MappingProxyType
 from typing import Protocol
 
 from .account_snapshot import AccountSnapshot, AccountSnapshots, NamedAccount
+from .account_state import AccountStateRequest
 from .actions.members import BaseExchangeAction
 from .currency import Currency
 from .exceptions import BotCriticalError
@@ -127,24 +128,26 @@ class AccountProtocol(NamedAccount, Protocol):
     async def _snapshot(
         self,
         requirement: "AccountRequirement",
+        request: AccountStateRequest,
         *,
         executions_since: datetime,
-        report_fills: bool = False,
-        max_attempts: int = MAX_ATTEMPTS,
-        base_delay: float = BASE_DELAY_SECONDS,
     ) -> "AccountSnapshot":
-        """Fetch the declared state in one concurrent burst.
+        """Fetch the declared state as one unit, answered in full or raised.
 
         Args:
             requirement: What the strategy declared for this account in `setup`.
-            executions_since: Start of the executions window.
-            report_fills: See `AccountRequirement.needs_executions`.
-            max_attempts: Total retry attempts for transient errors, per read.
-            base_delay: Base retry delay in seconds (doubled on each retry).
+            request: The reads the declaration takes, fixed for the run.
+            executions_since: Executions booked before this instant are left
+                out, and the venue may cap how far back the window reaches.
 
         Returns:
             A snapshot populated with the declared fields, plus executions
-            on top when report_fills asks for them.
+            on top when the request asks for them.
+
+        Raises:
+            ExchangeRecoverableError: If a read still fails once its attempts
+                are spent.
+            ExchangeCriticalError: If the venue is unusable on any read.
         """
         ...
 
@@ -202,6 +205,30 @@ class AccountRequirement:
         """
         return self.executions or bool(report_fills and self.symbols)
 
+    def state_request(
+        self, report_fills: bool, max_attempts: int, base_delay: float
+    ) -> AccountStateRequest:
+        """The reads of one candle, which every later candle of the run repeats.
+
+        Args:
+            report_fills: Whether a fill subscriber is configured, which reads
+                the executions of an account declaring symbols.
+            max_attempts: Total attempts of each read on a transient failure.
+            base_delay: Ceiling of the first delay between attempts, in seconds.
+        """
+        executions = self.needs_executions(report_fills)
+        return AccountStateRequest(
+            symbols=self.symbols,
+            positions=self.positions,
+            open_orders=self.open_orders,
+            balances=self.balances,
+            margin_settings=self.margin_settings,
+            equity=self.equity,
+            executions=executions,
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+        )
+
 
 class AccountRequirements:
     """Declares the account state a strategy needs."""
@@ -210,6 +237,10 @@ class AccountRequirements:
         self._requirements: list[AccountRequirement] = []
         self._position_needs: dict[str, tuple[Symbol, ...]] = {}
         self._execution_needs: set[str] = set()
+        self._state_reads: dict[
+            tuple[bool, int, float],
+            list[tuple[AccountRequirement, AccountStateRequest]],
+        ] = {}
 
     def add(
         self,
@@ -301,6 +332,25 @@ class AccountRequirements:
         if account.name in self._execution_needs:
             requirement = _reading_executions(requirement)
         self._requirements.append(requirement)
+        self._state_reads.clear()
+
+    def _declared_reads(
+        self, report_fills: bool, max_attempts: int, base_delay: float
+    ) -> list[tuple[AccountRequirement, AccountStateRequest]]:
+        """A run reads with the same settings on every candle."""
+        key = (report_fills, max_attempts, base_delay)
+        reads = self._state_reads.get(key)
+        if reads is None:
+            reads = [
+                (
+                    requirement,
+                    requirement.state_request(report_fills, max_attempts, base_delay),
+                )
+                for requirement in self._requirements
+                if not requirement.is_empty(report_fills)
+            ]
+            self._state_reads[key] = reads
+        return reads
 
     def _get_all(self) -> list[AccountRequirement]:
         return list(self._requirements)
@@ -308,6 +358,7 @@ class AccountRequirements:
     def _require_executions(self, account_name: str) -> None:
         """A tracker may be declared before or after its account."""
         self._execution_needs.add(account_name)
+        self._state_reads.clear()
         for index, requirement in enumerate(self._requirements):
             if requirement.account.name == account_name:
                 self._requirements[index] = _reading_executions(requirement)
@@ -320,6 +371,7 @@ class AccountRequirements:
         """
         combined = self._position_needs.get(account_name, ()) + symbols
         self._position_needs[account_name] = combined
+        self._state_reads.clear()
         for index, requirement in enumerate(self._requirements):
             if requirement.account.name == account_name:
                 self._requirements[index] = _reading_positions(requirement, combined)
@@ -345,27 +397,19 @@ async def fetch_account_snapshots(
     Returns:
         The snapshots, keyed by account.
     """
-    declared = [
-        requirement
-        for requirement in requirements._get_all()
-        if not requirement.is_empty(report_fills)
-    ]
+    declared = requirements._declared_reads(report_fills, max_attempts, base_delay)
     snapshots = await asyncio.gather(
         *[
             requirement.account._snapshot(
-                requirement,
-                executions_since=executions_since,
-                report_fills=report_fills,
-                max_attempts=max_attempts,
-                base_delay=base_delay,
+                requirement, request, executions_since=executions_since
             )
-            for requirement in declared
+            for requirement, request in declared
         ]
     )
     return AccountSnapshots(
         {
             requirement.account.name: snapshot
-            for requirement, snapshot in zip(declared, snapshots)
+            for (requirement, _), snapshot in zip(declared, snapshots)
         }
     )
 

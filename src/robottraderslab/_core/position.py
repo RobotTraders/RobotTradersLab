@@ -35,16 +35,20 @@ class PositionProtocol(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class PositionSnapshot:
-    """An open position as the venue reported it when the snapshot was taken.
+    """An open position as its exchange held it when the snapshot was taken.
 
     Attributes:
-        quantity: What the position holds, in the base currency; `side`
-            carries the direction.
-        average_entry_price: The price the position was opened at, averaged
-            over its fills.
-        leverage: The leverage the position is held at.
+        quantity: In the base currency; `side` carries the direction.
+        average_entry_price: Averaged over the position's fills.
         liquidation_price: The price the venue closes the position at, None
             on a venue that reports none.
+        stop_loss_price: None unless the read asked for protections, and
+            while no stop-loss rests. Several rest at once when each filled
+            entry placed its own beside the position's, and the level is
+            then that of the first one listed.
+        take_profit_price: None unless the read asked for protections, and
+            while no take-profit rests; chosen among several as the
+            stop-loss is.
     """
 
     symbol: Symbol
@@ -54,3 +58,5 @@ class PositionSnapshot:
     entry_time: datetime
     leverage: float
     liquidation_price: float | None
+    stop_loss_price: float | None
+    take_profit_price: float | None

@@ -88,6 +88,8 @@ def _position(symbol: Symbol, quantity: float) -> PositionSnapshot:
         entry_time=LONG_AGO,
         leverage=1.0,
         liquidation_price=0.0,
+        stop_loss_price=None,
+        take_profit_price=None,
     )
 
 

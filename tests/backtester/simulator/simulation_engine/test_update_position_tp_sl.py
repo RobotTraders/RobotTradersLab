@@ -87,6 +87,56 @@ class TestUpdatePositionStopLoss:
             await sim.exchange.update_position_stop_loss(btc_usdt_perp, 85.0)
 
 
+class TestPositionProtectionLevels:
+    async def test_a_read_without_protections_reports_no_level(
+        self, sim, btc_usdt_perp
+    ):
+        await _open_long_with_tp_sl(sim, btc_usdt_perp)
+
+        positions = await sim.exchange.get_open_positions([btc_usdt_perp])
+
+        assert positions[btc_usdt_perp].stop_loss_price is None
+        assert positions[btc_usdt_perp].take_profit_price is None
+
+    async def test_a_read_with_protections_reports_the_booked_levels(
+        self, sim, btc_usdt_perp
+    ):
+        await _open_long_with_tp_sl(sim, btc_usdt_perp)
+
+        positions = await sim.exchange.get_open_positions(
+            [btc_usdt_perp], with_protections=True
+        )
+
+        assert positions[btc_usdt_perp].stop_loss_price == 90.0
+        assert positions[btc_usdt_perp].take_profit_price == 150.0
+
+    async def test_moved_protections_read_back_on_the_position(
+        self, sim, btc_usdt_perp
+    ):
+        await _open_long_with_tp_sl(sim, btc_usdt_perp)
+        await sim.exchange.update_position_stop_loss(btc_usdt_perp, 85.0)
+        await sim.exchange.update_position_take_profit(btc_usdt_perp, 160.0)
+
+        positions = await sim.exchange.get_open_positions(
+            [btc_usdt_perp], with_protections=True
+        )
+
+        assert positions[btc_usdt_perp].stop_loss_price == 85.0
+        assert positions[btc_usdt_perp].take_profit_price == 160.0
+
+    async def test_a_position_opened_bare(self, sim, btc_usdt_perp):
+        await _open_long_with_tp_sl(
+            sim, btc_usdt_perp, stop_loss=None, take_profit=None
+        )
+
+        positions = await sim.exchange.get_open_positions(
+            [btc_usdt_perp], with_protections=True
+        )
+
+        assert positions[btc_usdt_perp].stop_loss_price is None
+        assert positions[btc_usdt_perp].take_profit_price is None
+
+
 class TestUpdatePositionTakeProfit:
     async def test_updates_take_profit_for_long_position(self, sim, btc_usdt_perp):
         await _open_long_with_tp_sl(sim, btc_usdt_perp)

@@ -102,6 +102,8 @@ def open_position() -> dict[Symbol, PositionSnapshot]:
             entry_time=_CLOSED_AT,
             leverage=1.0,
             liquidation_price=5.0,
+            stop_loss_price=None,
+            take_profit_price=None,
         )
     }
 

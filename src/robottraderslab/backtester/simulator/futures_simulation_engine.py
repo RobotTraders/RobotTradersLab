@@ -1,5 +1,6 @@
 import logging
 from bisect import bisect_left
+from dataclasses import replace
 from datetime import datetime
 
 from robottraderslab._core import (
@@ -105,6 +106,19 @@ class FuturesSimulationEngine(BaseSimulationEngine):
         )
         return self._executions[start:]
 
+    def protected_positions(self) -> dict[Symbol, PositionSnapshot]:
+        """The open positions with the levels of the guards the order book
+        holds for each.
+        """
+        return {
+            symbol: replace(
+                snapshot,
+                stop_loss_price=self._guard_level(symbol, StopLossOrder),
+                take_profit_price=self._guard_level(symbol, TakeProfitOrder),
+            )
+            for symbol, snapshot in self.open_positions.items()
+        }
+
     def set_symbol_leverage(self, symbol: Symbol, leverage: float) -> None:
         """
         Args:
@@ -141,6 +155,12 @@ class FuturesSimulationEngine(BaseSimulationEngine):
 
     def _get_positions_for_snapshot(self) -> dict[Symbol, SimulatedPosition]:
         return self._positions
+
+    def _guard_level(
+        self, symbol: Symbol, guard_type: type[StopLossOrder] | type[TakeProfitOrder]
+    ) -> float | None:
+        guard = self._order_book.find_guard(symbol, guard_type)
+        return guard.trigger_price if guard is not None else None
 
     def _on_add_limit_entry(self, limit_order: LimitOrder) -> None:
         """A resting entry locks what the quantity it would open needs beyond

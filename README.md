@@ -4,7 +4,7 @@ Backtesting and live trading engine for algorithmic trading strategies. Strategi
 
 ## Documentation
 
-The walkthrough from an empty machine to a live bot is at [robottraders.io/lab/docs/getting-started](https://robottraders.io/lab/docs/getting-started.html). The [strategy guide](https://robottraders.io/lab/docs/build-a-strategy.html), the [CLI reference](https://robottraders.io/lab/docs/cli.html) and the [API reference](https://robottraders.io/lab/docs/reference.html) cover writing strategies and running the engine. Every plugin has its page alongside them, and the Lab lists them all at [robottraders.io/lab](https://robottraders.io/lab).
+The walkthrough from an empty machine to a live bot is at [robottraders.io/lab/docs/getting-started](https://robottraders.io/lab/docs/getting-started.html). The [strategy guide](https://robottraders.io/lab/docs/implement-a-strategy.html), the [CLI reference](https://robottraders.io/lab/docs/cli.html) and the [API reference](https://robottraders.io/lab/docs/reference.html) cover writing strategies and running the engine. Every plugin has its page alongside them, and the Lab lists them all at [robottraders.io/lab](https://robottraders.io/lab).
 
 ## Disclaimer
 

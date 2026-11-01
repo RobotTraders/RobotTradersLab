@@ -86,6 +86,8 @@ def create_snapshot() -> Callable[[list[Execution], float | None], AccountSnapsh
                     entry_time=T0,
                     leverage=1.0,
                     liquidation_price=0.0,
+                    stop_loss_price=None,
+                    take_profit_price=None,
                 )
             }
         )
@@ -1179,6 +1181,8 @@ class TestMultipleSymbols:
                     entry_time=T0,
                     leverage=1.0,
                     liquidation_price=0.0,
+                    stop_loss_price=None,
+                    take_profit_price=None,
                 ),
                 eth: PositionSnapshot(
                     symbol=eth,
@@ -1188,6 +1192,8 @@ class TestMultipleSymbols:
                     entry_time=T0,
                     leverage=1.0,
                     liquidation_price=0.0,
+                    stop_loss_price=None,
+                    take_profit_price=None,
                 ),
             },
             executions=[btc_fill, eth_fill],

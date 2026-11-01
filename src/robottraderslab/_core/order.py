@@ -106,8 +106,10 @@ class OrderProtocol(Protocol):
         order_id: The id the venue assigned, which `cancel_order` and
             `modify_order` name the order by.
         kind: The kind of order, a protection included.
-        trigger_price: The level a triggered order waits on, None on an
-            order without a trigger.
+        trigger_price: The level a triggered order waits on, a trailing
+            stop's activation price included; None on an order without a
+            trigger and on a trailing stop that trails from its placement,
+            as Kraken's does.
         limit_price: The price the order rests at, None on an order that
             goes at market when it fills or triggers.
         quantity: The order's size in the base currency, the part already
@@ -122,6 +124,10 @@ class OrderProtocol(Protocol):
         client_order_id: The id the order was placed with, which `tag_of`
             reads the tag from; None on a venue reporting none and on an
             order placed by hand.
+        trailing_distance: The price distance a trailing stop follows the
+            price by, in the terms `place_trailing_stop_order` takes its
+            `distance`; None on an order that is not a trailing stop and on
+            a trailing stop whose reply does not state a price distance.
     """
 
     order_id: str
@@ -151,6 +157,9 @@ class OrderProtocol(Protocol):
 
     @property
     def take_profit_price(self) -> float | None: ...
+
+    @property
+    def trailing_distance(self) -> float | None: ...
 
 
 class ProtectionVenue(Protocol):

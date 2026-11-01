@@ -3,6 +3,7 @@ import re
 import sys
 import types
 from collections.abc import Callable, Iterator
+from functools import partial
 from importlib.metadata import EntryPoint
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from typer.testing import CliRunner
 from robottraderslab._core.actions.members import base_action
 from robottraderslab._core.dynamic_class_loading import _resolve_entry_point
 from robottraderslab.exchanges import FuturesExchangeProtocol, Instrument
+from robottraderslab.futures import read_account_state
 
 matplotlib.use("Agg")
 
@@ -155,6 +157,7 @@ def make_venue() -> Callable[..., Mock]:
         quantity_step: float = 1e-8, minimum_order_value: float | None = None
     ) -> Mock:
         venue = Mock(spec=FuturesExchangeProtocol)
+        venue.get_account_state.side_effect = partial(read_account_state, venue)
         venue.get_instrument.return_value = Instrument(
             quantity_step=quantity_step,
             minimum_order_value=minimum_order_value,

@@ -1,11 +1,17 @@
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
 from unittest.mock import Mock
 
 import pytest
 
 from robottraderslab import Symbol
-from robottraderslab._core import AccountRequirement
+from robottraderslab._core import (
+    BASE_DELAY_SECONDS,
+    MAX_ATTEMPTS,
+    AccountRequirement,
+    AccountSnapshot,
+)
 from robottraderslab.exceptions import (
     BotCriticalError,
     ExchangeRecoverableError,
@@ -15,7 +21,6 @@ from robottraderslab.exceptions import (
 from robottraderslab.exchanges import (
     Balance,
     Execution,
-    FuturesExchangeProtocol,
     MarginMode,
     OrderSide,
     OrderType,
@@ -39,6 +44,7 @@ from robottraderslab.strategies import TrackedPosition
 
 BTCUSDT = Symbol.create("BTC/USDT:USDT")
 ETHUSDT = Symbol.create("ETH/USDT:USDT")
+BTCUSD_SETTLED_IN_USDT = Symbol.create("BTC/USD:USDT")
 WINDOW_START = datetime(2026, 5, 1)
 
 
@@ -87,12 +93,28 @@ def _long(quantity: float) -> PositionSnapshot:
         entry_time=WINDOW_START,
         leverage=1.0,
         liquidation_price=1.0,
+        stop_loss_price=None,
+        take_profit_price=None,
+    )
+
+
+async def _take_snapshot(
+    account: FuturesAccount,
+    requirement: AccountRequirement,
+    *,
+    executions_since: datetime,
+    report_fills: bool = False,
+    base_delay: float = BASE_DELAY_SECONDS,
+) -> AccountSnapshot:
+    request = requirement.state_request(report_fills, MAX_ATTEMPTS, base_delay)
+    return await account._snapshot(
+        requirement, request, executions_since=executions_since
     )
 
 
 @pytest.fixture
-def exchange() -> Mock:
-    exchange = Mock(spec=FuturesExchangeProtocol)
+def exchange(make_venue: Callable[..., Mock]) -> Mock:
+    exchange = make_venue()
     exchange.get_open_positions.return_value = {}
     return exchange
 
@@ -195,7 +217,7 @@ def test_move_take_profit_with_a_price_not_above_zero(exchange, price):
 
 class TestCloseTrackedPosition:
     @pytest.fixture
-    async def account(self, make_venue) -> FuturesAccount:
+    async def account(self, make_venue: Callable[..., Mock]) -> FuturesAccount:
         account = FuturesAccount(make_venue())
         await account._read_instruments([BTCUSDT])
         return account
@@ -248,7 +270,8 @@ class TestSnapshot:
         exchange.get_open_positions.return_value = {}
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account, positions=True),
             executions_since=WINDOW_START,
         )
@@ -267,7 +290,8 @@ class TestSnapshot:
         exchange.get_executions_since.return_value = []
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(
                 account=account,
                 symbols=(BTCUSDT,),
@@ -279,10 +303,22 @@ class TestSnapshot:
             executions_since=WINDOW_START,
         )
 
-        exchange.get_open_positions.assert_awaited_once_with([BTCUSDT])
-        exchange.get_open_orders.assert_awaited_once_with([BTCUSDT])
-        exchange.get_balances.assert_awaited_once_with([BTCUSDT])
-        exchange.get_executions_since.assert_awaited_once_with(WINDOW_START, [BTCUSDT])
+        exchange.get_open_positions.assert_awaited_once_with((BTCUSDT,))
+        exchange.get_open_orders.assert_awaited_once_with((BTCUSDT,))
+        exchange.get_balances.assert_awaited_once_with((BTCUSDT,))
+        exchange.get_executions_since.assert_awaited_once_with(WINDOW_START, (BTCUSDT,))
+
+    async def test_an_undeclared_equity_is_refused_after_the_read(self, exchange):
+        exchange.get_balances.return_value = {}
+        account = FuturesAccount(exchange)
+        snapshot = await _take_snapshot(
+            account,
+            AccountRequirement(account=account, balances=True),
+            executions_since=WINDOW_START,
+        )
+
+        with pytest.raises(BotCriticalError, match="did not declare"):
+            snapshot.equity("USDT")
 
     async def test_populates_the_declared_fields(self, exchange):
         balance = Balance.compute(available=800.0, locked=200.0)
@@ -290,7 +326,8 @@ class TestSnapshot:
         exchange.get_open_orders.return_value = []
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, balances=True, open_orders=True),
             executions_since=WINDOW_START,
         )
@@ -301,7 +338,8 @@ class TestSnapshot:
     async def test_snapshot_carries_the_account_name(self, exchange):
         account = FuturesAccount(exchange, name="hedge")
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account),
             executions_since=WINDOW_START,
         )
@@ -312,7 +350,8 @@ class TestSnapshot:
     async def test_nothing_declared_fetches_nothing(self, exchange):
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account),
             executions_since=WINDOW_START,
         )
@@ -326,31 +365,34 @@ class TestSnapshot:
         exchange.get_executions_since.return_value = []
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account, executions=True),
             executions_since=since,
         )
 
-        exchange.get_executions_since.assert_awaited_once_with(since, [])
+        exchange.get_executions_since.assert_awaited_once_with(since, ())
 
     async def test_report_fills_reads_executions_even_when_undeclared(self, exchange):
         exchange.get_executions_since.return_value = []
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account, symbols=(BTCUSDT,)),
             executions_since=WINDOW_START,
             report_fills=True,
         )
 
-        exchange.get_executions_since.assert_awaited_once_with(WINDOW_START, [BTCUSDT])
+        exchange.get_executions_since.assert_awaited_once_with(WINDOW_START, (BTCUSDT,))
 
     async def test_report_fills_alone_does_not_read_an_account_with_no_symbols(
         self, exchange
     ):
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account),
             executions_since=WINDOW_START,
             report_fills=True,
@@ -374,7 +416,8 @@ class TestSnapshot:
         exchange.get_executions_since.return_value = [stop_loss]
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, symbols=(BTCUSDT,)),
             executions_since=WINDOW_START,
             report_fills=True,
@@ -387,19 +430,21 @@ class TestSnapshot:
         exchange.get_executions_since.return_value = []
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account, symbols=(BTCUSDT,)),
             executions_since=WINDOW_START,
             report_fills=True,
         )
 
-        exchange.get_open_positions.assert_awaited_once_with([BTCUSDT])
+        exchange.get_open_positions.assert_awaited_once_with((BTCUSDT,))
 
     async def test_positions_read_for_attribution_stay_undeclared(self, exchange):
         exchange.get_executions_since.return_value = []
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, symbols=(BTCUSDT,)),
             executions_since=WINDOW_START,
             report_fills=True,
@@ -416,7 +461,8 @@ class TestSnapshot:
         exchange.get_open_positions.return_value = {BTCUSDT: _long(1.0)}
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, symbols=(BTCUSDT,), executions=True),
             executions_since=WINDOW_START,
         )
@@ -432,7 +478,8 @@ class TestSnapshot:
         _stop_loss_filling_while_positions_answer(exchange)
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, symbols=(BTCUSDT,), executions=True),
             executions_since=WINDOW_START,
         )
@@ -442,7 +489,8 @@ class TestSnapshot:
     async def test_entry_fills_are_not_part_of_the_snapshot(self, exchange):
         account = FuturesAccount(exchange)
 
-        await account._snapshot(
+        await _take_snapshot(
+            account,
             AccountRequirement(account=account, notify_entry_fills=True),
             executions_since=WINDOW_START,
         )
@@ -473,7 +521,8 @@ class TestSnapshot:
         exchange.get_equity.side_effect = [10_000.0, 9_000.0]
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, equity=("USDT", "USDC")),
             executions_since=WINDOW_START,
         )
@@ -488,7 +537,8 @@ class TestSnapshot:
         account = FuturesAccount(exchange)
 
         with pytest.raises(ExchangeRecoverableError, match="rejected read"):
-            await account._snapshot(
+            await _take_snapshot(
+                account,
                 AccountRequirement(account=account, executions=True),
                 executions_since=datetime(2026, 5, 1),
             )
@@ -500,7 +550,8 @@ class TestSnapshot:
         ]
         account = FuturesAccount(exchange)
 
-        snapshot = await account._snapshot(
+        snapshot = await _take_snapshot(
+            account,
             AccountRequirement(account=account, positions=True),
             executions_since=WINDOW_START,
             base_delay=0.0,
@@ -508,6 +559,22 @@ class TestSnapshot:
 
         assert snapshot.position(BTCUSDT) is None
         assert exchange.get_open_positions.await_count == 2
+
+    async def test_positions_on_a_symbol_quoted_outside_its_margin_without_balances(
+        self, exchange
+    ):
+        account = FuturesAccount(exchange)
+
+        snapshot = await _take_snapshot(
+            account,
+            AccountRequirement(
+                account=account, symbols=(BTCUSD_SETTLED_IN_USDT,), positions=True
+            ),
+            executions_since=WINDOW_START,
+        )
+
+        assert snapshot.position(BTCUSD_SETTLED_IN_USDT) is None
+        exchange.get_quote_conversion_rate.assert_not_awaited()
 
 
 class TestAttributedExecutions:
