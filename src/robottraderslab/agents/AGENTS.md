@@ -46,11 +46,13 @@ uv run rtlab backtest workspace/<example>-bot-example --no-chart
 
 Drop `--no-chart` to open the interactive chart of the run in a browser.
 
-## Write a strategy
+## Implement a strategy
 
-Follow the `writing-strategies` skill, which ships with the engine beside this file:
-`.claude/skills/writing-strategies/SKILL.md` when `rtlab init claude` set the project up,
-`agents/skills/writing-strategies/SKILL.md` when `rtlab init agents` did.
+Follow the `implementing-strategies` skill, which ships with the engine beside this file.
+
+## Upgrade
+
+Follow the `rtlab-upgrade` skill, which ships beside this file, whenever the user asks to upgrade the engine or a plugin, or to move to a new release.
 
 ## Live trading
 

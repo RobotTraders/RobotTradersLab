@@ -70,6 +70,10 @@ class _Order:
     def take_profit_price(self) -> float | None:
         return self.take_profit.trigger_price if self.take_profit else None
 
+    @property
+    def trailing_distance(self) -> None:
+        return None
+
 
 @dataclass(kw_only=True, slots=True)
 class LimitOrder(_Order):
@@ -116,6 +120,10 @@ class _RestingProtection:
 
     @property
     def take_profit_price(self) -> None:
+        return None
+
+    @property
+    def trailing_distance(self) -> None:
         return None
 
 
@@ -200,6 +208,10 @@ class TriggerOrder:
     @property
     def take_profit_price(self) -> float | None:
         return self.order.take_profit_price
+
+    @property
+    def trailing_distance(self) -> None:
+        return None
 
 
 Order = LimitOrder | MarketOrder | StopLossOrder | TakeProfitOrder | TriggerOrder

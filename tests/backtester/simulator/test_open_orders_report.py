@@ -26,6 +26,32 @@ class TestOpenOrdersReport:
         assert entry.stop_loss_price == 90.0
         assert entry.take_profit_price == 120.0
 
+    async def test_a_limit_entry_states_no_trailing_distance(self, sim, btc_usdt_perp):
+        await sim.exchange.place_limit_order(
+            symbol=btc_usdt_perp,
+            side=OrderSide.BUY,
+            quantity=QUANTITY,
+            price=LIMIT_PRICE,
+        )
+
+        (entry,) = await sim.exchange.get_open_orders([btc_usdt_perp])
+
+        assert entry.trailing_distance is None
+
+    async def test_a_trigger_entry_states_no_trailing_distance(
+        self, sim, btc_usdt_perp
+    ):
+        await sim.exchange.place_market_order(
+            symbol=btc_usdt_perp,
+            side=OrderSide.BUY,
+            quantity=QUANTITY,
+            trigger_price=TRIGGER_PRICE,
+        )
+
+        (trigger,) = await sim.exchange.get_open_orders([btc_usdt_perp])
+
+        assert trigger.trailing_distance is None
+
     async def test_a_limit_entry_without_protections_reports_none_for_both(
         self, sim, btc_usdt_perp
     ):
@@ -94,3 +120,4 @@ class TestOpenOrdersReport:
         assert stop_loss.remaining_quantity is None
         assert stop_loss.stop_loss_price is None
         assert stop_loss.take_profit_price is None
+        assert stop_loss.trailing_distance is None

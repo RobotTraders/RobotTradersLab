@@ -1,10 +1,10 @@
 ---
-name: writing-strategies
-description: Writes a trading strategy for the RobotTradersLab engine as a Python package, registers it with the engine and backtests it until the run completes. Use when asked to write, create, build or change a trading strategy for the RobotTradersLab engine or its rtlab command.
+name: implementing-strategies
+description: Implements a trading strategy for the RobotTradersLab engine as a Python package, registers it with the engine and backtests it until the run completes. Use when asked to implement, code, write, create, build or change a trading strategy for the RobotTradersLab engine or its rtlab command.
 license: Apache-2.0
 ---
 
-# Writing a RobotTradersLab strategy
+# Implementing a RobotTradersLab strategy
 
 A strategy is a Python package installed beside the engine. The engine finds it through an entry point, a configuration file (TOML) names it, and `rtlab backtest` runs it. The same class runs in a backtest and live; nothing in it selects the mode. Every command below runs from the bot project, the folder whose environment holds the engine.
 
@@ -23,7 +23,7 @@ The engine ships a complete strategy to read, a moving-average crossover registe
 
 The guides carry the concepts:
 
-- Build a strategy: https://robottraders.io/lab/docs/build-a-strategy.html
+- Implement a strategy: https://robottraders.io/lab/docs/implement-a-strategy.html
 - Ship a strategy (the package, the entry point, the editable install): https://robottraders.io/lab/docs/ship-a-strategy.html
 - API reference: https://robottraders.io/lab/docs/reference.html
 - Data sources (the candle providers a backtest reads): https://robottraders.io/lab/docs/data-sources.html

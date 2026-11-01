@@ -6,7 +6,7 @@ from .futures_capabilities import FuturesCapabilities
 from .futures_close_builder import FuturesCloseBuilder
 from .futures_close_position import ClosePositionAction
 from .futures_exchange_base import FuturesExchangeBase
-from .futures_exchange_protocol import FuturesExchangeProtocol
+from .futures_exchange_protocol import FuturesExchangeProtocol, read_account_state
 from .futures_limit_order import FuturesLimitOrderAction
 from .futures_market_order import FuturesMarketOrderAction
 from .futures_order_batch import (
@@ -47,4 +47,5 @@ __all__ = [
     "UpdatePositionTakeProfitAction",
     "modify_in_order",
     "place_in_order",
+    "read_account_state",
 ]

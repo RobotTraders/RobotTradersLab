@@ -122,6 +122,8 @@ def test_futures_strategies_gate():
 
 def test_exchanges_gate():
     assert sorted(exchanges.__all__) == [
+        "AccountState",
+        "AccountStateRequest",
         "ActionResult",
         "Balance",
         "BaseExchangeAction",
@@ -184,6 +186,7 @@ def test_exchanges_gate():
         "no_candles",
         "page_bounds",
         "process_bot_bytes",
+        "read_account_state",
         "tag_of",
         "to_milliseconds",
         "venue_trigger_type",

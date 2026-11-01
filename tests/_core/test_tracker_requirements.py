@@ -63,6 +63,8 @@ def _snapshots(
                 entry_time=datetime(2025, 1, 1, tzinfo=timezone.utc),
                 leverage=1.0,
                 liquidation_price=None,
+                stop_loss_price=None,
+                take_profit_price=None,
             )
         }
     )

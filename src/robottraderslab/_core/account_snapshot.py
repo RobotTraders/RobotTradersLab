@@ -1,8 +1,10 @@
 from typing import NoReturn, Protocol
 
+from .account_state import AccountState
 from .balance import Balance
 from .currency import Currency
 from .exceptions import BotCriticalError
+from .fill_effects import attribute_fill_effects
 from .margin import MarginSettings
 from .order import (
     RESTING_ENTRY_KINDS,
@@ -29,7 +31,7 @@ class AccountSnapshot:
 
     Every accessor is a pure in-memory read. Only declared fields are
     populated, and reading an undeclared one raises `BotCriticalError`,
-    so no read ever leaves the declared burst.
+    so no read ever leaves the declared state.
     """
 
     def __init__(
@@ -71,6 +73,41 @@ class AccountSnapshot:
         self._conversion_rates = conversion_rates
         self._executions = executions
         self._executions_declared = executions_declared
+
+    @classmethod
+    def from_state(
+        cls,
+        state: AccountState,
+        *,
+        account_name: str,
+        positions_declared: bool,
+        executions_declared: bool,
+    ) -> "AccountSnapshot":
+        """The positions a read took only to measure the executions stay out
+        of the snapshot unless the strategy declared them.
+
+        Args:
+            state: What the venue answered the account's state read.
+            account_name: Labels the account in errors.
+            positions_declared: Whether the strategy declared the positions.
+            executions_declared: Whether the strategy declared the executions.
+        """
+        attributed = (
+            attribute_fill_effects(state.executions, state.positions)
+            if state.executions is not None and state.positions is not None
+            else None
+        )
+        return cls(
+            account_name=account_name,
+            open_orders=state.open_orders,
+            positions=state.positions if positions_declared else None,
+            balances=state.balances,
+            equities=state.equities or None,
+            margin_settings=state.margin_settings,
+            conversion_rates=state.conversion_rates or None,
+            executions=attributed,
+            executions_declared=executions_declared,
+        )
 
     def balance(self, currency: Currency) -> Balance:
         """Return the funds held in the currency, one of the margin currencies

@@ -241,6 +241,59 @@ def test_init_for_agents_refuses_an_option(kind, option, cli, project):
     assert sorted(project.iterdir()) == before
 
 
+@pytest.mark.parametrize(("kind", "instructions"), AGENT_KINDS)
+def test_init_for_agents_refuses_an_edited_copy(kind, instructions, cli, project):
+    cli.invoke(app, ["init", kind])
+    (project / instructions).write_text("mine", encoding="utf-8")
+
+    refused = cli.invoke(app, ["init", kind])
+
+    assert refused.exit_code == 1
+    assert (
+        f"Edited since rtlab init wrote it: {project / instructions}" in refused.stderr
+    )
+    assert (project / instructions).read_text(encoding="utf-8") == "mine"
+
+
+@pytest.mark.parametrize(("kind", "instructions"), AGENT_KINDS)
+def test_init_for_agents_force_replaces_an_edited_copy(
+    kind, instructions, cli, project
+):
+    cli.invoke(app, ["init", kind])
+    (project / instructions).write_text("mine", encoding="utf-8")
+
+    forced = cli.invoke(app, ["init", kind, "--force"])
+
+    assert forced.exit_code == 0
+    assert (project / instructions).read_text(encoding="utf-8") != "mine"
+
+
+@pytest.mark.parametrize("kind", ["live", "cron"])
+def test_init_refuses_force_for_a_kind_that_copies_no_agent_files(
+    kind, cli, monkeypatch
+):
+    received: list[bool] = []
+    for module in ("workspace", "cron"):
+        monkeypatch.setattr(
+            import_module(f"robottraderslab.scaffold.{module}"),
+            "main",
+            lambda **kwargs: received.append(True),
+        )
+
+    invoked = cli.invoke(app, ["init", kind, "--force"])
+
+    assert invoked.exit_code == 2
+    assert received == []
+
+
+@pytest.mark.parametrize("kind", AGENT_KIND_NAMES)
+def test_init_for_agents_names_force_as_the_one_option_it_takes(kind, cli, project):
+    invoked = cli.invoke(app, ["init", kind, "--force", "--workspace", "elsewhere"])
+
+    assert invoked.exit_code == 2
+    assert f"`init {kind}` takes no option but --force" in invoked.stderr
+
+
 @pytest.mark.parametrize("kind", AGENT_KIND_NAMES)
 def test_init_for_agents_outside_any_project_is_refused(
     kind, cli, tmp_path, monkeypatch

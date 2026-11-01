@@ -1,8 +1,6 @@
-import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Any
 
 from robottraderslab._core import (
     BASE_DELAY_SECONDS,
@@ -11,6 +9,7 @@ from robottraderslab._core import (
     NO_ORDER_OVERRIDES,
     AccountRequirement,
     AccountSnapshot,
+    AccountStateRequest,
     Execution,
     Instrument,
     MarginMode,
@@ -18,7 +17,6 @@ from robottraderslab._core import (
     OrderSettings,
     OrderSide,
     PositionSide,
-    PositionSnapshot,
     Symbol,
     SymbolNotListedError,
     TrackedPosition,
@@ -548,60 +546,6 @@ class FuturesAccount:
             reference_price=reference_price,
         )
 
-    def _declared_reads(
-        self,
-        requirement: AccountRequirement,
-        report_fills: bool,
-        max_attempts: int,
-        base_delay: float,
-    ) -> dict[str, Awaitable[Any]]:
-        fetches: dict[str, Awaitable[Any]] = {}
-        symbols = list(requirement.symbols)
-
-        def declare(key: str, fn: Callable[..., Awaitable[Any]], *args: Any) -> None:
-            fetches[key] = retry_on_transient(
-                fn, *args, max_attempts=max_attempts, base_delay=base_delay
-            )
-
-        if requirement.open_orders:
-            declare("open_orders", self._exchange.get_open_orders, symbols)
-        if requirement.positions or requirement.needs_executions(report_fills):
-            declare("positions", self._exchange.get_open_positions, symbols)
-        if requirement.balances:
-            declare("balances", self._exchange.get_balances, symbols)
-            for symbol in _cross_quoted(requirement.symbols):
-                declare(
-                    f"rate:{symbol}", self._exchange.get_quote_conversion_rate, symbol
-                )
-        if requirement.margin_settings:
-            declare("margin_settings", self._exchange.get_margin_settings, symbols)
-        for currency in requirement.equity:
-            declare(f"equity:{currency}", self._exchange.get_equity, currency)
-        return fetches
-
-    async def _executions_after(
-        self,
-        positions_read: asyncio.Future[dict[Symbol, PositionSnapshot]],
-        since: datetime,
-        symbols: Iterable[Symbol],
-        *,
-        max_attempts: int,
-        base_delay: float,
-    ) -> list[Execution]:
-        """Read the executions once the positions read has answered.
-
-        A stop-loss that fills before the positions answer is in the
-        executions answered after it, so a position seen closed always has
-        its stop-loss in the same snapshot.
-        """
-        await positions_read
-        return await self._executions_since(
-            since,
-            symbols,
-            max_attempts=max_attempts,
-            base_delay=base_delay,
-        )
-
     async def _executions_since(
         self,
         since: datetime,
@@ -645,68 +589,15 @@ class FuturesAccount:
     async def _snapshot(
         self,
         requirement: AccountRequirement,
+        request: AccountStateRequest,
         *,
         executions_since: datetime,
-        report_fills: bool = False,
-        max_attempts: int = MAX_ATTEMPTS,
-        base_delay: float = BASE_DELAY_SECONDS,
     ) -> AccountSnapshot:
-        """Fetch the declared state in one concurrent burst, the executions
-        read starting once the positions read has answered.
-
-        Args:
-            requirement: What the strategy declared for this account in `setup`.
-            executions_since: Start of the executions window.
-            report_fills: See `AccountRequirement.needs_executions`.
-            max_attempts: Total retry attempts for transient errors, per read.
-            base_delay: Base retry delay in seconds (doubled on each retry).
-
-        Returns:
-            A snapshot populated with the declared fields, plus executions
-            on top when report_fills asks for them, each attributed against
-            the positions the same burst read.
-        """
-        fetches = self._declared_reads(
-            requirement,
-            report_fills,
-            max_attempts,
-            base_delay,
-        )
-        reads = {key: asyncio.ensure_future(read) for key, read in fetches.items()}
-        if requirement.needs_executions(report_fills):
-            reads["executions"] = asyncio.ensure_future(
-                self._executions_after(
-                    reads["positions"],
-                    executions_since,
-                    requirement.symbols,
-                    max_attempts=max_attempts,
-                    base_delay=base_delay,
-                )
-            )
-        results = dict(zip(reads, await asyncio.gather(*reads.values())))
-
-        executions = results.get("executions")
-        attributed = (
-            attribute_fill_effects(executions, results["positions"])
-            if executions is not None
-            else None
-        )
-        equities = {
-            currency: results[f"equity:{currency}"] for currency in requirement.equity
-        }
-        conversion_rates = {
-            symbol: results[f"rate:{symbol}"]
-            for symbol in _cross_quoted(requirement.symbols)
-        }
-        return AccountSnapshot(
+        state = await self._exchange.get_account_state(request, executions_since)
+        return AccountSnapshot.from_state(
+            state,
             account_name=self.name,
-            open_orders=results.get("open_orders"),
-            positions=results.get("positions") if requirement.positions else None,
-            balances=results.get("balances"),
-            equities=equities or None,
-            margin_settings=results.get("margin_settings"),
-            conversion_rates=conversion_rates or None,
-            executions=attributed,
+            positions_declared=requirement.positions,
             executions_declared=requirement.executions,
         )
 
@@ -719,7 +610,3 @@ class FuturesAccount:
                 logger.debug("%s", error)
                 unlisted.add(symbol)
         return frozenset(unlisted)
-
-
-def _cross_quoted(symbols: tuple[Symbol, ...]) -> tuple[Symbol, ...]:
-    return tuple(symbol for symbol in symbols if symbol.quote != symbol.margin)

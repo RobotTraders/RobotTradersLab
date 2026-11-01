@@ -238,6 +238,8 @@ class TestPositionClose:
                 entry_time=datetime(2026, 5, 1),
                 leverage=1.0,
                 liquidation_price=1.0,
+                stop_loss_price=None,
+                take_profit_price=None,
             )
         }
         close = (

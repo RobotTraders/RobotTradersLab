@@ -27,6 +27,8 @@ def _long(quantity: float, symbol: Symbol = BTCUSDT) -> PositionSnapshot:
         entry_time=datetime(2026, 5, 1, tzinfo=UTC),
         leverage=1.0,
         liquidation_price=1.0,
+        stop_loss_price=None,
+        take_profit_price=None,
     )
 
 
@@ -39,6 +41,8 @@ def _short(quantity: float, symbol: Symbol = BTCUSDT) -> PositionSnapshot:
         entry_time=datetime(2026, 5, 1, tzinfo=UTC),
         leverage=1.0,
         liquidation_price=1.0,
+        stop_loss_price=None,
+        take_profit_price=None,
     )
 
 

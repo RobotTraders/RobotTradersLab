@@ -13,7 +13,12 @@ from robottraderslab.backtester.simulator import (
     SimulatedFuturesExchange,
     fee_model_for,
 )
-from robottraderslab.exchanges import OrderProtocol, PositionSnapshot
+from robottraderslab.exchanges import (
+    OrderProtocol,
+    OrderSide,
+    PositionSnapshot,
+    StopLoss,
+)
 from robottraderslab.futures import FuturesAccount
 
 
@@ -127,3 +132,29 @@ async def declared_account(sim: SimulationFixture, btc_usdt_perp) -> FuturesAcco
     account = FuturesAccount(sim.exchange)
     await account._read_instruments([btc_usdt_perp])
     return account
+
+
+@pytest.fixture
+async def holding_sim(
+    sim: SimulationFixture, btc_usdt_perp: Symbol, eth_usdt_perp: Symbol
+) -> tuple[SimulationFixture, tuple[Symbol, ...]]:
+    """A simulator holding a BTC long reopened after its stop-loss fired, a resting
+    ETH buy, and a EUR-quoted symbol with its rate recorded.
+    """
+    euro_perp = Symbol.create("ETH/EUR:USDT")
+    sim.simulation_engine.record_prices({Symbol("EUR", "USDT"): 1.1})
+    await sim.exchange.place_market_order(
+        symbol=btc_usdt_perp,
+        side=OrderSide.BUY,
+        quantity=1.0,
+        stop_loss=StopLoss(trigger_price=150.0),
+    )
+    sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=180.0, high=220.0, close=200.0)
+    await sim.exchange.place_limit_order(
+        symbol=eth_usdt_perp, side=OrderSide.BUY, quantity=2.0, price=50.0
+    )
+    sim.simulate_on_current_ohlcvs(btc_usdt_perp, low=140.0, high=200.0, close=160.0)
+    await sim.exchange.place_market_order(
+        symbol=btc_usdt_perp, side=OrderSide.BUY, quantity=1.0
+    )
+    return sim, (btc_usdt_perp, eth_usdt_perp, euro_perp)

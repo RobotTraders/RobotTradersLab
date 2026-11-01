@@ -51,6 +51,8 @@ def _position(symbol: Symbol = BTC) -> PositionSnapshot:
         entry_time=datetime(2025, 1, 1, tzinfo=timezone.utc),
         leverage=1.0,
         liquidation_price=0.0,
+        stop_loss_price=None,
+        take_profit_price=None,
     )
 
 

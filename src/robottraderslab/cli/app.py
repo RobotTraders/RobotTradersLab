@@ -16,6 +16,7 @@ from robottraderslab.exceptions import (
 )
 from robottraderslab.scaffold import (
     CrontabError,
+    EditedCopiesError,
     ExampleError,
     OutsideProjectError,
     project_folder,
@@ -154,6 +155,12 @@ _AccountSymbol = Annotated[
 ]
 _DEFAULT_SECRETS_FILE = Path("secrets.toml")
 _DEFAULT_ACCOUNT_SYMBOL = "BTC/USDT:USDT"
+_Force = Annotated[
+    bool,
+    typer.Option(
+        "--force", help="Replace the copies of `claude` or `agents` you edited"
+    ),
+]
 _Workspace = Annotated[
     Path | None,
     typer.Option(
@@ -318,6 +325,7 @@ def init(
     kind: _InitKindArgument,
     registry: _Registry = None,
     workspace: _Workspace = None,
+    force: _Force = False,
 ) -> None:
     """Set up a project for live trading or for an AI agent: `live` lays out
     the example secrets file and the example registry of bots in the workspace,
@@ -328,13 +336,19 @@ def init(
     `.claude/skills/`, leaving `CLAUDE.md` untouched; `agents` writes the same
     files into `agents/`, for any other agent to copy and rename as it expects.
     A rerun of `claude` or `agents` replaces the copies with the ones the
-    installed engine ships.
+    installed engine ships, and refuses one you edited unless `--force` is given.
     """
     if kind in (_InitKind.AGENTS, _InitKind.CLAUDE):
         if workspace is not None or registry is not None:
-            ctx.fail(f"`init {kind}` takes no option")
-        _init(kind, project=_project())
+            ctx.fail(f"`init {kind}` takes no option but --force")
+        project = _project()
+        try:
+            _init(kind, project=project, force=force)
+        except EditedCopiesError as e:
+            _refuse(e)
         return
+    if force:
+        ctx.fail("--force goes with `init claude` or `init agents`")
     if kind is _InitKind.CRON:
         if workspace is not None:
             ctx.fail("--workspace goes with `init live`")

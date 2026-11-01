@@ -80,6 +80,8 @@ def _position(
         entry_time=datetime(2026, 1, 1, tzinfo=UTC),
         leverage=1.0,
         liquidation_price=10.0,
+        stop_loss_price=None,
+        take_profit_price=None,
     )
 
 
