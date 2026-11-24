@@ -6,15 +6,97 @@ on:
       - main
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.13"
 
 jobs:
-  ci:
-    name: Continuous Integration
+  changes:
+    name: Name the Packages the Change Reaches
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.13]
+    outputs:
+      core: ${{ steps.packages.outputs.core }}
+      engine: ${{ steps.packages.outputs.engine }}
+      plugins: ${{ steps.packages.outputs.plugins }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Name the packages from the changed paths
+        id: packages
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          core=false
+          engine=false
+          every_plugin=false
+          declare -A touched=()
+          if [ "$EVENT" = workflow_dispatch ]; then
+            core=true
+            engine=true
+            every_plugin=true
+          else
+            case "$EVENT" in
+              pull_request) revisions=("origin/$BASE_REF...HEAD") ;;
+              *) revisions=("$BEFORE" HEAD) ;;
+            esac
+            # The paths are NUL-separated, so no name is quoted or split, whatever characters it holds.
+            git diff --name-only --no-renames -z "${revisions[@]}" > "$RUNNER_TEMP/changed-paths"
+            # A path of the core reaches the core alone, since the engine and the plugins resolve it from PyPI.
+            # Every other path outside plugins/ reaches the engine: a file of the root, a folder of the engine or .github/.
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                plugins/*) name=${path#plugins/}; touched["${name%%/*}"]=1 ;;
+                robottraderslab-core/*) core=true ;;
+                .github/*) core=true; engine=true; every_plugin=true ;;
+                *) engine=true ;;
+              esac
+            done < "$RUNNER_TEMP/changed-paths"
+          fi
+
+          # A repository without the core's folder, a fork or one not yet released, has no core to check.
+          [ -f robottraderslab-core/pyproject.toml ] || core=false
+
+          plugins=""
+          for folder in plugins/*/; do
+            [ -f "${folder}pyproject.toml" ] || continue
+            name=$(basename "$folder")
+            if [ "$every_plugin" = true ] || [ -n "${touched[$name]:-}" ]; then
+              plugins="$plugins${plugins:+,}\"$name\""
+            fi
+          done
+
+          echo "core=$core" >> "$GITHUB_OUTPUT"
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+          echo "plugins=[$plugins]" >> "$GITHUB_OUTPUT"
+
+  core:
+    name: Core
+    needs: changes
+    if: needs.changes.outputs.core == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Run the Core Checks
+        uses: ./.github/actions/core-checks
+        with:
+          directory: robottraderslab-core
+          python-version: ${{ env.PYTHON_VERSION }}
+
+  engine:
+    name: Engine
+    needs: changes
+    if: needs.changes.outputs.engine == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -22,4 +104,41 @@ jobs:
       - name: Run the Engine Checks
         uses: ./.github/actions/ci
         with:
-          python-version: ${{ matrix.python-version }}
+          directory: robottraderslab
+          python-version: ${{ env.PYTHON_VERSION }}
+
+  plugins:
+    name: Plugin (${{ matrix.package }}, ${{ matrix.resolution == 'highest' && 'newest engine' || 'engine floor' }})
+    needs: changes
+    if: needs.changes.outputs.plugins != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJson(needs.changes.outputs.plugins) }}
+        resolution: [highest, lowest-direct]
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Run the Plugin Checks
+        uses: ./.github/actions/plugin-checks
+        with:
+          directory: plugins/${{ matrix.package }}
+          resolution: ${{ matrix.resolution }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+  ci:
+    name: Every check passed
+    needs: [changes, core, engine, plugins]
+    if: always() && needs.changes.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when any check failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          case "$RESULTS" in
+            *failure*|*cancelled*) exit 1 ;;
+          esac

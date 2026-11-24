@@ -1,0 +1,22 @@
+from typing import Any
+
+from robottraderslab.indicators import sma
+from robottraderslab.strategies import Candles, ChartLine
+
+
+# The engine calls this function once for each profile when it writes a
+# backtest's report.html, and draws the lines it returns beside the candles.
+# pyproject.toml registers it under `robot_traders_lab.indicators` with the
+# same name as the strategy. How to draw more:
+# https://robottraders.io/lab/docs/implement-a-strategy.html#drawing-on-the-chart
+def chart_lines(candles: Candles, indicator_params: dict[str, Any]) -> list[ChartLine]:
+    """
+    Args:
+        indicator_params: The profile's `fast_ma_length` and `slow_ma_length`.
+    """
+    fast = indicator_params["fast_ma_length"]
+    slow = indicator_params["slow_ma_length"]
+    return [
+        ChartLine(name=f"SMA {fast}", values=sma(candles.close, fast), colour="blue"),
+        ChartLine(name=f"SMA {slow}", values=sma(candles.close, slow), colour="red"),
+    ]

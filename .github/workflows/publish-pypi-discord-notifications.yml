@@ -1,0 +1,42 @@
+name: Publish robottraderslab-discord-notifications to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the distributions
+    if: startsWith(github.event.release.tag_name, 'robottraderslab-discord-notifications-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Build the distributions of robottraderslab-discord-notifications
+        uses: ./.github/actions/build-distributions
+        with:
+          directory: plugins/robottraderslab-discord-notifications
+          tag-prefix: robottraderslab-discord-notifications-v
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-discord-notifications
+      url: https://pypi.org/p/robottraderslab-discord-notifications
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: distributions
+          path: dist/
+
+      - name: Publish the distributions with their attestations
+        uses: pypa/gh-action-pypi-publish@release/v1

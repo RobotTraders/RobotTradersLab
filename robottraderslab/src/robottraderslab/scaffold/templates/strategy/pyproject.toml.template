@@ -1,0 +1,16 @@
+[project]
+name = "$name"
+version = "0.1.0"
+description = "A strategy for the RobotTradersLab engine"
+requires-python = ">=3.13,<3.14"
+dependencies = ["robottraderslab>=$engine_version"]
+
+[project.entry-points."robot_traders_lab.strategies"]
+$module = "$module.main:$class_name"
+
+[project.entry-points."robot_traders_lab.indicators"]
+$module = "$module.chart_indicators:chart_lines"
+
+[build-system]
+requires = ["uv_build>=0.10.4,<0.11.0"]
+build-backend = "uv_build"

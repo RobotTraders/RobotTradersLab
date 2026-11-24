@@ -14,7 +14,17 @@ The signature is recorded in this repository, on the `cla-signatures` branch, an
 
 ## Checks on a pull request
 
-The CI pipeline runs on every pull request out of draft: the formatter and the linter, the type checker, the tests, and a backtest and a live run of the smoke-test bot.
+The CI pipeline runs on every pull request out of draft and checks the packages the changed paths reach: the engine for a path outside `plugins/`, a plugin for a path under its folder, and every plugin for a path under `.github/`. Each package gets the formatter and the linter, the type checker and the tests; the engine also gets a backtest and a live run of the smoke-test bot.
+
+## Issues
+
+Issues on this repository are for three things, each through its own form: a bug in the code, a proposal or a request for a new feature or an improvement to the code, and a mistake or gap in the documentation.
+
+This repository takes the issues of the whole Robot Traders Lab: the engine and every plugin. The bug and feature forms ask which part your issue is about.
+
+If you need help with installing, configuring or running your bot, please look in the [documentation](https://robottraders.io/lab/docs/contents.html) first, or use our [AI toolkit](https://robottraders.io/lab/docs/ai-agents.html), which sets up an AI agent that knows the Robot Traders Lab and can help you with your own setup. If neither answers your question, you are welcome to ask on the [Robot Traders Discord server](https://discord.com/invite/aQJ9PvC2Hz). An issue that asks for help is closed with a pointer there.
+
+Open issues are ranked by thumbs up reactions. To show you want an issue fixed, please add a thumbs up to it instead of a comment.
 
 ## Credit
 

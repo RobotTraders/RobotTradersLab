@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Read the documentation
+    url: https://robottraders.io/lab/docs/contents.html
+    about: The documentation covers installing the Robot Traders Lab, writing a strategy and running a bot. You can also use the AI toolkit, which sets up an AI agent that knows the Robot Traders Lab and can help you with your own setup.
+  - name: Ask for help on Discord
+    url: https://discord.com/invite/aQJ9PvC2Hz
+    about: Please ask your questions about installing, configuring or running your bot on the Robot Traders Discord server.

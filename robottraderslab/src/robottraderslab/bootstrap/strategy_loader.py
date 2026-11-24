@@ -1,0 +1,109 @@
+import logging
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from robottraderslab._internal import (
+    Candles,
+    ChartLine,
+    ClassLoadingError,
+    find_class,
+    load_class,
+)
+from robottraderslab.exceptions import BotCriticalError, ProfileConfigError
+from robottraderslab.strategies import StrategyProtocol
+
+logger = logging.getLogger(__name__)
+
+_Section = dict[str, Any]
+
+_STRATEGY_CLASS_KEY = "strategy_class"
+_STRATEGY_ENTRY_POINT_GROUP = "robot_traders_lab.strategies"
+_INDICATORS_ENTRY_POINT_GROUP = "robot_traders_lab.indicators"
+
+ChartLinesFunc = Callable[[Candles, dict[str, Any]], list[ChartLine]]
+
+
+def load_strategy(
+    strategy_config: _Section, *, config_file: Path | None = None, **auto_params: Any
+) -> StrategyProtocol:
+    """Load the strategy a config names, with its own parameters applied.
+
+    Args:
+        strategy_config: must contain a `strategy_class` key specifying either:
+          - A short name registered via entry points (e.g., "impulse")
+          - A full class path (e.g., "robottraderslab_impulse.impulse.ImpulseStrategy")
+        config_file: The configuration file the sections were read from; a
+            refusal while the strategy is built names it.
+
+    Raises:
+        BotCriticalError: If the strategy refuses its configuration.
+        ProfileConfigError: If the strategy's profile class refuses a profile
+            and the run is not live trading.
+    """
+    strategy_config.update(**auto_params)
+    strategy_name = _extract_strategy_name(strategy_config)
+    strategy_class = _load_strategy_class(strategy_name)
+    try:
+        instance = strategy_class(**strategy_config)
+    except BotCriticalError as error:
+        if config_file is None:
+            raise
+        raise BotCriticalError(f"`{config_file}`: {error}") from error
+    except ProfileConfigError as refusal:
+        if config_file is None:
+            raise
+        raise ProfileConfigError(f"`{config_file}`: {refusal}") from refusal
+    strategy = _validate_strategy(strategy_name, instance)
+    logger.debug(f"Strategy `{strategy_name}` loaded")
+    return strategy
+
+
+def load_lightweight_chart_indicators(
+    indicators_name: str,
+    candles: Candles,
+    indicators_params: dict[str, Any],
+) -> list[ChartLine]:
+    """A strategy registers an indicators entry point only when it has lines to
+    draw.
+
+    Args:
+        indicators_name: Entry point name; a dotted path matches no entry point
+            and so draws no lines.
+
+    Raises:
+        BotCriticalError: If the entry point is registered but cannot be
+            loaded.
+    """
+    try:
+        chart_lines: ChartLinesFunc | None = find_class(
+            indicators_name, _INDICATORS_ENTRY_POINT_GROUP
+        )
+        if chart_lines is None:
+            return []
+        return chart_lines(candles, indicators_params)
+    except ClassLoadingError as e:
+        raise BotCriticalError(str(e)) from e
+
+
+def _extract_strategy_name(config: _Section) -> str:
+    try:
+        name: str = config.pop(_STRATEGY_CLASS_KEY)
+        return name
+    except KeyError:
+        raise BotCriticalError(f"`{_STRATEGY_CLASS_KEY}` is a required config key")
+
+
+def _load_strategy_class(strategy_name: str) -> Any:
+    try:
+        return load_class(strategy_name, _STRATEGY_ENTRY_POINT_GROUP)
+    except ClassLoadingError as e:
+        raise BotCriticalError(str(e)) from e
+
+
+def _validate_strategy(strategy_class_name: str, instance: Any) -> StrategyProtocol:
+    if not isinstance(instance, StrategyProtocol):
+        raise TypeError(
+            f"Make sure your strategy class `{strategy_class_name}` implements `StrategyProtocol` accordingly"
+        )
+    return instance
