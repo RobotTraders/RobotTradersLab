@@ -1,0 +1,56 @@
+name: Documentation
+description: Report a mistake, an unclear passage or a missing topic in the documentation.
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a mistake in a page of the documentation, a passage that is unclear, or a page or topic you want added. Please choose which one first, then fill in each field for that case.
+
+        Everything written in an issue is public. Share only what the issue needs, and never your secrets file, an API key or account details.
+
+        Many thanks for helping improve the Lab!
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is this about?
+      options:
+        - A mistake in a page
+        - An unclear passage
+        - A new page or topic to add
+    validations:
+      required: true
+  - type: input
+    id: page
+    attributes:
+      label: Page or topic
+      description: For a mistake or an unclear passage, paste the URL of the page on the documentation site. For a new page, name the topic.
+      placeholder: "https://robottraders.io/lab/docs/getting-started.html"
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: What is wrong, unclear or missing
+      description: For a mistake or an unclear passage, quote it, then say what is wrong or hard to follow in it. For a new page, say what it should cover.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to find
+      description: Say what you were trying to do when you looked for it, and what the documentation should have told you.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording or outline
+      description: If you have one, write the text you would put in the page. For a new page, list the headings you would give it.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no report of this.
+          required: true

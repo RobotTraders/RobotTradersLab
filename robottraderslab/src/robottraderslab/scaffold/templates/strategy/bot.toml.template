@@ -1,0 +1,22 @@
+[strategy]
+strategy_class = "$module"
+
+[[strategy.profiles]]
+symbol = "BTC/USDC:USDC"
+timeframe = "4h"
+fast_ma_length = 10
+slow_ma_length = 30
+total_balance_ratio = 0.25
+
+[backtest]
+initial_balance = { USDC = 10000.0 }
+# Hyperliquid's base fee rates: https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees
+maker_fee_rate = 0.00015
+taker_fee_rate = 0.00045
+# Hyperliquid serves only the latest 5000 candles of a timeframe, so keep the
+# dates within them, 833 days for 4h and 208 days for 1h.
+start_date = "2026-01-01"
+end_date = "2026-07-01"
+
+[backtest.ohlcv_provider]
+ohlcv_provider = "ccxt_hyperliquid"

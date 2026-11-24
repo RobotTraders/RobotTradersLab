@@ -1,0 +1,105 @@
+name: Bug report
+description: Report a bug in the Robot Traders Lab.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for a bug in the code: something that goes wrong again each time the same steps are repeated.
+
+        If you need help with installing, configuring or running your bot, please look in the [documentation](https://robottraders.io/lab/docs/contents.html) first, or use our [AI toolkit](https://robottraders.io/lab/docs/ai-agents.html), which sets up an AI agent that knows the Robot Traders Lab and can help you with your own setup. If neither answers your question, you are welcome to ask on the [Robot Traders Discord server](https://discord.com/invite/aQJ9PvC2Hz).
+
+        Please fill in each field in full. The more complete the report, the faster the bug can be reproduced and fixed.
+
+        Everything written in an issue is public. Share only what the issue needs, and never your secrets file, an API key or account details.
+
+        Many thanks for helping improve the Lab!
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is this about?
+      description: Pick the engine, or the plugin the problem comes from. If you cannot tell, pick Not sure.
+      options:
+        - Engine (robottraderslab)
+        - Impulse strategy
+        - Envelope strategy
+        - Bitget connector
+        - Kraken connector
+        - Dukascopy data provider
+        - Discord notifications
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Engine version
+      description: Run `uv run rtlab --version` in your terminal and paste what it prints.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Run `uv run python --version` in your terminal and paste what it prints.
+      placeholder: "Python 3.13.0"
+    validations:
+      required: true
+  - type: input
+    id: plugins
+    attributes:
+      label: Plugins and their versions
+      description: Plugins are the add-on packages that connect an exchange or provide a strategy. Run `uv pip list` in your terminal and paste the lines for the plugins your bot uses, with their versions.
+      placeholder: "robottraderslab-bitget 0.1.0, robottraderslab-impulse 0.1.0"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what you expected
+      description: Write what happened, then what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Command and steps to reproduce
+      description: Please write the exact `rtlab` command you ran. Then say whether the bug also happens on the example bot the Robot Traders Lab ships, which `uv run rtlab new impulse impulse-bot-example` creates. Last, list only the settings you changed in the example's `bot.toml` that make the bug appear.
+      placeholder: |
+        1. Command: `uv run rtlab backtest workspace/impulse-bot-example --no-chart`
+        2. Also happens on the example bot: yes or no
+        3. Settings changed from the example that make the bug appear: ...
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or traceback
+      description: >-
+        Please paste the full log of the run, from its first line to the failure, not an excerpt. Read it before you paste it, and remove anything private, such as an account identifier. The log is the text the Robot Traders Lab writes while it runs. A saved backtest writes `backtest.log` in its run folder under `backtests/`. A live bot writes `logs/live.log` in its folder.
+        A traceback is the list of lines Python prints when it fails. To print it in the terminal, add `--debug` before the command, as in `uv run rtlab --debug backtest workspace/impulse-bot-example`.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no report of this bug.
+          required: true
+        - label: I reproduced the bug on the latest release (the newest published version of the Robot Traders Lab).
+          required: true
+        - label: The log and the configuration I pasted contain no API key or secret.
+          required: true
+        - label: This is a bug in the code, not a request for help.
+          required: true

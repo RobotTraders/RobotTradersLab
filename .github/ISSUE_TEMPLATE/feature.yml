@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose or ask for a new feature or an improvement to the Robot Traders Lab.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to propose or ask for a new feature, or an improvement to an existing one, in the Robot Traders Lab code.
+
+        Open issues are ranked by thumbs up reactions, so please describe your need clearly enough for others to recognise it as theirs.
+
+        Everything written in an issue is public. Share only what the issue needs, and never your secrets file, an API key or account details.
+
+        Many thanks for helping improve the Lab!
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part is this about?
+      description: Pick the engine, or the plugin your idea is about. If you cannot tell, pick Not sure.
+      options:
+        - Engine (robottraderslab)
+        - Impulse strategy
+        - Envelope strategy
+        - Bitget connector
+        - Kraken connector
+        - Dukascopy data provider
+        - Discord notifications
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: Describe what you want the Lab to let you do, and the situation in which you need it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: Describe how the Lab should behave once your need is met. Where it makes the idea exact, add a command, a setting from your `bot.toml` or an example.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: List the other approaches you considered, and any workaround you use today.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open and closed issues and found no earlier proposal of this.
+          required: true
