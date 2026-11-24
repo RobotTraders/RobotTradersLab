@@ -1,0 +1,36 @@
+name: Build the Distributions
+description: Checks that the release tag names the version of the package in the directory, builds its source distribution and wheel, and keeps them for the publish job.
+
+inputs:
+  directory:
+    description: The directory holding the package's pyproject.toml.
+    required: true
+  tag-prefix:
+    description: The part of the release tag before the version, <PyPI name of the package>-v, such as robottraderslab-v or robottraderslab-impulse-v.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.0.1
+
+    - name: Check the release tag names the project version
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      env:
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+      run: |
+        version="$(uv version --short)"
+        test "$TAG_PREFIX$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME does not name version $version as $TAG_PREFIX$version" >&2; exit 1; }
+
+    - name: Build the source distribution and the wheel
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      run: uv build --out-dir dist
+
+    - name: Keep the distributions for the publish job
+      uses: actions/upload-artifact@v7
+      with:
+        name: distributions
+        path: ${{ inputs.directory }}/dist/

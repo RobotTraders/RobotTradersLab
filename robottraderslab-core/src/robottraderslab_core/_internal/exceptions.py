@@ -1,0 +1,144 @@
+from .timeframes import TimeFrame
+
+
+class ExchangeRecoverableError(Exception):
+    """The operation failed but the system can continue with other operations."""
+
+    pass
+
+
+class ExchangeTransientError(ExchangeRecoverableError):
+    """A recoverable failure worth retrying before it is treated as one.
+
+    Covers 5xx responses, connection drops, and timeouts: conditions that
+    are likely to resolve on a subsequent attempt.
+    """
+
+    pass
+
+
+class MissingOhlcvDataError(ExchangeRecoverableError):
+    """A symbol/timeframe pair was read that this run's candles do not hold."""
+
+    def __init__(
+        self,
+        symbol: object,
+        timeframe: object,
+        detail: str = "no candles were loaded",
+    ) -> None:
+        """
+        Args:
+            detail: What the run's candles lack for the pair.
+        """
+        super().__init__(f"{symbol}@{timeframe}: {detail}")
+
+
+class SymbolNotListedError(ExchangeRecoverableError):
+    """The venue lists no contract for a symbol, so the symbol cannot be traded
+    on it. The symbol owns the failure: the profiles that trade it sit out
+    while every other symbol trades.
+    """
+
+    pass
+
+
+class NoOpenPositionError(ExchangeRecoverableError):
+    """A protection update named a symbol the account holds no position on,
+    so there is nothing left to protect.
+    """
+
+    pass
+
+
+class ExchangeCriticalError(BaseException):
+    """The venue is unusable, so trading stops until someone intervenes.
+
+    It stands outside the `Exception` tree so that no `except Exception`
+    between the venue and the entry point can keep the run going on it.
+    """
+
+    pass
+
+
+class BotCriticalError(BaseException):
+    """The bot's configuration file or its strategy's code is broken, so
+    trading stops.
+
+    It stands outside the `Exception` tree so that no `except Exception`
+    between the bot and the entry point can keep the run going on it.
+    """
+
+    pass
+
+
+class ProfileError(Exception):
+    """A failure one profile owns, raised by a strategy to state that this
+    profile cannot run. Live, it stops that profile and the rest of the bot
+    trades.
+    """
+
+    pass
+
+
+class ProfileConfigError(ProfileError):
+    """A profile class raises it from its `__post_init__` to refuse that
+    profile's configuration. The profile owns the refusal: live, it sits out
+    the run while the other profiles trade, unless a bot with a working copy
+    meets it after an edit and runs its symbol from the copy; in a backtest
+    the run stops with an error naming it.
+    """
+
+    pass
+
+
+class DataError(Exception):
+    """The candles could not be supplied: a source that is unreadable or
+    empty, one holding no candle in the window asked for, a request the
+    provider refuses, or a download that failed.
+    """
+
+    pass
+
+
+class OhlcvValidationError(DataError):
+    """A candle request the provider refuses as asked."""
+
+    pass
+
+
+class DownloadError(DataError, ExchangeTransientError):
+    """A candle download failed; transient, so the fetch is retried."""
+
+    pass
+
+
+class ExchangeConnectionError(DownloadError):
+    """The venue could not be reached for the pair's candles; transient, so
+    the fetch is retried.
+    """
+
+    def __init__(self, symbol: object, timeframe: object, detail: str) -> None:
+        super().__init__(
+            f"Exchange connection error for {symbol}/{timeframe}: {detail}"
+        )
+
+
+class RateLimitExceededError(DownloadError):
+    """The venue refused a candle request for exceeding its rate limit;
+    transient, so the fetch is retried.
+    """
+
+    def __init__(self, symbol: object, timeframe: object, detail: str) -> None:
+        super().__init__(f"Rate limit exceeded for {symbol}/{timeframe}: {detail}")
+
+
+class InvalidTimeframeError(DataError, ExchangeRecoverableError):
+    """The venue serves no candles on the timeframe; the message lists the
+    ones it serves.
+    """
+
+    def __init__(self, timeframe: object, supported: set[TimeFrame]) -> None:
+        supported_str = ", ".join(sorted(map(str, supported)))
+        super().__init__(
+            f"Timeframe '{timeframe}' not supported by exchange. Supported timeframes: {supported_str}"
+        )
