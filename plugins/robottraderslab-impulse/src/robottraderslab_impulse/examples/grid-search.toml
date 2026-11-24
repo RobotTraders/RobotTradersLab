@@ -1,0 +1,18 @@
+[profile]
+symbol = "ETH/USDT:USDT"
+timeframe = "4h"
+tag = "alpha"
+
+[[parameter_configs]]
+parameter = "trix_length"
+sampling = "linear"
+min = 5.0
+max = 50.0
+num_samples = 10
+
+[[parameter_configs]]
+parameter = "signal_length"
+sampling = "linear"
+min = 5.0
+max = 50.0
+num_samples = 10

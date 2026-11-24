@@ -1,0 +1,87 @@
+[strategy]
+strategy_class = "impulse"
+
+[backtest]
+initial_balance = { USDT = 1000.0 }
+maker_fee_rate = 0.0002
+taker_fee_rate = 0.0005
+start_date = "2025-04-01"
+end_date = "2026-04-01"
+
+[backtest.ohlcv_provider]
+ohlcv_provider = "ccxt_bitget"
+
+[live.ohlcv_provider]
+ohlcv_provider = "bitget"
+
+[live.trading_account]
+secret_name = "impulse-example"
+
+[report]
+reference_symbol = "ETH/USDT:USDT"
+
+[[strategy.profiles]]
+symbol = "ETH/USDT:USDT"
+timeframe = "4h"
+tag = "alpha"
+total_balance_ratio = 0.15
+leverage = 1.0
+trix_length = 8
+signal_length = 12
+trend_length = 180
+trend_type = "EMA"
+
+[[strategy.profiles]]
+symbol = "ETH/USDT:USDT"
+timeframe = "4h"
+tag = "beta"
+total_balance_ratio = 0.15
+leverage = 1.0
+trix_length = 37
+signal_length = 42
+trend_length = 180
+trend_type = "EMA"
+
+[[strategy.profiles]]
+symbol = "ETH/USDT:USDT"
+timeframe = "2h"
+tag = "alpha"
+total_balance_ratio = 0.15
+leverage = 1.0
+trix_length = 15
+signal_length = 27
+trend_length = 360
+trend_type = "EMA"
+
+[[strategy.profiles]]
+symbol = "ETH/USDT:USDT"
+timeframe = "2h"
+tag = "beta"
+total_balance_ratio = 0.15
+leverage = 1.0
+trix_length = 43
+signal_length = 16
+trend_length = 360
+trend_type = "EMA"
+
+[[strategy.profiles]]
+symbol = "ETH/USDT:USDT"
+timeframe = "1h"
+tag = "alpha"
+total_balance_ratio = 0.15
+leverage = 1.0
+trix_length = 30
+signal_length = 45
+trend_length = 720
+trend_type = "EMA"
+
+[[strategy.profiles]]
+symbol = "ETH/USDT:USDT"
+timeframe = "1h"
+tag = "beta"
+total_balance_ratio = 0.15
+leverage = 1.0
+trix_length = 32
+signal_length = 33
+trend_length = 720
+trend_type = "EMA"
