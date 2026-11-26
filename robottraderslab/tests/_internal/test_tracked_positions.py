@@ -310,7 +310,7 @@ async def test_a_position_no_read_explains_names_how_far_back_it_reached(
     assert "left unattributed" in caplog.text
 
 
-async def test_a_position_on_a_delisted_symbol_is_settled_with_no_second_read(
+async def test_a_delisted_symbol_the_account_shows_no_position_on_is_settled_with_no_second_read(
     caplog,
 ):
     account = _Account([], unlisted=[BTC])
@@ -332,6 +332,32 @@ async def test_a_position_on_a_delisted_symbol_is_settled_with_no_second_read(
     assert account.reads == []
     assert [record.levelname for record in caplog.records] == ["WARNING"]
     assert "BTC/USDT:USDT" in caplog.text
+
+
+async def test_a_symbol_the_listing_lacks_is_not_settled_while_the_account_shows_a_position(
+    caplog,
+):
+    account = _Account([], unlisted=[BTC])
+    strategy_requirements = StrategyRequirements()
+    strategy_requirements.account.add(account, symbols=[BTC], positions=True)
+    tracker = strategy_requirements.tracker.add(
+        account=account, symbols={ALPHA: BTC}, tags={ALPHA: profile_tag("1h", "a")}
+    )
+    opened = _execution("e1", OrderSide.BUY, 2.0, WITHIN_THE_READ, tag="1h-a")
+    await _settle(
+        strategy_requirements, _snapshots(2.0, [opened]), executions_since=CANDLE_READ
+    )
+
+    with caplog.at_level(logging.INFO):
+        await _settle(
+            strategy_requirements,
+            _snapshots(3.0, [opened]),
+            executions_since=CANDLE_READ,
+        )
+
+    assert tracker.get(ALPHA) == TrackedPosition(PositionSide.LONG, 2.0)
+    assert account.reads == []
+    assert caplog.records == []
 
 
 async def test_a_delisted_symbol_is_reported_on_every_cycle_it_stands(caplog):

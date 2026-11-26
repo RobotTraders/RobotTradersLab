@@ -1,8 +1,15 @@
 import logging
-from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
-from copy import copy
-from dataclasses import dataclass, replace
+from collections.abc import Collection, Iterable, Sequence
+from dataclasses import dataclass
 
+from robottraderslab._internal import (
+    booked_items,
+    closed_steps,
+    is_immediate,
+    is_sent_at_once,
+    rebuilt_actions,
+    without_protections,
+)
 from robottraderslab.futures import (
     BatchableOrderAction,
     CancelOrderByIdAction,
@@ -204,7 +211,7 @@ def restrict_symbol(
         A call with the same arguments gives the same decision.
     """
     ledger = _Ledger(symbol, position)
-    booked = [item for item in _booked_items(actions) if item.symbol == symbol]
+    booked = [item for _, item in booked_items(actions) if item.symbol == symbol]
     ledger.settle_market_orders(booked)
     by_id = {order.order_id: order for order in open_orders}
     covered = _judge_cancels(ledger, actions, by_id)
@@ -221,46 +228,6 @@ def restrict_symbol(
     )
     ledger.drop_unknown(actions)
     return ledger.decision(actions, cancelled)
-
-
-def rebuilt_actions(
-    actions: Sequence[BaseExchangeAction],
-    gone: Collection[ActionID],
-    replaced: Mapping[ActionID, BatchableOrderAction],
-) -> list[BaseExchangeAction]:
-    """Return the actions as they go out.
-
-    The orders `gone` are left out, and the orders in `replaced` stand in for
-    those they replace.
-
-    Args:
-        actions: Everything booked this candle, in booking order.
-        gone: Ids of the orders to leave out, a member of a batch or of a
-            modification among them.
-        replaced: The order to send in place of each order, by the id of the
-            order it replaces.
-
-    Returns:
-        The actions in booking order. An action nothing changes is itself, one
-        whose members are left out or replaced is a copy carrying the members
-        left, and one with no member left is absent.
-    """
-    return [
-        rebuilt
-        for action in actions
-        if (rebuilt := _rebuilt_action(action, gone, replaced)) is not None
-    ]
-
-
-def carried_orders(
-    action: FuturesOrderBatchAction | FuturesOrderModifyAction,
-) -> Iterator[BatchableOrderAction]:
-    """Yield the orders a batch places or a modification replaces with."""
-    if isinstance(action, FuturesOrderBatchAction):
-        yield from action.orders
-    else:
-        for modification in action.modifications:
-            yield modification.order
 
 
 class _Ledger:
@@ -354,13 +321,13 @@ class _Ledger:
         return cancelled
 
     def _close(self, close: ClosePositionAction) -> None:
-        self._remaining -= round(self._remaining * close.closing_ratio)
+        self._remaining -= closed_steps(self._remaining, close.closing_ratio)
         if close.closing_ratio < _WHOLE_POSITION:
             self._may_close_whole = True
 
     def _cut_to(self, order: BatchableOrderAction, steps: StepCount) -> None:
         quantity = to_quantity(steps)
-        cut = _stripped(order)
+        cut = without_protections(order)
         cut.quantity = quantity
         self._replaced[order.id] = cut
         self._cut.append(CutOrder(order, quantity))
@@ -370,7 +337,7 @@ class _Ledger:
         reduces = order.side is self._closing_side
         room = self._room
         if order.reduce_only:
-            if _is_immediate(order) and reduces:
+            if is_immediate(order) and reduces:
                 self._remaining -= min(steps, self._remaining)
         elif not reduces or room == 0:
             self.drop(order)
@@ -388,130 +355,20 @@ class _Ledger:
         immediate: bool,
     ) -> None:
         for item in items:
+            if is_sent_at_once(item) is not immediate:
+                continue
             if isinstance(item, ClosePositionAction):
-                if (item.limit_price is None) is immediate:
-                    self._close(item)
-            elif _is_immediate(item) is immediate:
+                self._close(item)
+            else:
                 self._place(item)
 
     def _strip_protections(self, order: BatchableOrderAction) -> None:
         if _is_protected(order):
-            self._replaced[order.id] = _stripped(order)
-
-
-def _rebuilt_action(
-    action: BaseExchangeAction,
-    gone: Collection[ActionID],
-    replaced: Mapping[ActionID, BatchableOrderAction],
-) -> BaseExchangeAction | None:
-    if action.id in gone:
-        return None
-    if isinstance(action, (FuturesLimitOrderAction, FuturesMarketOrderAction)):
-        return replaced.get(action.id, action)
-    if isinstance(action, FuturesOrderBatchAction):
-        return _rebuilt_batch(action, gone, replaced)
-    if isinstance(action, FuturesOrderModifyAction):
-        return _rebuilt_modification(action, gone, replaced)
-    return action
-
-
-def _rebuilt_batch(
-    batch: FuturesOrderBatchAction,
-    gone: Collection[ActionID],
-    replaced: Mapping[ActionID, BatchableOrderAction],
-) -> FuturesOrderBatchAction | None:
-    return _rebuilt_carrier(
-        batch,
-        "orders",
-        batch.orders,
-        gone,
-        replaced,
-        lambda order: order,
-        lambda _, order: order,
-    )
-
-
-def _rebuilt_modification(
-    action: FuturesOrderModifyAction,
-    gone: Collection[ActionID],
-    replaced: Mapping[ActionID, BatchableOrderAction],
-) -> FuturesOrderModifyAction | None:
-    return _rebuilt_carrier(
-        action,
-        "modifications",
-        action.modifications,
-        gone,
-        replaced,
-        lambda modification: modification.order,
-        lambda modification, order: replace(modification, order=order),
-    )
-
-
-def _rebuilt_carrier[A: (FuturesOrderBatchAction, FuturesOrderModifyAction), M](
-    action: A,
-    field: str,
-    members: Sequence[M],
-    gone: Collection[ActionID],
-    replaced: Mapping[ActionID, BatchableOrderAction],
-    order_of: Callable[[M], BatchableOrderAction],
-    with_order: Callable[[M, BatchableOrderAction], M],
-) -> A | None:
-    rebuilt_members = _rebuilt_members(members, gone, replaced, order_of, with_order)
-    if rebuilt_members is None:
-        return action
-    if not rebuilt_members:
-        return None
-    rebuilt = copy(action)
-    setattr(rebuilt, field, rebuilt_members)
-    rebuilt.symbol = order_of(rebuilt_members[0]).symbol
-    return rebuilt
-
-
-def _rebuilt_members[M](
-    members: Sequence[M],
-    gone: Collection[ActionID],
-    replaced: Mapping[ActionID, BatchableOrderAction],
-    order_of: Callable[[M], BatchableOrderAction],
-    with_order: Callable[[M, BatchableOrderAction], M],
-) -> list[M] | None:
-    if not any(
-        order_of(member).id in gone or order_of(member).id in replaced
-        for member in members
-    ):
-        return None
-    return [
-        with_order(member, replaced.get(order_of(member).id, order_of(member)))
-        for member in members
-        if order_of(member).id not in gone
-    ]
-
-
-def _booked_items(
-    actions: Sequence[BaseExchangeAction],
-) -> Iterator[BatchableOrderAction | ClosePositionAction]:
-    for action in actions:
-        if isinstance(action, FuturesOrderBatchAction):
-            yield from carried_orders(action)
-        elif isinstance(
-            action,
-            (ClosePositionAction, FuturesLimitOrderAction, FuturesMarketOrderAction),
-        ):
-            yield action
-
-
-def _is_immediate(order: BatchableOrderAction) -> bool:
-    return isinstance(order, FuturesMarketOrderAction) and order.trigger_price is None
+            self._replaced[order.id] = without_protections(order)
 
 
 def _is_protected(order: BatchableOrderAction) -> bool:
     return order.stop_loss is not None or order.take_profit is not None
-
-
-def _stripped[T: BatchableOrderAction](order: T) -> T:
-    stripped = copy(order)
-    stripped.stop_loss = None
-    stripped.take_profit = None
-    return stripped
 
 
 def _judge_cancels(

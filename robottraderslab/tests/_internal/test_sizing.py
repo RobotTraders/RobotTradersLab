@@ -5,9 +5,7 @@ import pytest
 
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.exceptions import ProfileConfigError
-from robottraderslab.exchanges import Balance
 from robottraderslab.strategies import (
-    AccountSnapshot,
     AccountSnapshots,
     BookKeeper,
     OHLCVs,
@@ -51,23 +49,13 @@ class _ProfileLessStrategy:
 @pytest.fixture
 async def account(make_venue) -> FuturesAccount:
     exchange = make_venue()
-    exchange.placement_reserve_rate = 0.0
     account = FuturesAccount(exchange)
     await account._read_instruments([BTC_USDT])
     return account
 
 
-def _snapshots(account: FuturesAccount) -> AccountSnapshots:
-    snapshot = AccountSnapshot(
-        account_name=account.name,
-        balances={"USDT": Balance(locked=0.0, total=10_000.0)},
-        conversion_rates={BTC_USDT: 1.0},
-    )
-    return AccountSnapshots({account.name: snapshot})
-
-
 class TestAStrategyWithoutProfiles:
-    def test_sizes_with_the_rule_its_keys_name(self, account):
+    def test_sizes_with_the_rule_its_keys_name(self, account, make_account_snapshots):
         strategy = _ProfileLessStrategy(
             account=account, total_balance_ratio=0.2, fast_length=20
         )
@@ -75,7 +63,9 @@ class TestAStrategyWithoutProfiles:
 
         strategy.book_trading_actions(
             OHLCVs({}),
-            _snapshots(account),
+            make_account_snapshots(
+                account.name, 10_000.0, conversion_rates={BTC_USDT: 1.0}
+            ),
             datetime(2026, 1, 1, tzinfo=UTC),
             bookkeeper,
             [],

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import stat
@@ -15,14 +16,16 @@ from typing import Any
 from unittest.mock import Mock
 
 import matplotlib
+import numpy as np
 import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-from robottraderslab import Symbol
+from robottraderslab import Symbol, TimeFrame
 from robottraderslab._internal import hold_instance_lock
 from robottraderslab._internal.dynamic_class_loading import _resolve_entry_point
 from robottraderslab.exchanges import (
+    Balance,
     FuturesExchangeProtocol,
     Instrument,
     OrderProtocol,
@@ -31,7 +34,8 @@ from robottraderslab.exchanges import (
     TimeInForce,
     TriggerType,
 )
-from robottraderslab.futures import read_account_state
+from robottraderslab.futures import FuturesAccount, read_account_state
+from robottraderslab.strategies import AccountSnapshot, AccountSnapshots, OHLCVs
 from robottraderslab_core.engine import name_process
 from robottraderslab_core.exchanges import BaseExchangeAction
 
@@ -66,6 +70,20 @@ def _restore_process_identity() -> Iterator[None]:
 
 
 @pytest.fixture
+def logged_once(caplog: pytest.LogCaptureFixture) -> Callable[[str], logging.LogRecord]:
+    """Return the one captured record whose message holds a text.
+
+    The lookup fails unless exactly one record holds it.
+    """
+
+    def find(text: str) -> logging.LogRecord:
+        (record,) = (r for r in caplog.records if text in r.getMessage())
+        return record
+
+    return find
+
+
+@pytest.fixture
 def make_ohlcv_dict() -> Callable[..., dict[Symbol, pd.DataFrame]]:
     def make(
         timestamps: list[str],
@@ -93,6 +111,62 @@ def make_ohlcv_dict() -> Callable[..., dict[Symbol, pd.DataFrame]]:
             )
             for symbol, symbol_close in zip(symbols, close_values)
         }
+
+    return make
+
+
+@pytest.fixture
+def make_dated_ohlcvs(
+    make_ohlcv_dict: Callable[..., dict[Symbol, pd.DataFrame]],
+) -> Callable[..., OHLCVs]:
+    def make(
+        symbol: Symbol, timeframe: TimeFrame, freq: str, closes: list[float]
+    ) -> OHLCVs:
+        """Build the candles of one symbol on one timeframe, from 2024-01-01 UTC.
+
+        Args:
+            freq: The pandas frequency of the timeframe, such as "D" for "1d".
+            closes: One close per candle.
+        """
+        dates = pd.date_range("2024-01-01", periods=len(closes), freq=freq, tz="UTC")
+        return OHLCVs(
+            {
+                timeframe: make_ohlcv_dict(
+                    [str(date) for date in dates], [symbol], [closes]
+                )
+            }
+        )
+
+    return make
+
+
+@pytest.fixture
+def candles_where_raised() -> Callable[[OHLCVs, Symbol, TimeFrame, str], list[int]]:
+    def read(
+        ohlcvs: OHLCVs, symbol: Symbol, timeframe: TimeFrame, column: str
+    ) -> list[int]:
+        """Return the indexes of the candles a column is raised on."""
+        return np.flatnonzero(ohlcvs.column(symbol, timeframe, column)).tolist()
+
+    return read
+
+
+@pytest.fixture
+def make_account_snapshots() -> Callable[..., AccountSnapshots]:
+    def make(
+        account_name: str, usdt_total: float, **snapshot_fields: Any
+    ) -> AccountSnapshots:
+        """Build the snapshots of one account holding `usdt_total` USDT, none locked.
+
+        Args:
+            snapshot_fields: The other fields of the account's snapshot.
+        """
+        account_snapshot = AccountSnapshot(
+            account_name=account_name,
+            balances={"USDT": Balance(locked=0.0, total=usdt_total)},
+            **snapshot_fields,
+        )
+        return AccountSnapshots({account_name: account_snapshot})
 
     return make
 
@@ -321,6 +395,7 @@ def make_venue() -> Callable[..., Mock]:
         quantity_step: float = 1e-8, minimum_order_value: float | None = None
     ) -> Mock:
         venue = Mock(spec=FuturesExchangeProtocol)
+        venue.placement_reserve_rate = 0.0
         venue.get_account_state.side_effect = partial(read_account_state, venue)
         venue.get_instrument.return_value = Instrument(
             quantity_step=quantity_step,
@@ -330,6 +405,21 @@ def make_venue() -> Callable[..., Mock]:
             maximum_market_order_quantity=None,
         )
         return venue
+
+    return make
+
+
+@pytest.fixture
+def make_futures_account(
+    make_venue: Callable[..., Mock],
+) -> Callable[..., FuturesAccount]:
+    def make(**venue_options: Any) -> FuturesAccount:
+        """Build an account over a fresh venue double.
+
+        Args:
+            venue_options: The arguments `make_venue` takes.
+        """
+        return FuturesAccount(make_venue(**venue_options))
 
     return make
 

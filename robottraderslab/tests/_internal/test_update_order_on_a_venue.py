@@ -52,7 +52,6 @@ def create_plain_buy(
 @pytest.fixture
 def venue(make_venue: Callable[..., Mock]) -> Mock:
     exchange = make_venue(quantity_step=1.0, minimum_order_value=5.0)
-    exchange.placement_reserve_rate = 0.0
 
     async def replaced(requests: list[OrderModifyRequest]) -> list[PlacedOrder]:
         return [PlacedOrder(order_id=f"new-{index}") for index in range(len(requests))]

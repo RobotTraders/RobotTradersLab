@@ -27,6 +27,7 @@ from robottraderslab.strategies import (
     OHLCVs,
     ProfileStrategy,
     StrategyProtocol,
+    StrategyRequirements,
     TrackingId,
     TradingMode,
     TradingSystem,
@@ -577,24 +578,8 @@ class TestReportingQuantityNoTrackingIdOwns:
                     bookkeeper.add(account.long_entry(symbol, 1.0).build())
                     self._entered = True
 
-        ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
-        ohlcv_provider.fetch_ohlcv.return_value = pd.DataFrame(
-            {
-                "open": [100.0] * 6,
-                "high": [100.0] * 6,
-                "low": [100.0] * 6,
-                "close": [100.0] * 6,
-                "volume": [1.0] * 6,
-            },
-            index=pd.date_range("2024-01-01", periods=6, freq="1D", tz="UTC"),
-        )
-        backtester = Backtester(
-            Strategy(),
-            simulation_engine,
-            ohlcv_provider,
-            fill_recorder,
-            "2024-01-01",
-            "2024-01-06",
+        backtester = _backtester_over_flat_candles(
+            Strategy(), simulation_engine, fill_recorder, 6
         )
 
         with caplog.at_level(logging.INFO):
@@ -612,6 +597,93 @@ class TestReportingQuantityNoTrackingIdOwns:
             "INFO",
             "INFO",
         ]
+
+
+class TestSplittingAnExitAgainstThePosition:
+    async def test_an_exit_over_the_position_is_cut_to_it_and_warned_about(
+        self, simulation_engine, fill_recorder, account, caplog
+    ):
+        symbol = Symbol.create("BTC/USDT:USDT")
+
+        class Strategy(StrategyProtocol):
+            market_type = "futures"
+
+            def __init__(self) -> None:
+                self._booked = 0
+
+            def book_trading_actions(
+                self,
+                _ohlcvs: OHLCVs,
+                _snapshots: AccountSnapshots,
+                _timestamp: datetime,
+                bookkeeper: BookKeeper,
+                _triggered_timeframes: set[TimeFrame],
+            ) -> None:
+                self._booked += 1
+                if self._booked == 1:
+                    bookkeeper.add(account.long_entry(symbol, 1.0).build())
+                if self._booked == 3:
+                    bookkeeper.add(account.long_exit(symbol, 2.0).tag("a").build())
+
+            def generate_trading_signals(self, ohlcvs: OHLCVs) -> None:
+                pass
+
+            async def setup(self, requirements: StrategyRequirements) -> None:
+                requirements.ohlcv.add(symbol, "1d", 10)
+                requirements.account.add(account, symbols=[symbol], positions=True)
+
+        backtester = _backtester_over_flat_candles(
+            Strategy(), simulation_engine, fill_recorder, 6
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await backtester.run()
+
+        cuts = [
+            record.getMessage()
+            for record in caplog.records
+            if "the exit of profile a is cut by 1.002," in record.getMessage()
+        ]
+        assert len(cuts) == 1
+
+
+class TestEntriesTheAccountCannotCarry:
+    async def test_entries_refused_for_margin_in_one_candle_are_one_warning(
+        self, simulation_engine, fill_recorder, account, caplog
+    ):
+        symbols = [Symbol.create("BTC/USDT:USDT"), Symbol.create("ETH/USDT:USDT")]
+
+        class Strategy(StrategyProtocol):
+            market_type = "futures"
+
+            def book_trading_actions(
+                self,
+                _ohlcvs: OHLCVs,
+                _snapshots: AccountSnapshots,
+                _timestamp: datetime,
+                bookkeeper: BookKeeper,
+                _triggered_timeframes: set[TimeFrame],
+            ) -> None:
+                for symbol in symbols:
+                    bookkeeper.add(account.long_entry(symbol, 1_000_000.0).build())
+
+            def generate_trading_signals(self, ohlcvs: OHLCVs) -> None:
+                pass
+
+            async def setup(self, requirements: StrategyRequirements) -> None:
+                for symbol in symbols:
+                    requirements.ohlcv.add(symbol, "1d", 10)
+                requirements.account.add(account, symbols=symbols)
+
+        backtester = _backtester_over_flat_candles(
+            Strategy(), simulation_engine, fill_recorder, 1
+        )
+
+        with caplog.at_level(logging.WARNING):
+            await backtester.run()
+
+        assert caplog.text.count("fully committed") == 1
+        assert "2 not placed" in caplog.text
 
 
 class TestExecutionsWindowSeconds:
@@ -755,3 +827,35 @@ def test_an_order_on_a_symbol_the_account_did_not_declare_stops_the_run(
 
     with pytest.raises(BotCriticalError, match="without declaring it"):
         asyncio.run(backtester.run())
+
+
+def _backtester_over_flat_candles(
+    strategy: StrategyProtocol,
+    simulation_engine: FuturesSimulationEngine,
+    fill_recorder: CacheFillRecorder,
+    periods: int,
+) -> Backtester:
+    ohlcv_provider = Mock(spec=OHLCVProviderProtocol)
+    ohlcv_provider.fetch_ohlcv.return_value = _flat_candles(periods)
+    last_day = f"2024-01-{periods:02d}"
+    return Backtester(
+        strategy,
+        simulation_engine,
+        ohlcv_provider,
+        fill_recorder,
+        "2024-01-01",
+        last_day,
+    )
+
+
+def _flat_candles(periods: int) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "open": [100.0] * periods,
+            "high": [100.0] * periods,
+            "low": [100.0] * periods,
+            "close": [100.0] * periods,
+            "volume": [1.0] * periods,
+        },
+        index=pd.date_range("2024-01-01", periods=periods, freq="1D", tz="UTC"),
+    )

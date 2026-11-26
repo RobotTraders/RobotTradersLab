@@ -90,7 +90,7 @@ class $class_name(ProfileStrategy[$profile_class]):
     def generate_profile_signals(
         self, profile: $profile_class, ohlcvs: OHLCVs
     ) -> None:
-        """Store the buy and sell flags of the profile as one column per flag.
+        """Store the entry flags and the exit states of the profile, one column each.
 
         book_profile_actions reads them for each candle.
         """
@@ -133,6 +133,19 @@ class $class_name(ProfileStrategy[$profile_class]):
             profile.symbol, profile.timeframe, "sell", crossunder(fast, slow)
         )
 
+        # An exit is the state its side is in, never the candle of a crossing:
+        # a long is closed on every candle where the fast average is below the
+        # slow one, a short on every candle where it is above. A position still
+        # standing on a closed side is then exited on the next candle too, so an
+        # exit the exchange refused is placed again instead of waiting for the
+        # next crossing.
+        ohlcvs.add_column(
+            profile.symbol, profile.timeframe, "long_exit", fast < slow
+        )
+        ohlcvs.add_column(
+            profile.symbol, profile.timeframe, "short_exit", fast > slow
+        )
+
     # This strategy reads the position of a market from the account, so it
     # holds one profile per market. Trading the same market on
     # several timeframes or parameter sets needs position tracking: the venue
@@ -152,12 +165,13 @@ class $class_name(ProfileStrategy[$profile_class]):
         Profiles sharing a market need a position tracker to book their own
         orders.
         """
-        # Read the signals of the candle being traded; most candles have
-        # neither, and then there is nothing to book.
+        # Read the signals of the candle being traded: the two entry flags,
+        # raised on the candle of a crossing, and the two exit states, raised
+        # on every candle their side is closed.
         buy = ohlcvs.signal(profile.symbol, profile.timeframe, "buy")
         sell = ohlcvs.signal(profile.symbol, profile.timeframe, "sell")
-        if not (buy or sell):
-            return
+        long_exit = ohlcvs.signal(profile.symbol, profile.timeframe, "long_exit")
+        short_exit = ohlcvs.signal(profile.symbol, profile.timeframe, "short_exit")
 
         # The snapshot holds the account state declared in setup; the
         # position is the one held on this market, or None when flat.
@@ -167,16 +181,26 @@ class $class_name(ProfileStrategy[$profile_class]):
         # The close of the candle being traded prices the entry's size.
         close = ohlcvs.current(profile.symbol, profile.timeframe, "close")
 
-        # A buy closes a short if one is held, then opens a long sized by the
-        # profile's sizing rule. Already long, it books nothing.
-        if buy and (position is None or position.side == PositionSide.SHORT):
-            if position is not None:
+        # A position on a closed side is exited, on the candle of the crossing
+        # and on every candle after it while the position stands.
+        if position is not None:
+            if position.side == PositionSide.LONG and long_exit:
+                bookkeeper.add(
+                    self.account.long_exit(profile.symbol, position.quantity).reason(
+                        "ma crossover sell"
+                    )
+                )
+            elif position.side == PositionSide.SHORT and short_exit:
                 bookkeeper.add(
                     self.account.short_exit(profile.symbol, position.quantity).reason(
                         "ma crossover buy"
                     )
                 )
 
+        # A buy opens a long sized by the profile's sizing rule when the market
+        # is flat or held short, the exit above having closed the short. Already
+        # long, it books nothing.
+        if buy and (position is None or position.side == PositionSide.SHORT):
             entry = self.account.long_entry(profile.symbol)
             bookkeeper.add(
                 entry.size(profile.sizing, close, account_snapshot).reason(
@@ -184,16 +208,9 @@ class $class_name(ProfileStrategy[$profile_class]):
                 )
             )
 
-        # A sell is the mirror image: it closes a long if one is held, then
-        # opens a short.
+        # A sell is the mirror image: it opens a short when the market is flat or
+        # held long.
         elif sell and (position is None or position.side == PositionSide.LONG):
-            if position is not None:
-                bookkeeper.add(
-                    self.account.long_exit(profile.symbol, position.quantity).reason(
-                        "ma crossover sell"
-                    )
-                )
-
             entry = self.account.short_entry(profile.symbol)
             bookkeeper.add(
                 entry.size(profile.sizing, close, account_snapshot).reason(

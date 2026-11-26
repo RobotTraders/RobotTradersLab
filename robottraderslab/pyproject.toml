@@ -1,6 +1,6 @@
 [project]
 name = "robottraderslab"
-version = "0.11.0"
+version = "0.12.0"
 description = "Backtesting and live trading engine for algorithmic trading strategies"
 requires-python = ">=3.13,<3.14"
 license = "Apache-2.0"
@@ -25,7 +25,7 @@ dependencies = [
   "pydantic-settings>=2.15.0",
   "typer>=0.27.1",
   "lazy-loader>=0.5",
-  "robottraderslab-core==0.1.0",
+  "robottraderslab-core==0.1.1",
 ]
 
 [project.urls]

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 from unittest.mock import AsyncMock, Mock, call
 
@@ -7,6 +8,7 @@ from robottraderslab import Symbol
 from robottraderslab.exceptions import (
     ExchangeRecoverableError,
     ExchangeTransientError,
+    InsufficientMarginError,
 )
 from robottraderslab.exchanges import (
     FuturesExchangeBase,
@@ -19,6 +21,7 @@ from robottraderslab.exchanges import (
     TimeInForce,
 )
 from robottraderslab.futures import FuturesAccount, OrderModification
+from robottraderslab_core.exchanges import retry_on_transient
 from robottraderslab_core.futures import (
     FuturesLimitOrderAction,
     FuturesMarketOrderAction,
@@ -199,6 +202,116 @@ class TestBatchAction:
             "BTC/USDT:USDT is under one quantity step"
         ) in caplog.text
 
+    async def test_a_denied_exit_is_reported_once_however_often_the_batch_is_retried(
+        self, caplog, logged_once
+    ):
+        denied = _a_denied_market_sell(self.exchange, tag="4h", is_exit=True)
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            side_effect=[
+                ExchangeTransientError("timeout"),
+                [PlacedOrder(order_id="1")],
+            ],
+        )
+        batch = self.account.place_orders([denied, self.limit_order])
+
+        with caplog.at_level(logging.INFO):
+            await retry_on_transient(batch.execute, max_attempts=2, base_delay=0)
+
+        assert logged_once("Exit refused").levelno == logging.ERROR
+
+    async def test_a_denied_exit_is_an_error_naming_the_profile(self, caplog):
+        denied = FuturesMarketOrderAction(
+            exchange=self.exchange,
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=0.4,
+            tag="4h",
+            is_exit=True,
+            denial="Order quantity 0.4 of BTC/USDT:USDT is under one quantity step",
+        )
+
+        await self.account.place_orders([denied]).execute()
+
+        (record,) = caplog.records
+        assert record.levelno == logging.ERROR
+        assert record.getMessage() == (
+            "Exit refused, the strategy's position is not closed: BTC/USDT:USDT, "
+            "profile BTC/USDT:USDT@4h, FuturesMarketOrderAction: Order quantity 0.4 "
+            "of BTC/USDT:USDT is under one quantity step"
+        )
+
+    async def test_an_exit_reaches_the_venue_marked_as_one(self):
+        exit_order = _a_market_exit(self.exchange)
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            return_value=[PlacedOrder(order_id="1"), PlacedOrder(order_id="2")],
+        )
+
+        await self.account.place_orders([exit_order, self.limit_order]).execute()
+
+        (requests,) = self.exchange.place_orders.await_args.args
+        assert [request.is_exit for request in requests] == [True, False]
+
+    async def test_a_batch_the_venue_refuses_whole_is_raised_for_the_executor(self):
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            side_effect=ExchangeRecoverableError("40932 batch refused"),
+        )
+
+        with pytest.raises(ExchangeRecoverableError, match="40932"):
+            await self.batch.execute()
+
+    async def test_an_exit_in_a_batch_the_venue_refuses_whole_is_an_error(self, caplog):
+        exit_order = _a_market_exit(self.exchange)
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            side_effect=ExchangeRecoverableError("40932 batch refused"),
+        )
+
+        with caplog.at_level(logging.INFO):
+            action_result = await self.account.place_orders(
+                [exit_order, self.limit_order]
+            ).execute()
+
+        assert action_result.orders == ()
+        assert [record.levelno for record in caplog.records] == [
+            logging.ERROR,
+            logging.WARNING,
+        ]
+
+    async def test_a_transient_failure_of_a_batch_holding_an_exit_is_never_reported(
+        self, caplog
+    ):
+        exit_order = _a_market_exit(self.exchange)
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            side_effect=ExchangeTransientError("timeout"),
+        )
+
+        with caplog.at_level(logging.INFO), pytest.raises(ExchangeTransientError):
+            await self.account.place_orders([exit_order, self.limit_order]).execute()
+
+        assert caplog.records == []
+
+    async def test_entries_in_a_batch_refused_whole_for_margin_are_reported_apiece(
+        self, caplog
+    ):
+        self.exchange.place_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.place_orders,
+            side_effect=InsufficientMarginError("25202 Insufficient balance"),
+        )
+
+        with caplog.at_level(logging.INFO):
+            action_result = await self.batch.execute()
+
+        assert action_result.orders == ()
+        assert [record.levelno for record in caplog.records] == [
+            logging.WARNING,
+            logging.WARNING,
+        ]
+        assert len({record.getMessage() for record in caplog.records}) == 2
+
     async def test_a_batch_whose_every_order_is_denied(self):
         denied = FuturesMarketOrderAction(
             exchange=self.exchange,
@@ -357,7 +470,9 @@ class TestModifyAction:
         assert first.placement.kind == "limit"
         assert second.placement.kind == "market"
 
-    async def test_a_denied_replacement_cancels_its_resting_order(self):
+    async def test_a_denied_replacement_cancels_its_resting_order_once_however_often_the_batch_is_retried(
+        self,
+    ):
         denied = FuturesMarketOrderAction(
             exchange=self.exchange,
             symbol=BTC_USDT,
@@ -373,10 +488,13 @@ class TestModifyAction:
         )
         self.exchange.modify_orders = AsyncMock(
             spec=FuturesExchangeProtocol.modify_orders,
-            return_value=[PlacedOrder(order_id="a")],
+            side_effect=[
+                ExchangeTransientError("timeout"),
+                [PlacedOrder(order_id="a")],
+            ],
         )
 
-        await modify.execute()
+        await retry_on_transient(modify.execute, max_attempts=2, base_delay=0)
 
         self.exchange.cancel_order_by_id.assert_awaited_once_with(BTC_USDT, "b")
         (requests,) = self.exchange.modify_orders.await_args.args
@@ -412,23 +530,79 @@ class TestModifyAction:
             call(eth_usdt, "e"),
         ]
 
-    async def test_a_modification_whose_every_replacement_is_denied(self):
-        denied = FuturesMarketOrderAction(
-            exchange=self.exchange,
-            symbol=BTC_USDT,
-            side=OrderSide.SELL,
-            quantity=0.4,
-            denial="under one quantity step",
-        )
-        modify = self.account.modify_orders(
-            [OrderModification(order_id="b", order=denied)]
-        )
+    async def test_a_modification_whose_every_replacement_is_denied(self, caplog):
+        denied = _a_denied_market_sell(self.exchange)
+        modify = self.account.modify_order("b", denied)
 
-        action_result = await modify.execute()
+        with caplog.at_level(logging.INFO):
+            action_result = await modify.execute()
 
         self.exchange.cancel_order_by_id.assert_awaited_once_with(BTC_USDT, "b")
         self.exchange.modify_orders.assert_not_awaited()
         assert action_result.orders == ()
+        (record,) = caplog.records
+        assert record.levelno == logging.WARNING
+        assert "resting as b" in record.getMessage()
+
+    async def test_a_cancel_the_venue_fails_transiently_is_retried_and_its_report_is_not(
+        self, caplog, logged_once
+    ):
+        denied = _a_denied_market_sell(self.exchange, tag="4h", is_exit=True)
+        self.exchange.cancel_order_by_id = AsyncMock(
+            spec=FuturesExchangeProtocol.cancel_order_by_id,
+            side_effect=[ExchangeTransientError("timeout"), None],
+        )
+        modify = self.account.modify_order("b", denied)
+
+        with caplog.at_level(logging.INFO):
+            await retry_on_transient(modify.execute, max_attempts=2, base_delay=0)
+
+        assert self.exchange.cancel_order_by_id.await_count == 2
+        assert logged_once("Exit refused").levelno == logging.ERROR
+        assert logged_once("resting as b").levelno == logging.WARNING
+
+    async def test_a_denied_exit_replacement_is_an_error_and_its_resting_order_is_cancelled(
+        self, caplog
+    ):
+        denied = _a_denied_market_sell(self.exchange, tag="4h", is_exit=True)
+        modify = self.account.modify_order("b", denied)
+
+        with caplog.at_level(logging.INFO):
+            await modify.execute()
+
+        self.exchange.cancel_order_by_id.assert_awaited_once_with(BTC_USDT, "b")
+        assert [record.levelno for record in caplog.records] == [
+            logging.ERROR,
+            logging.WARNING,
+        ]
+        assert "profile BTC/USDT:USDT@4h" in caplog.records[0].getMessage()
+        assert "resting as b" in caplog.records[1].getMessage()
+
+    async def test_a_modification_the_venue_refuses_whole_is_raised_for_the_executor(
+        self,
+    ):
+        self.exchange.modify_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.modify_orders,
+            side_effect=ExchangeRecoverableError("refused"),
+        )
+
+        with pytest.raises(ExchangeRecoverableError, match="refused"):
+            await self.modify.execute()
+
+    async def test_an_exit_in_a_modification_the_venue_refuses_whole_is_an_error(
+        self, caplog
+    ):
+        modify = self.account.modify_order("b", _a_market_exit(self.exchange))
+        self.exchange.modify_orders = AsyncMock(
+            spec=FuturesExchangeProtocol.modify_orders,
+            side_effect=ExchangeRecoverableError("refused"),
+        )
+
+        with caplog.at_level(logging.INFO):
+            modify_result = await modify.execute()
+
+        assert modify_result.orders == ()
+        assert [record.levelno for record in caplog.records] == [logging.ERROR]
 
     async def test_modification_the_venue_rejected(self):
         self.exchange.modify_orders = AsyncMock(
@@ -571,3 +745,27 @@ class TestBaseModifyOrders:
 
 async def _on_filled(placed_order: PlacedOrder, fill: OrderFill | None) -> None:
     pass
+
+
+def _a_denied_market_sell(
+    futures_exchange: Mock, **order_fields: object
+) -> FuturesMarketOrderAction:
+    return FuturesMarketOrderAction(
+        exchange=futures_exchange,
+        symbol=BTC_USDT,
+        side=OrderSide.SELL,
+        quantity=0.4,
+        denial="under one quantity step",
+        **order_fields,
+    )
+
+
+def _a_market_exit(futures_exchange: Mock) -> FuturesMarketOrderAction:
+    return FuturesMarketOrderAction(
+        exchange=futures_exchange,
+        symbol=BTC_USDT,
+        side=OrderSide.SELL,
+        quantity=0.4,
+        tag="4h",
+        is_exit=True,
+    )

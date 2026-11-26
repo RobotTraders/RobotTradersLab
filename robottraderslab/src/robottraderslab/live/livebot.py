@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -15,9 +15,14 @@ from robottraderslab._internal import (
     dropped_pair_report,
     failure_of,
     hold_margin_targets,
+    listing_lacks,
+    listing_lacks_among,
     log_dropped_pair,
     log_strategy_slots,
+    report_unlisted_holdings,
     sitting_out_symbols,
+    split_by_read,
+    split_exits,
     sweep_orphan_protections,
     widen_tracked_positions,
 )
@@ -25,6 +30,7 @@ from robottraderslab.exceptions import (
     BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
+    SymbolNotListedError,
 )
 from robottraderslab.strategies import (
     AccountSnapshots,
@@ -65,13 +71,21 @@ from robottraderslab_core.ohlcv import (
     candle_windows,
     to_seconds,
 )
-from robottraderslab_core.strategies import FillDescriber
+from robottraderslab_core.strategies import AccountRequirements, FillDescriber
 
 from .booked_fills import BookedFills
 from .exit_only import restrict_to_exit_only
-from .halts import held_back, log_halts, restrict_halted, without_actions_on
+from .halts import (
+    closed_with_unlisted,
+    held_back,
+    log_halts,
+    restrict_halted,
+    without_actions_on,
+)
 
 logger = logging.getLogger(__name__)
+
+_FETCH_FAILED = "Account state fetch failed, skipping cycle"
 
 
 def utc_now() -> datetime:
@@ -115,8 +129,9 @@ class LiveBot:
                 cancels the resting orders that could open, increase or flip
                 it. Every other symbol trades as usual, except a symbol its
                 venue reports closed to new positions, which the cycle runs
-                in exit-only mode as well, and one closed to every order,
-                which it sends nothing on.
+                in exit-only mode as well, one closed to every order, and one
+                its venue does not list, which it sends nothing on for each
+                account declaring it.
             dry_run: Runs the cycle to see whether it runs through and sends
                 nothing: no order, cancel, leverage or margin-mode setting and
                 no notification. It runs `setup`, reads the candles and the
@@ -146,6 +161,7 @@ class LiveBot:
         self._dry_run = dry_run
         self._clock = clock
         self._log = _CycleLog(dry_run)
+        self._unlisted_level = logging.DEBUG if dry_run else logging.ERROR
         self._exit_only_halts: dict[AccountProtocol, frozenset[Symbol]] = {}
         self._closed_halts: dict[AccountProtocol, frozenset[Symbol]] = {}
 
@@ -241,15 +257,18 @@ class LiveBot:
             booked_fills,
         )
 
-    def _booked_timeframes(self, declared: set[TimeFrame]) -> set[TimeFrame]:
+    def _booked_timeframes(
+        self, declared: set[TimeFrame], moment: datetime
+    ) -> set[TimeFrame]:
         """The declared timeframes this cycle books, every one in a dry run.
 
-        Otherwise those whose candle closes at the clock's moment.
+        Otherwise those whose candle closes at the cycle's moment.
         """
         if self._dry_run:
             return declared
-        now = self._clock()
-        return {timeframe for timeframe in declared if candle_closes_at(timeframe, now)}
+        return {
+            timeframe for timeframe in declared if candle_closes_at(timeframe, moment)
+        }
 
     def _drop_actions_on_closed_halts(self, bookkeeper: BookKeeper) -> None:
         """Leave out every action on a symbol closed to every order.
@@ -322,13 +341,54 @@ class LiveBot:
         finally:
             booked_fills.cancel()
 
-    async def _fetch_ohlcvs(self, requirements: StrategyRequirements) -> OHLCVs | None:
-        return await assemble_available_ohlcvs_from_requirements(
+    async def _fetch_ohlcvs(
+        self, requirements: StrategyRequirements, unlisted: set[Symbol]
+    ) -> OHLCVs | None:
+        """Fetch the declared candles, None when none could be fetched.
+
+        Each symbol dropped because its venue does not list it is added to
+        `unlisted`.
+        """
+
+        def on_dropped(
+            symbol: Symbol, timeframe: TimeFrame, outcome: BaseException
+        ) -> None:
+            if isinstance(outcome, SymbolNotListedError):
+                unlisted.add(symbol)
+            self._log.dropped_pair(symbol, timeframe, outcome)
+
+        ohlcvs = await assemble_available_ohlcvs_from_requirements(
             self._ohlcv_provider,
             requirements.ohlcv,
             max_attempts=self._max_attempts,
             base_delay=self._base_delay,
-            on_dropped=self._log.dropped_pair,
+            on_dropped=on_dropped,
+        )
+        if ohlcvs is None:
+            self._log.error(
+                "No declared market data could be fetched, skipping cycle",
+                recoverable=True,
+            )
+        return ohlcvs
+
+    async def _fetch_snapshots(
+        self,
+        account_requirements: AccountRequirements,
+        executions_since: datetime,
+        report_fills: bool,
+    ) -> AccountSnapshots:
+        """Read the state the declarations ask for.
+
+        Raises:
+            ExchangeRecoverableError: If a read still fails once its attempts
+                are spent.
+        """
+        return await fetch_account_snapshots(
+            account_requirements,
+            executions_since=executions_since,
+            report_fills=report_fills,
+            max_attempts=self._max_attempts,
+            base_delay=self._base_delay,
         )
 
     def _generate_actions(
@@ -410,6 +470,46 @@ class LiveBot:
             max_attempts=self._max_attempts,
             base_delay=self._base_delay,
         )
+
+    async def _hold_unlisted_holdings(
+        self,
+        strategy_requirements: StrategyRequirements,
+        account_snapshots: AccountSnapshots,
+        moment: datetime,
+    ) -> None:
+        """Hold the symbols a venue does not list, and report what is held on them.
+
+        Each declared symbol its account's venue does not list is held like a
+        symbol closed to every order, so nothing is sent on it this cycle, the
+        engine's own actions included. An account whose cycle read holds its
+        positions, open orders and trigger entries is reported from that read,
+        any other from a read of those on those symbols alone, whose failure
+        loses the report and leaves the cycle going.
+
+        Args:
+            moment: The cycle's moment.
+        """
+        unlisted_by_account = await listing_lacks(strategy_requirements.account)
+        if not unlisted_by_account:
+            return
+        self._closed_halts = closed_with_unlisted(
+            self._closed_halts, unlisted_by_account
+        )
+        read, unread = split_by_read(
+            self._reads_of(strategy_requirements), unlisted_by_account
+        )
+        self._report_unlisted(
+            strategy_requirements.account._reading_holdings_of(read),
+            account_snapshots,
+        )
+        try:
+            await self._report_holdings_of(strategy_requirements, unread, moment)
+        except ExchangeRecoverableError as e:
+            self._log.warning(
+                f"{', '.join(sorted(account.name for account in unread))}: the "
+                "holdings on the symbols the listing lacks could not be read, "
+                f"nothing is reported this cycle: {e}"
+            )
 
     async def _load_strategy(self) -> StrategyRequirements:
         """Load strategy with fresh requirements to avoid duplicates on retry."""
@@ -537,6 +637,7 @@ class LiveBot:
             requirements, account_snapshots, bookkeeper, engine_actions
         )
         self._drop_actions_on_closed_halts(bookkeeper)
+        await self._split_exits(requirements, account_snapshots, bookkeeper)
         await self._send_actions(bookkeeper, notifications, booked_fills)
         return bookkeeper.list_actions()
 
@@ -550,19 +651,22 @@ class LiveBot:
         """
         self._hold_halts(requirements)
         try:
-            account_snapshots = await fetch_account_snapshots(
-                requirements.account._widened_for_exit_only(
-                    self._exit_only_symbols, self._exit_only_halts
-                ),
-                executions_since=ohlcvs._earliest_candle_open(),
-                report_fills=self._report_fills,
-                max_attempts=self._max_attempts,
-                base_delay=self._base_delay,
+            return await self._fetch_snapshots(
+                self._reads_of(requirements),
+                ohlcvs._earliest_candle_open(),
+                self._report_fills,
             )
         except ExchangeRecoverableError as e:
-            self._log.warning(f"Account state fetch failed, skipping cycle: {e}")
+            self._log.warning(f"{_FETCH_FAILED}: {e}")
             return None
-        return account_snapshots
+
+    def _reads_of(
+        self, strategy_requirements: StrategyRequirements
+    ) -> AccountRequirements:
+        """The declarations the accounts' state is read with this cycle."""
+        return strategy_requirements.account._widened_for_exit_only(
+            self._exit_only_symbols, self._exit_only_halts
+        )
 
     async def _record_entry_fills(
         self,
@@ -626,6 +730,68 @@ class LiveBot:
                 reason=describe(fill) if describe is not None else None,
             )
 
+    async def _report_dropped_holdings(
+        self,
+        strategy_requirements: StrategyRequirements,
+        unlisted: set[Symbol],
+        moment: datetime,
+    ) -> None:
+        """Report what the accounts hold on the symbols the fetch found unlisted.
+
+        It runs on a cycle that ends before its account state is read, and
+        names only the symbols the account's own listing lacks.
+
+        Args:
+            unlisted: The symbols the candle fetch dropped because its venue
+                does not list them.
+            moment: The cycle's moment.
+        """
+        if not unlisted:
+            return
+        unlisted_by_account = await listing_lacks_among(
+            strategy_requirements.account, unlisted
+        )
+        try:
+            await self._report_holdings_of(
+                strategy_requirements, unlisted_by_account, moment
+            )
+        except ExchangeRecoverableError as e:
+            self._log.warning(f"{_FETCH_FAILED}: {e}")
+
+    async def _report_holdings_of(
+        self,
+        strategy_requirements: StrategyRequirements,
+        unlisted_by_account: Mapping[AccountProtocol, frozenset[Symbol]],
+        moment: datetime,
+    ) -> None:
+        """Read what the accounts hold on their unlisted symbols and report it.
+
+        Only the positions and open orders of the accounts among the keys are
+        read, on those symbols alone, and none when there is no such account.
+
+        Args:
+            unlisted_by_account: The unlisted symbols by account.
+            moment: The cycle's moment.
+
+        Raises:
+            ExchangeRecoverableError: If a read still fails once its attempts
+                are spent.
+        """
+        if not unlisted_by_account:
+            return
+        account_requirements = strategy_requirements.account._reading_holdings_of(
+            unlisted_by_account
+        )
+        account_snapshots = await self._fetch_snapshots(
+            account_requirements, moment, False
+        )
+        self._report_unlisted(account_requirements, account_snapshots)
+
+    def _report_unlisted(
+        self, declarations: AccountRequirements, account_snapshots: AccountSnapshots
+    ) -> None:
+        report_unlisted_holdings(declarations, account_snapshots, self._unlisted_level)
+
     def _restrict_to_exit_only(
         self,
         requirements: StrategyRequirements,
@@ -647,26 +813,28 @@ class LiveBot:
 
     async def _run_cycle(self) -> None:
         requirements = await self._set_up_strategy()
+        moment = self._clock()
         declared_timeframes = {r.timeframe for r in requirements.ohlcv._get_all()}
-        closing_timeframes = self._booked_timeframes(declared_timeframes)
+        closing_timeframes = self._booked_timeframes(declared_timeframes, moment)
         if declared_timeframes and not closing_timeframes:
             logger.info("No declared candle closes this minute, nothing to do")
             return
 
-        ohlcvs = await self._fetch_ohlcvs(requirements)
-        if ohlcvs is None:
-            self._log.error(
-                "No declared market data could be fetched, skipping cycle",
-                recoverable=True,
-            )
-            return
-
-        closing_timeframes = _timeframes_held(ohlcvs, closing_timeframes)
-        if not closing_timeframes or not self._generate_signals(ohlcvs):
+        unlisted: set[Symbol] = set()
+        ohlcvs = await self._fetch_ohlcvs(requirements, unlisted)
+        if ohlcvs is not None:
+            closing_timeframes = _timeframes_held(ohlcvs, closing_timeframes)
+        if (
+            ohlcvs is None
+            or not closing_timeframes
+            or not self._generate_signals(ohlcvs)
+        ):
+            await self._report_dropped_holdings(requirements, unlisted, moment)
             return
         account_snapshots = await self._read_account_state(requirements, ohlcvs)
         if account_snapshots is None:
             return
+        await self._hold_unlisted_holdings(requirements, account_snapshots, moment)
         await self._hold_margin_targets(requirements, account_snapshots)
         await self._settle_and_book(
             requirements, ohlcvs, account_snapshots, closing_timeframes
@@ -700,6 +868,7 @@ class LiveBot:
             max_attempts=self._max_attempts,
             base_delay=self._base_delay,
             declared_waits=bookkeeper.declared_waits(),
+            report_margin_refusals_together=True,
         )
         if post_execution_callbacks:
             await _invoke_callbacks(post_execution_callbacks)
@@ -800,6 +969,20 @@ class LiveBot:
             self._log.error(f"Internal error refreshing tracked positions: {e}")
             return False
         return True
+
+    async def _split_exits(
+        self,
+        requirements: StrategyRequirements,
+        account_snapshots: AccountSnapshots,
+        bookkeeper: BookKeeper,
+    ) -> None:
+        await split_exits(
+            requirements,
+            account_snapshots,
+            bookkeeper,
+            max_attempts=self._max_attempts,
+            base_delay=self._base_delay,
+        )
 
 
 def _newest_snapshot(ohlcvs: OHLCVs) -> TimeframeSnapshot:

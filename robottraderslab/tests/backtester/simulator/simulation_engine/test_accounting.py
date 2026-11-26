@@ -4,7 +4,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab.backtester.simulator import FeeRates
-from robottraderslab.exceptions import ExchangeRecoverableError
+from robottraderslab.exceptions import InsufficientMarginError
 from robottraderslab.exchanges import (
     FuturesExchangeProtocol,
     OrderSide,
@@ -212,7 +212,7 @@ class TestAccounting:
 
     async def test_not_enough_funds_to_place_order(self, sim, btc_usdt_perp):
         with pytest.raises(
-            ExchangeRecoverableError, match="Insufficient available funds"
+            InsufficientMarginError, match="Insufficient available funds"
         ):
             await sim.exchange.place_limit_order(
                 symbol=btc_usdt_perp, side=OrderSide.BUY, quantity=2.0, price=100_000.0

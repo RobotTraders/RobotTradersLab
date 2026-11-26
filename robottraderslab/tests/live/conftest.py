@@ -77,6 +77,11 @@ def candle_boundary_clock() -> Iterator[None]:
 
 
 @pytest.fixture
+def exchange(make_live_venue: Callable[[], Mock]) -> Mock:
+    return make_live_venue()
+
+
+@pytest.fixture
 def account(exchange: Mock) -> FuturesAccount:
     return FuturesAccount(exchange)
 

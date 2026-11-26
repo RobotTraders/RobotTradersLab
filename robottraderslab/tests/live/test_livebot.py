@@ -14,6 +14,7 @@ from live_cycle_helpers import messages_at as _messages_at
 from live_cycle_helpers import (
     requirements_failing_to_refresh as _requirements_failing_to_refresh,
 )
+from live_cycle_helpers import short_position as _short_position
 
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.exceptions import (
@@ -22,6 +23,7 @@ from robottraderslab.exceptions import (
     ExchangeCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
+    InsufficientMarginError,
     MissingOhlcvDataError,
     ProfileConfigError,
     SymbolNotListedError,
@@ -1822,26 +1824,19 @@ def _resting_order(symbol: Symbol, kind: str, order_id: str) -> Mock:
 
 
 @pytest.fixture
-def create_protection_strategy(account) -> Callable[[Symbol, float], StrategyProtocol]:
+def create_protection_strategy(
+    account: FuturesAccount, create_booking_strategy: Callable[..., StrategyProtocol]
+) -> Callable[[Symbol, float], StrategyProtocol]:
     def _create_protection_strategy(
         symbol: Symbol, take_profit: float
     ) -> StrategyProtocol:
-        class Strategy(StrategyProtocol):
-            market_type = "futures"
-
-            async def setup(self, requirements):
-                requirements.ohlcv.add(symbol, "1d")
-                requirements.account.add(account, symbols=[symbol], positions=True)
-
-            def generate_trading_signals(self, ohlcvs):
-                pass
-
-            def book_trading_actions(
-                self, ohlcvs, snapshots, timestamp, bookkeeper, triggered_timeframes
-            ):
-                bookkeeper.add(account.move_take_profit(symbol, take_profit))
-
-        return Strategy()
+        return create_booking_strategy(
+            symbol,
+            [symbol],
+            lambda bookkeeper: bookkeeper.add(
+                account.move_take_profit(symbol, take_profit)
+            ),
+        )
 
     return _create_protection_strategy
 
@@ -2035,11 +2030,13 @@ def test_a_refused_leverage_is_warned_about_and_the_candle_still_trades(
 
 
 @pytest.fixture
-def create_market_exit_strategy(account) -> Callable[..., StrategyProtocol]:
-    def _create_market_exit_strategy(
-        symbol: Symbol, tags: Iterable[str], *, symbols: Iterable[Symbol] | None = None
+def create_booking_strategy(account: FuturesAccount) -> Callable[..., StrategyProtocol]:
+    def _create_booking_strategy(
+        symbol: Symbol,
+        declared: Iterable[Symbol],
+        book: Callable[[BookKeeper], None],
     ) -> StrategyProtocol:
-        declared = [symbol] if symbols is None else list(symbols)
+        declared = list(declared)
 
         class Strategy(StrategyProtocol):
             market_type = "futures"
@@ -2054,17 +2051,85 @@ def create_market_exit_strategy(account) -> Callable[..., StrategyProtocol]:
             def book_trading_actions(
                 self, ohlcvs, snapshots, timestamp, bookkeeper, triggered_timeframes
             ):
-                for tag in tags:
-                    bookkeeper.add(
-                        account.short_exit(symbol, 1.0)
-                        .reason("impulse short exit")
-                        .tag(tag)
-                        .build()
-                    )
+                book(bookkeeper)
 
         return Strategy()
 
+    return _create_booking_strategy
+
+
+@pytest.fixture
+def create_market_exit_strategy(
+    account: FuturesAccount,
+    exchange: FuturesExchangeProtocol,
+    create_booking_strategy: Callable[..., StrategyProtocol],
+) -> Callable[..., StrategyProtocol]:
+    def _create_market_exit_strategy(
+        symbol: Symbol, tags: Iterable[str]
+    ) -> StrategyProtocol:
+        tags = list(tags)
+        if tags:
+            _hold_short_once(exchange, symbol, float(len(tags)))
+
+        def book(bookkeeper: BookKeeper) -> None:
+            for tag in tags:
+                bookkeeper.add(
+                    account.short_exit(symbol, 1.0)
+                    .reason("impulse short exit")
+                    .tag(tag)
+                    .build()
+                )
+
+        return create_booking_strategy(symbol, [symbol], book)
+
     return _create_market_exit_strategy
+
+
+def test_an_exit_over_the_position_is_sent_reduce_only_with_its_surplus_after_it(
+    account, exchange, create_booking_strategy
+):
+    symbol = Symbol.create("HYPE/USDT:USDT")
+    strategy = create_booking_strategy(
+        symbol,
+        [symbol],
+        lambda bookkeeper: bookkeeper.add(
+            account.long_exit(symbol, 3.0, reduce_only=False).build()
+        ),
+    )
+    exchange.get_open_positions.return_value = {symbol: _long_position(symbol, 2.0)}
+    exchange.place_market_order.return_value = PlacedOrder(order_id="sent")
+
+    _run_one_cycle(strategy)
+
+    sent = [
+        (call.kwargs["quantity"], call.kwargs["reduce_only"])
+        for call in exchange.place_market_order.await_args_list
+    ]
+    assert sent == [(2.0, True), (1.0, False)]
+
+
+def test_entries_refused_for_margin_in_one_cycle_are_one_warning(
+    account, exchange, create_booking_strategy, caplog
+):
+    hype = Symbol.create("HYPE/USDT:USDT")
+    doge = Symbol.create("DOGE/USDT:USDT")
+    exchange.place_market_order.side_effect = InsufficientMarginError(
+        "25202 Insufficient balance"
+    )
+    strategy = create_booking_strategy(
+        hype,
+        [hype, doge],
+        lambda bookkeeper: [
+            bookkeeper.add(account.long_entry(symbol, 1.0).build())
+            for symbol in (hype, doge)
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING):
+        _run_one_cycle(strategy)
+
+    assert caplog.text.count("fully committed") == 1
+    assert "2 not placed" in caplog.text
 
 
 def _market_exit_placed_as(symbol: Symbol, *order_ids: str) -> AsyncMock:
@@ -2330,6 +2395,7 @@ def test_a_limit_order_that_filled_on_placement_is_settled_when_its_fill_is_repo
     exchange.get_executions_since = AsyncMock(
         return_value=[_short_exit_execution(symbol, "order-1", 1, 0.42)]
     )
+    _hold_short_once(exchange, symbol, 1.0)
     notifier = AsyncMock()
 
     _run_one_cycle(Strategy(), on_fill=[notifier])
@@ -2744,3 +2810,16 @@ def test_an_order_under_one_quantity_step_is_reported_and_never_sent(
     assert "Order quantity 0.4 of DOGE/USDT:USDT is under one quantity step" in (
         caplog.text
     )
+
+
+def _hold_short_once(
+    exchange: FuturesExchangeProtocol, symbol: Symbol, quantity: float
+) -> None:
+    reads = iter([{symbol: _short_position(symbol, quantity)}])
+
+    async def get_open_positions(
+        _symbols: list[Symbol],
+    ) -> dict[Symbol, PositionSnapshot]:
+        return next(reads, {})
+
+    exchange.get_open_positions.side_effect = get_open_positions

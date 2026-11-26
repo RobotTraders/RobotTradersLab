@@ -24,7 +24,6 @@ async def _declared(exchange: Mock) -> FuturesAccount:
 async def account(make_venue: Callable[..., Mock]) -> FuturesAccount:
     exchange = make_venue()
     exchange.get_quote_conversion_rate.return_value = 1.0
-    exchange.placement_reserve_rate = 0.0
     exchange.placement_requirement_rate = lambda leverage: 1 / leverage
     return await _declared(exchange)
 

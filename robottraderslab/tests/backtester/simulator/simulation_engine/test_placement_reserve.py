@@ -4,7 +4,7 @@ import pytest
 
 from robottraderslab import Symbol
 from robottraderslab.backtester.simulator import FeeModel, FeeRates, fee_model_for
-from robottraderslab.exceptions import ExchangeRecoverableError
+from robottraderslab.exceptions import InsufficientMarginError
 from robottraderslab.exchanges import OrderSide, PositionSide
 from robottraderslab_core.exchanges import PlacementReserve
 
@@ -93,7 +93,7 @@ class TestLimitOrder:
     async def test_order_above_the_boundary_is_refused_at_placement(
         self, levered_sim, btc_usdt_perp, side
     ):
-        with pytest.raises(ExchangeRecoverableError):
+        with pytest.raises(InsufficientMarginError):
             await levered_sim.exchange.place_limit_order(
                 symbol=btc_usdt_perp,
                 side=side,
@@ -199,7 +199,7 @@ class TestAnOrderOpposingThePosition:
     ):
         await _fill_long(levered_sim, btc_usdt_perp, HELD_QUANTITY)
 
-        with pytest.raises(ExchangeRecoverableError, match="requires"):
+        with pytest.raises(InsufficientMarginError, match="requires"):
             await levered_sim.exchange.place_market_order(
                 symbol=btc_usdt_perp,
                 side=OrderSide.SELL,

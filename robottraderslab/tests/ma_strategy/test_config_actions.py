@@ -1,7 +1,6 @@
 import asyncio
 import math
 from collections.abc import Mapping
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, Mock
@@ -17,9 +16,6 @@ from robottraderslab.exchanges import (
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.ma_strategy.futures_ma_strategy import FuturesMAStrategy
 from robottraderslab.strategies import (
-    AccountSnapshot,
-    AccountSnapshots,
-    BookKeeper,
     OHLCVs,
     StrategyRequirements,
     TradingMode,
@@ -150,32 +146,20 @@ class TestMarginTargets:
             ),
         }
 
-    def test_a_drifted_symbol_books_no_margin_action(self, strategy_single_profile):
-        bookkeeper = BookKeeper()
+    def test_a_drifted_symbol_books_no_margin_action(
+        self, strategy_single_profile, make_booked_cycle
+    ):
         ohlcvs = Mock(spec=OHLCVs)
         ohlcvs.current.return_value = math.nan
-        account_name = strategy_single_profile.account.name
-        snapshots = AccountSnapshots(
-            {
-                account_name: AccountSnapshot(
-                    account_name=account_name,
-                    positions={},
-                    margin_settings={
-                        profile.symbol: MarginSettings(
-                            leverage=None, margin_mode=MarginMode.ISOLATED
-                        )
-                        for profile in strategy_single_profile.profiles
-                    },
-                )
-            }
-        )
+        drifted = {
+            profile.symbol: MarginSettings(
+                leverage=None, margin_mode=MarginMode.ISOLATED
+            )
+            for profile in strategy_single_profile.profiles
+        }
 
-        strategy_single_profile.book_trading_actions(
-            ohlcvs,
-            snapshots,
-            datetime.fromisoformat("2024-01-01 12:00:00"),
-            bookkeeper,
-            {"1d", "4h"},
+        bookkeeper = make_booked_cycle(
+            strategy_single_profile, ohlcvs, margin_settings=drifted
         )
 
         setters = [
