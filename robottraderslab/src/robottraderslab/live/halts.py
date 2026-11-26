@@ -1,6 +1,11 @@
 import logging
 from collections.abc import Collection, Iterable, Mapping, Sequence
 
+from robottraderslab._internal import (
+    carried_orders,
+    non_empty_by_account,
+    rebuilt_actions,
+)
 from robottraderslab.futures import FuturesOrderBatchAction, FuturesOrderModifyAction
 from robottraderslab.strategies import AccountSnapshots
 from robottraderslab_core import Symbol
@@ -8,7 +13,7 @@ from robottraderslab_core.engine import AccountProtocol, ActionID, Halt
 from robottraderslab_core.exchanges import BaseExchangeAction, TradingStatus
 from robottraderslab_core.strategies import AccountRequirements
 
-from .exit_only import carried_orders, rebuilt_actions, restrict_account
+from .exit_only import restrict_account
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +53,39 @@ def held_back(
         halts: The halts of the cycle.
         status: The status the symbols are halted at.
     """
-    held: dict[AccountProtocol, frozenset[Symbol]] = {}
-    for requirement in requirements._get_all():
-        symbols = frozenset(
-            halt.symbol
-            for halt in halts
-            if halt.account == requirement.account.name
-            and halt.closure.status is status
+    return non_empty_by_account(
+        (
+            requirement.account,
+            frozenset(
+                halt.symbol
+                for halt in halts
+                if halt.account == requirement.account.name
+                and halt.closure.status is status
+            ),
         )
-        if symbols:
-            held[requirement.account] = symbols
-    return held
+        for requirement in requirements._get_all()
+    )
+
+
+def closed_with_unlisted(
+    closed: Mapping[AccountProtocol, frozenset[Symbol]],
+    unlisted_by_account: Mapping[AccountProtocol, frozenset[Symbol]],
+) -> dict[AccountProtocol, frozenset[Symbol]]:
+    """Join the symbols a listing lacks to those closed to every order.
+
+    A symbol its venue does not list is sent nothing for the cycle, as one the
+    venue closed to every order is. An account keeps the symbols closed on it
+    and gains the unlisted ones.
+
+    Args:
+        closed: The symbols closed to every order, by account.
+        unlisted_by_account: The declared symbols the account's venue does not
+            list, by account.
+    """
+    joined = dict(closed)
+    for account, symbols in unlisted_by_account.items():
+        joined[account] = joined.get(account, frozenset()) | symbols
+    return joined
 
 
 def restrict_halted(

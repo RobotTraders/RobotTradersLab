@@ -1,6 +1,4 @@
 import logging
-from collections.abc import Callable
-from unittest.mock import Mock
 
 import pytest
 from live_cycle_helpers import (
@@ -32,11 +30,6 @@ DOGE = Symbol.create("DOGE/USDT:USDT")
 NOT_THIS_BOT = "aaaaaa000000-1-grid"
 
 pytestmark = pytest.mark.usefixtures("candle_boundary_clock")
-
-
-@pytest.fixture
-def exchange(make_live_venue: Callable[[], Mock]) -> Mock:
-    return make_live_venue()
 
 
 def _lines(caplog: pytest.LogCaptureFixture, level: int, text: str) -> list[str]:

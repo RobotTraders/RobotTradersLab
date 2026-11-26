@@ -1,29 +1,20 @@
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from tracker_helpers import tracker_reporting
 
 from robottraderslab.exceptions import BotCriticalError
-from robottraderslab.futures import FuturesAccount, FuturesMarketOrderAction
+from robottraderslab.futures import FuturesAccount
 from robottraderslab.ma_strategy.futures_ma_strategy import FuturesMAStrategy
 from robottraderslab.strategies import (
-    AccountSnapshot,
-    AccountSnapshots,
-    Balance,
-    BookKeeper,
     OHLCVs,
     PositionSide,
-    PositionTracker,
     StrategyRequirements,
-    TrackedPosition,
     TradingSystem,
     tag_of,
 )
-from robottraderslab.strategies.futures import MarginSettings
-
-_MARGIN_CURRENCY = "USDT"
 
 
 def _make_strategy(
@@ -37,8 +28,7 @@ def _make_strategy(
         config_dir=Path("bot-config-dir"),
         profiles=profiles,
     )
-    strategy._position_tracker = Mock(spec=PositionTracker)
-    strategy._position_tracker.get.return_value = None
+    strategy._position_tracker = tracker_reporting(None)
     return strategy
 
 
@@ -49,48 +39,12 @@ def _ohlcvs_signalling(wanted_column: str) -> OHLCVs:
     return ohlcvs
 
 
-def _book(strategy: FuturesMAStrategy, ohlcvs: OHLCVs) -> BookKeeper:
-    bookkeeper = BookKeeper()
-    account_name = strategy.account.name
-    current_settings = {
-        profile.symbol: MarginSettings(
-            leverage=profile.leverage, margin_mode=profile.margin_mode
-        )
-        for profile in strategy.profiles
-    }
-    snapshots = AccountSnapshots(
-        {
-            account_name: AccountSnapshot(
-                account_name=account_name,
-                positions={},
-                balances={_MARGIN_CURRENCY: Balance(locked=0.0, total=100_000.0)},
-                margin_settings=current_settings,
-            )
-        }
-    )
-    strategy.book_trading_actions(
-        ohlcvs,
-        snapshots,
-        datetime.fromisoformat("2024-01-01 12:00:00"),
-        bookkeeper,
-        [strategy.profiles[0].timeframe],
-    )
-    return bookkeeper
-
-
-def _only_order_action(bookkeeper: BookKeeper) -> FuturesMarketOrderAction:
-    order_actions = [
-        action
-        for action in bookkeeper.list_actions()
-        if isinstance(action, FuturesMarketOrderAction)
-    ]
-    assert len(order_actions) == 1
-    return order_actions[0]
-
-
 class TestCrossoverTags:
     def test_entry_long_uses_the_timeframe_without_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -102,13 +56,14 @@ class TestCrossoverTags:
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
         ohlcvs = _ohlcvs_signalling("buy")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d"
 
     def test_entry_short_composes_the_timeframe_with_the_profiles_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -121,13 +76,15 @@ class TestCrossoverTags:
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
         ohlcvs = _ohlcvs_signalling("slow_sell")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d-slow"
 
     def test_exit_long_composes_the_timeframe_with_the_profiles_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
+        hold_position,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -138,18 +95,18 @@ class TestCrossoverTags:
             "tag": "slow",
         }
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
-        strategy._position_tracker.get.return_value = TrackedPosition(
-            side=PositionSide.LONG, quantity=1.5
-        )
-        ohlcvs = _ohlcvs_signalling("slow_sell")
+        hold_position(strategy, PositionSide.LONG, 1.5)
+        ohlcvs = _ohlcvs_signalling("slow_long_exit")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d-slow"
 
     def test_exit_short_uses_the_timeframe_without_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
+        hold_position,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -159,20 +116,19 @@ class TestCrossoverTags:
             "available_balance_ratio": 0.25,
         }
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
-        strategy._position_tracker.get.return_value = TrackedPosition(
-            side=PositionSide.SHORT, quantity=1.5
-        )
-        ohlcvs = _ohlcvs_signalling("buy")
+        hold_position(strategy, PositionSide.SHORT, 1.5)
+        ohlcvs = _ohlcvs_signalling("short_exit")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d"
 
 
 class TestLongShortTags:
     def test_entry_long_composes_the_timeframe_with_the_profiles_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -186,13 +142,14 @@ class TestLongShortTags:
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
         ohlcvs = _ohlcvs_signalling("trend_long_entry")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d-trend"
 
     def test_entry_short_uses_the_timeframe_without_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -205,13 +162,15 @@ class TestLongShortTags:
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
         ohlcvs = _ohlcvs_signalling("short_entry")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d"
 
     def test_exit_long_uses_the_timeframe_without_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
+        hold_position,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -222,18 +181,18 @@ class TestLongShortTags:
             "available_balance_ratio": 0.25,
         }
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
-        strategy._position_tracker.get.return_value = TrackedPosition(
-            side=PositionSide.LONG, quantity=1.5
-        )
+        hold_position(strategy, PositionSide.LONG, 1.5)
         ohlcvs = _ohlcvs_signalling("long_exit")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d"
 
     def test_exit_short_composes_the_timeframe_with_the_profiles_tag(
-        self, mock_account, backtest_trading_system
+        self,
+        mock_account,
+        backtest_trading_system,
+        make_booked_order,
+        hold_position,
     ):
         profile = {
             "symbol": "BTC/USDT:USDT",
@@ -245,14 +204,10 @@ class TestLongShortTags:
             "tag": "trend",
         }
         strategy = _make_strategy(mock_account, backtest_trading_system, [profile])
-        strategy._position_tracker.get.return_value = TrackedPosition(
-            side=PositionSide.SHORT, quantity=1.5
-        )
+        hold_position(strategy, PositionSide.SHORT, 1.5)
         ohlcvs = _ohlcvs_signalling("trend_short_exit")
 
-        bookkeeper = _book(strategy, ohlcvs)
-
-        order = _only_order_action(bookkeeper)
+        order = make_booked_order(strategy, ohlcvs)
         assert tag_of(order.client_order_id) == "1d-trend"
 
 

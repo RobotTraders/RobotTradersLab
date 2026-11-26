@@ -5,7 +5,10 @@ from datetime import datetime
 
 from robottraderslab_core import Symbol
 from robottraderslab_core.engine import StepCount, to_quantity, to_step_count
-from robottraderslab_core.exceptions import ExchangeRecoverableError
+from robottraderslab_core.exceptions import (
+    ExchangeRecoverableError,
+    InsufficientMarginError,
+)
 from robottraderslab_core.exchanges import (
     Balance,
     Currency,
@@ -22,7 +25,7 @@ from robottraderslab_core.ohlcv import OHLCVsBySymbol
 from robottraderslab_core.strategies import FillDescriber
 
 from .base_simulation_engine import BaseSimulationEngine
-from .currency_converter import CurrencyConverter
+from .currency_converter import CurrencyConverter, MissingConversionRateError
 from .fees import FeeModel, FeeRates
 from .fill_recorder import FillRecorder, FillType
 from .order_models import (
@@ -250,9 +253,7 @@ class FuturesSimulationEngine(BaseSimulationEngine):
             )
             self._update_balance(locked_delta=limit_order.locked_margin)
         except RuntimeError as e:
-            raise ExchangeRecoverableError(
-                f"{e}, placing an order on {limit_order.symbol}"
-            ) from e
+            raise _refusal_of(e, f"placing an order on {limit_order.symbol}") from e
 
     def _on_release_limit_entry(self, limit_order: LimitOrder) -> None:
         self._update_balance(locked_delta=-limit_order.locked_margin)
@@ -267,7 +268,7 @@ class FuturesSimulationEngine(BaseSimulationEngine):
         opening leg needs, as the venue counts it.
 
         Raises:
-            ExchangeRecoverableError: If the balance, with that margin, is
+            InsufficientMarginError: If the balance, with that margin, is
                 under what the fee model's venue holds back for an order of
                 this notional.
         """
@@ -276,7 +277,7 @@ class FuturesSimulationEngine(BaseSimulationEngine):
         )
         available = self._balances[self._margin_currency].available + released_margin
         if available < required:
-            raise ExchangeRecoverableError(
+            raise InsufficientMarginError(
                 f"Order of {notional} {self._margin_currency} notional on {symbol} "
                 f"requires {required}, {available} is available to it"
             )
@@ -369,9 +370,7 @@ class FuturesSimulationEngine(BaseSimulationEngine):
                 total_delta=-fee,
             )
         except RuntimeError as e:
-            raise ExchangeRecoverableError(
-                f"{e}, filling an order on {order.symbol}"
-            ) from e
+            raise _refusal_of(e, f"filling an order on {order.symbol}") from e
 
         created = self._grow_position(
             timestamp,
@@ -825,6 +824,12 @@ class FuturesSimulationEngine(BaseSimulationEngine):
         )
 
         self._trades_occurred_this_tick = True
+
+
+def _refusal_of(error: RuntimeError, doing: str) -> ExchangeRecoverableError:
+    if isinstance(error, MissingConversionRateError):
+        return ExchangeRecoverableError(f"{error}, {doing}")
+    return InsufficientMarginError(f"{error}, {doing}")
 
 
 def _determine_position_side(order: LimitOrder | MarketOrder) -> PositionSide:

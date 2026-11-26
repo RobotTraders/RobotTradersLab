@@ -25,7 +25,10 @@ from robottraderslab_core.engine import (
     validate_price,
     validate_ratio,
 )
-from robottraderslab_core.exceptions import SymbolNotListedError
+from robottraderslab_core.exceptions import (
+    ExchangeRecoverableError,
+    SymbolNotListedError,
+)
 from robottraderslab_core.exchanges import (
     AccountStateRequest,
     BaseExchangeAction,
@@ -36,6 +39,7 @@ from robottraderslab_core.exchanges import (
     OrderRequest,
     OrderSide,
     PositionSide,
+    PositionSnapshot,
     TimeInForce,
     TriggerType,
     modify_request,
@@ -182,9 +186,16 @@ class FuturesAccount:
         """Start the exit that closes the position a tracker holds under one
         id, or a share of it.
 
-        The order takes the side opposite the tracked position and is not
-        reduce-only, since the venue nets every profile on the symbol into
-        one position the tracked share may stand against.
+        The order takes the side opposite the tracked position. The venue nets
+        every profile on the symbol into one position the tracked share may
+        stand against, so the engine sends the part of the order that reduces
+        that position reduce-only, which free margin never refuses, and the
+        rest as a plain order placed after it. On a symbol whose tracked
+        positions the engine cannot tie to the venue's, that rest is cut and
+        logged at WARNING. The engine reads the venue's position from the
+        account's snapshot, and from the venue itself, once for the cycle, when
+        the account declared no positions for the symbol; when that read
+        fails, the order is sent reduce-only whole.
 
         Args:
             tracked: The position a `PositionTracker` holds under the id.
@@ -200,12 +211,13 @@ class FuturesAccount:
         """
         validate_closing_ratio(closing_ratio)
         quantity = tracked.quantity * closing_ratio
-        if tracked.side is PositionSide.LONG:
-            return self._create_sell_order(
-                symbol, quantity, self._order_overrides.exit, reduce_only=False
-            )
-        return self._create_buy_order(
-            symbol, quantity, self._order_overrides.exit, reduce_only=False
+        return self._create_order(
+            OrderSide.SELL if tracked.side is PositionSide.LONG else OrderSide.BUY,
+            symbol,
+            quantity,
+            self._order_overrides.exit,
+            reduce_only=False,
+            is_exit=True,
         )
 
     def long_entry(
@@ -221,7 +233,9 @@ class FuturesAccount:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_buy_order(symbol, quantity, self._order_overrides.entry)
+        return self._create_order(
+            OrderSide.BUY, symbol, quantity, self._order_overrides.entry
+        )
 
     def long_exit(
         self,
@@ -232,18 +246,44 @@ class FuturesAccount:
     ) -> FuturesOrderBuilder:
         """Start a sell order that closes a long position.
 
+        The engine sends the part of the order that reduces the venue's
+        position reduce-only, which free margin never refuses. The position
+        comes from the account's snapshot, and from the venue itself, once for
+        the cycle, when the account declared no positions for the symbol and
+        the order is not reduce-only; when that read fails, the order is sent
+        reduce-only whole, which a venue that refuses a reduce-only order above its
+        position refuses when the order exceeds it, and the order is then
+        reported; a strategy that books its exit on every candle its side stays
+        closed books it again the next cycle, and one that books it on the
+        crossing candle alone does not. A reduce-only order on a symbol the
+        account declared no positions for is sent as booked, unless an exit
+        booked with `reduce_only=False` on that symbol in the same cycle, one
+        the venue's rules accept, made the engine read the position and the
+        read answered, which then caps it.
+
         Args:
             quantity: Quantity to sell, in the base currency; omit it to size
                 the order with the builder's `size`.
             reduce_only: Whether the order may only shrink the position,
-                never open the opposite side.
+                never open the opposite side. True cuts a quantity above the
+                position to it, and logs the cut at WARNING, where the account
+                holds the position in its snapshot; False sends that
+                surplus as a plain order placed after the reduce-only part,
+                which can open the opposite side, except on a symbol whose
+                tracked positions the engine cannot tie to the venue's, where
+                the surplus is cut as True cuts it.
 
         Raises:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_sell_order(
-            symbol, quantity, self._order_overrides.exit, reduce_only=reduce_only
+        return self._create_order(
+            OrderSide.SELL,
+            symbol,
+            quantity,
+            self._order_overrides.exit,
+            reduce_only=reduce_only,
+            is_exit=True,
         )
 
     def long_target(
@@ -457,7 +497,9 @@ class FuturesAccount:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_sell_order(symbol, quantity, self._order_overrides.entry)
+        return self._create_order(
+            OrderSide.SELL, symbol, quantity, self._order_overrides.entry
+        )
 
     def short_exit(
         self,
@@ -468,18 +510,44 @@ class FuturesAccount:
     ) -> FuturesOrderBuilder:
         """Start a buy order that closes a short position.
 
+        The engine sends the part of the order that reduces the venue's
+        position reduce-only, which free margin never refuses. The position
+        comes from the account's snapshot, and from the venue itself, once for
+        the cycle, when the account declared no positions for the symbol and
+        the order is not reduce-only; when that read fails, the order is sent
+        reduce-only whole, which a venue that refuses a reduce-only order above its
+        position refuses when the order exceeds it, and the order is then
+        reported; a strategy that books its exit on every candle its side stays
+        closed books it again the next cycle, and one that books it on the
+        crossing candle alone does not. A reduce-only order on a symbol the
+        account declared no positions for is sent as booked, unless an exit
+        booked with `reduce_only=False` on that symbol in the same cycle, one
+        the venue's rules accept, made the engine read the position and the
+        read answered, which then caps it.
+
         Args:
             quantity: Quantity to buy, in the base currency; omit it to size
                 the order with the builder's `size`.
             reduce_only: Whether the order may only shrink the position,
-                never open the opposite side.
+                never open the opposite side. True cuts a quantity above the
+                position to it, and logs the cut at WARNING, where the account
+                holds the position in its snapshot; False sends that
+                surplus as a plain order placed after the reduce-only part,
+                which can open the opposite side, except on a symbol whose
+                tracked positions the engine cannot tie to the venue's, where
+                the surplus is cut as True cuts it.
 
         Raises:
             ValueError: If the quantity is zero, negative or NaN, or the
                 symbol carries no margin currency.
         """
-        return self._create_buy_order(
-            symbol, quantity, self._order_overrides.exit, reduce_only=reduce_only
+        return self._create_order(
+            OrderSide.BUY,
+            symbol,
+            quantity,
+            self._order_overrides.exit,
+            reduce_only=reduce_only,
+            is_exit=True,
         )
 
     def short_target(
@@ -627,11 +695,8 @@ class FuturesAccount:
         base_delay: float = BASE_DELAY_SECONDS,
     ) -> list[Execution]:
         symbol_list = list(symbols)
-        positions = await retry_on_transient(
-            self._exchange.get_open_positions,
-            symbol_list,
-            max_attempts=max_attempts,
-            base_delay=base_delay,
+        positions = await self._read_positions(
+            symbol_list, max_attempts=max_attempts, base_delay=base_delay
         )
         executions = await self._executions_since(
             since,
@@ -650,16 +715,13 @@ class FuturesAccount:
         return getattr(action, "exchange", None) is self._exchange
 
     def _builder_of(self, request: OrderRequest) -> FuturesOrderBuilder:
-        create = (
-            self._create_buy_order
-            if request.side is OrderSide.BUY
-            else self._create_sell_order
-        )
-        builder = create(
+        builder = self._create_order(
+            request.side,
             request.symbol,
             request.quantity,
             NO_ORDER_SETTINGS,
             reduce_only=request.reduce_only,
+            is_exit=request.reduce_only,
         )
         if request.limit_price is not None:
             builder.limit(
@@ -677,46 +739,49 @@ class FuturesAccount:
             builder.tag(tag)
         return builder
 
+    def _checked_quantity(
+        self,
+        symbol: Symbol,
+        quantity: float,
+        *,
+        price: float | None,
+        reduce_only: bool,
+    ) -> tuple[float, str | None]:
+        try:
+            return (
+                self._instrument(symbol).order_quantity(
+                    symbol, quantity, price=price, reduce_only=reduce_only
+                ),
+                None,
+            )
+        except ExchangeRecoverableError as refusal:
+            logger.debug("%s", refusal)
+            return quantity, str(refusal)
+
     def _close_removed_position(self, symbol: Symbol) -> ClosePositionAction:
         return ClosePositionAction(
-            exchange=self._exchange, symbol=symbol, tag=FLATTEN_TAG
+            exchange=self._exchange, symbol=symbol, tag=FLATTEN_TAG, is_exit=False
         )
 
-    def _create_buy_order(
+    def _create_order(
         self,
+        order_side: OrderSide,
         symbol: Symbol,
         quantity: float | None,
         settings: OrderSettings,
         reduce_only: bool = False,
+        is_exit: bool = False,
         reference_price: float | None = None,
     ) -> FuturesOrderBuilder:
-        """Create a BUY order (opens long or closes short)."""
+        """Create a buy, which opens a long or closes a short, or a sell."""
         return FuturesOrderBuilder(
             account=self,
             quantity=quantity,
-            side=OrderSide.BUY,
+            side=order_side,
             symbol=symbol,
             settings=settings,
             reduce_only=reduce_only,
-            reference_price=reference_price,
-        )
-
-    def _create_sell_order(
-        self,
-        symbol: Symbol,
-        quantity: float | None,
-        settings: OrderSettings,
-        reduce_only: bool = False,
-        reference_price: float | None = None,
-    ) -> FuturesOrderBuilder:
-        """Create a SELL order (opens short or closes long)."""
-        return FuturesOrderBuilder(
-            account=self,
-            quantity=quantity,
-            side=OrderSide.SELL,
-            symbol=symbol,
-            settings=settings,
-            reduce_only=reduce_only,
+            is_exit=is_exit,
             reference_price=reference_price,
         )
 
@@ -761,6 +826,14 @@ class FuturesAccount:
     def _labels_resting_triggers(self) -> bool:
         return self.capabilities.labels_resting_triggers
 
+    def _quantity_denial(
+        self, symbol: Symbol, quantity: float, price: float | None
+    ) -> str | None:
+        _, denial = self._checked_quantity(
+            symbol, quantity, price=price, reduce_only=False
+        )
+        return denial
+
     async def _read_instruments(self, symbols: Iterable[Symbol]) -> None:
         for symbol in symbols:
             try:
@@ -770,6 +843,21 @@ class FuturesAccount:
                 logger.debug("%s", error)
                 self._instruments.pop(symbol, None)
                 self._unlisted[symbol] = str(error)
+
+    async def _read_positions(
+        self,
+        symbols: Iterable[Symbol],
+        *,
+        max_attempts: int = MAX_ATTEMPTS,
+        base_delay: float = BASE_DELAY_SECONDS,
+    ) -> dict[Symbol, PositionSnapshot]:
+        positions: dict[Symbol, PositionSnapshot] = await retry_on_transient(
+            self._exchange.get_open_positions,
+            list(symbols),
+            max_attempts=max_attempts,
+            base_delay=base_delay,
+        )
+        return positions
 
     async def _snapshot(
         self,

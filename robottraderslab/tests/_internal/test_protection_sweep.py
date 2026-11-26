@@ -196,11 +196,15 @@ class TestSweepOrphanProtections:
         requirements = _declared(account)
         snapshots = _snapshots(open_orders=[_order("stop-loss")])
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.INFO):
             sweep_orphan_protections(requirements.account, snapshots, BookKeeper())
 
-        assert "BTC/USDT:USDT" in caplog.text
-        assert "stop-loss" in caplog.text
+        (record,) = caplog.records
+        assert record.levelno == logging.INFO
+        assert record.getMessage() == (
+            "BTC/USDT:USDT: cancelling a resting stop-loss order, "
+            "the position it guarded is closed"
+        )
 
     def test_a_flat_symbol_is_swept_while_a_held_one_is_not(self, account):
         requirements = _declared(account, symbols=[BTC, ETH])

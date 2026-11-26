@@ -23,10 +23,13 @@ async def widen_tracked_positions(
     """A tracker accounts for a symbol's whole position only from a moment
     the symbol held nothing, and the candle's own read reaches back no
     further than the strategy's lookback, so a position older than that
-    leaves the tracker asking for more. A symbol the venue's listing lacks
-    has had its position settled by the delisting, so no read widens for it.
+    leaves the tracker asking for more. No read widens for a symbol the venue's
+    listing lacks: one the account shows no position on is settled, and one it
+    still shows a position on is left as it stands.
 
     Args:
+        account_snapshots: The snapshots of the cycle, holding the state of every
+            account a tracker asks on.
         executions_since: Where the candle's own read starts. The second
             read never starts later, so a strategy whose lookback already
             reaches past the attribution span keeps every fill it had.
@@ -41,9 +44,11 @@ async def widen_tracked_positions(
     since = min(executions_since, datetime.now(UTC) - ATTRIBUTION_REACH)
     for requirement, symbols in asking:
         account = accounts[requirement.account.name]
+        account_snapshot = account_snapshots.of(requirement.account)
         unlisted = await account._unlisted_among(symbols)
         for symbol in unlisted:
-            requirement.tracker.settle_unlisted(symbol)
+            if account_snapshot.position(symbol) is None:
+                requirement.tracker.settle_unlisted(symbol)
         listed = symbols - unlisted
         if not listed:
             continue
@@ -54,7 +59,7 @@ async def widen_tracked_positions(
             base_delay=base_delay,
         )
         requirement.tracker.widen(
-            account_snapshots.of(requirement.account),
+            account_snapshot,
             executions,
             listed,
             since,

@@ -29,6 +29,7 @@ from robottraderslab_core.engine import (
     AccountRequirement,
 )
 from robottraderslab_core.futures import (
+    BatchableOrderAction,
     CancelOrderByIdAction,
     CancelOrdersForSymbolAction,
     SetLeverageAction,
@@ -211,17 +212,18 @@ def test_move_take_profit_with_a_price_not_above_zero(exchange, price):
         account.move_take_profit(BTCUSDT, price)
 
 
-class TestCloseTrackedPosition:
-    @pytest.fixture
-    async def account(self, make_venue: Callable[..., Mock]) -> FuturesAccount:
-        account = FuturesAccount(make_venue())
-        await account._read_instruments([BTCUSDT])
-        return account
+@pytest.fixture
+async def account(
+    make_futures_account: Callable[..., FuturesAccount],
+) -> FuturesAccount:
+    account = make_futures_account()
+    await account._read_instruments([BTCUSDT])
+    return account
 
+
+class TestCloseTrackedPosition:
     def test_a_tracked_long_is_closed_with_a_sell_of_its_quantity(self, account):
-        exit_order = account.close_tracked_position(
-            BTCUSDT, TrackedPosition(PositionSide.LONG, 3.0)
-        ).build()
+        exit_order = _tracked_long_exit(account)
 
         assert exit_order.symbol == BTCUSDT
         assert exit_order.side == OrderSide.SELL
@@ -243,6 +245,47 @@ class TestCloseTrackedPosition:
         ).build()
 
         assert exit_order.quantity == 0.5
+
+
+class TestExitMarker:
+    def test_a_long_exit_is_marked_an_exit(self, account):
+        assert account.long_exit(BTCUSDT, 1.0).build().is_exit is True
+
+    def test_a_short_exit_is_marked_an_exit(self, account):
+        assert account.short_exit(BTCUSDT, 1.0).build().is_exit is True
+
+    def test_an_exit_that_is_not_reduce_only_is_marked_an_exit(self, account):
+        exit_order = account.long_exit(BTCUSDT, 1.0, reduce_only=False).build()
+
+        assert exit_order.is_exit is True
+
+    def test_a_limit_exit_is_marked_an_exit(self, account):
+        assert account.long_exit(BTCUSDT, 1.0).limit(110.0).build().is_exit is True
+
+    def test_the_exit_of_a_tracked_position_is_marked_an_exit(self, account):
+        assert _tracked_long_exit(account).is_exit is True
+
+    def test_the_close_of_a_symbol_is_marked_an_exit(self, account):
+        assert account.close_position(BTCUSDT).build().is_exit is True
+
+    @pytest.mark.parametrize(("reduce_only", "is_exit"), [(True, True), (False, False)])
+    def test_the_replacement_of_a_resting_order_is_an_exit_when_it_reduces_only(
+        self, account, create_resting_order, reduce_only, is_exit
+    ):
+        resting = create_resting_order(reduce_only=reduce_only)
+
+        modify_action = account.update_order(resting, limit_price=104.0)
+
+        assert modify_action.modifications[0].order.is_exit is is_exit
+
+    def test_the_close_of_a_removed_position_is_not_an_exit(self, account):
+        assert account._close_removed_position(BTCUSDT).is_exit is False
+
+    def test_a_long_entry_is_not_marked_an_exit(self, account):
+        assert account.long_entry(BTCUSDT, 1.0).build().is_exit is False
+
+    def test_a_short_entry_is_not_marked_an_exit(self, account):
+        assert account.short_entry(BTCUSDT, 1.0).build().is_exit is False
 
 
 def test_close_position_with_a_ratio_outside_a_share(exchange):
@@ -634,6 +677,12 @@ class TestUnlistedAmong:
         unlisted = await account._unlisted_among([BTCUSDT, ETHUSDT])
 
         assert unlisted == frozenset({BTCUSDT})
+
+
+def _tracked_long_exit(futures_account: FuturesAccount) -> BatchableOrderAction:
+    return futures_account.close_tracked_position(
+        BTCUSDT, TrackedPosition(PositionSide.LONG, 3.0)
+    ).build()
 
 
 def _list_only(listed: Symbol):

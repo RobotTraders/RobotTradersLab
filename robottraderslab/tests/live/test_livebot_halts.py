@@ -57,11 +57,6 @@ pytestmark = pytest.mark.usefixtures("candle_boundary_clock")
 
 
 @pytest.fixture
-def exchange(make_live_venue: Callable[[], Mock]) -> Mock:
-    return make_live_venue()
-
-
-@pytest.fixture
 def other_exchange(make_live_venue: Callable[[], Mock]) -> Mock:
     return make_live_venue()
 

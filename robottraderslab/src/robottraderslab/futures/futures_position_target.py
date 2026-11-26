@@ -7,7 +7,7 @@ from robottraderslab_core.engine import (
     signed_position,
     validate_price,
 )
-from robottraderslab_core.exchanges import PositionSide
+from robottraderslab_core.exchanges import OrderSide, PositionSide
 from robottraderslab_core.strategies import AccountSnapshot, SizingRule
 
 from .futures_order_builder import FuturesOrderBuilder
@@ -96,6 +96,20 @@ class FuturesPositionTarget:
             price,
         )
 
+    def _order_for(
+        self, quantity_difference: float, reduce_only: bool, current_price: float
+    ) -> FuturesOrderBuilder:
+        overrides = self._account._order_overrides
+        return self._account._create_order(
+            OrderSide.BUY if quantity_difference > 0 else OrderSide.SELL,
+            self._symbol,
+            abs(quantity_difference),
+            overrides.exit if reduce_only else overrides.entry,
+            reduce_only=reduce_only,
+            is_exit=reduce_only,
+            reference_price=current_price,
+        )
+
     def _order_to(
         self, target_quantity: float, current_price: float
     ) -> FuturesOrderBuilder | None:
@@ -114,23 +128,8 @@ class FuturesPositionTarget:
         )
         if abs(difference) < minimum:
             return None
-        reduce_only = _shrinks_without_crossing(held, target)
-        overrides = self._account._order_overrides
-        settings = overrides.exit if reduce_only else overrides.entry
-        if difference > 0:
-            return self._account._create_buy_order(
-                self._symbol,
-                difference,
-                settings,
-                reduce_only=reduce_only,
-                reference_price=current_price,
-            )
-        return self._account._create_sell_order(
-            self._symbol,
-            -difference,
-            settings,
-            reduce_only=reduce_only,
-            reference_price=current_price,
+        return self._order_for(
+            difference, _shrinks_without_crossing(held, target), current_price
         )
 
 

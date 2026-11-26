@@ -1,6 +1,6 @@
 import functools
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,7 +17,12 @@ from robottraderslab.bootstrap import (
     load_single_exchange,
     load_strategy,
 )
-from robottraderslab.exceptions import BotCriticalError, ExchangeRecoverableError
+from robottraderslab.exceptions import (
+    BotCriticalError,
+    ExchangeRecoverableError,
+    ExchangeTransientError,
+    NoOpenPositionError,
+)
 from robottraderslab.exchanges import FuturesExchangeProtocol, next_client_order_id
 from robottraderslab.futures import FuturesAccount
 from robottraderslab.strategies import (
@@ -30,7 +35,9 @@ from robottraderslab.strategies import (
 )
 from robottraderslab_core import Symbol
 from robottraderslab_core.engine import (
+    BASE_DELAY_SECONDS,
     FLATTEN_TAG,
+    MAX_ATTEMPTS,
     StepCount,
     fetch_account_snapshots,
     name_process,
@@ -41,6 +48,7 @@ from robottraderslab_core.engine import (
 from robottraderslab_core.exchanges import (
     OrderProtocol,
     OrderSide,
+    PlacedOrder,
     PositionSnapshot,
     retry_on_transient,
 )
@@ -170,31 +178,92 @@ async def _flatten_symbol(
 ) -> None:
     try:
         await retry_on_transient(exchange.cancel_orders_for_symbol, symbol)
-        logger.info("Cancelled open orders for `%s`", symbol)
-        if position is not None:
-            await _close_position(exchange, symbol, position)
+    except ExchangeTransientError as e:
+        logger.error("Could not fully flatten `%s` after its retries: %s", symbol, e)
+        return
     except ExchangeRecoverableError as e:
         logger.warning("Could not fully flatten `%s`: %s", symbol, e)
+        return
+    logger.info("Cancelled open orders for `%s`", symbol)
+    if position is not None:
+        await _close_position(exchange, symbol, position)
 
 
 async def _close_position(
     exchange: FuturesExchangeProtocol, symbol: Symbol, position: PositionSnapshot
 ) -> None:
-    close = functools.partial(
-        exchange.place_market_order,
+    place_order = _closing_order(
+        exchange,
         symbol,
         position.side.closing_side,
         position.quantity,
         reduce_only=True,
+    )
+    if await _send_order(place_order, f"the {position.side} position on `{symbol}`"):
+        logger.info(
+            "Closed %s position on `%s`, quantity %s",
+            position.side,
+            symbol,
+            position.quantity,
+        )
+
+
+def _closing_order(
+    exchange: FuturesExchangeProtocol,
+    symbol: Symbol,
+    side: OrderSide,
+    quantity: float,
+    *,
+    reduce_only: bool,
+) -> Callable[[], Awaitable[PlacedOrder]]:
+    return functools.partial(
+        exchange.place_market_order,
+        symbol,
+        side,
+        quantity,
+        reduce_only=reduce_only,
         client_order_id=next_client_order_id(FLATTEN_TAG),
     )
-    await retry_on_transient(close)
-    logger.info(
-        "Closed %s position on `%s`, quantity %s",
-        position.side,
-        symbol,
-        position.quantity,
-    )
+
+
+async def _send_order(
+    place_order: Callable[[], Awaitable[PlacedOrder]],
+    closing: str,
+    *,
+    max_attempts: int = MAX_ATTEMPTS,
+    base_delay: float = BASE_DELAY_SECONDS,
+) -> bool:
+    """Send an order that closes a quantity, retrying a transient failure, and say whether it went through.
+
+    A refusal or a transient failure of the order is logged and never raised:
+    a no-position answer at INFO, a transient failure that outlasts the
+    retries and any other refusal at ERROR. A critical error propagates.
+
+    Args:
+        place_order: Sends the order.
+        closing: Names the quantity the order closes, for the line of a failure.
+        max_attempts: Total attempts for a transient failure.
+        base_delay: Ceiling of the first retry delay in seconds.
+    """
+    try:
+        await retry_on_transient(
+            place_order, max_attempts=max_attempts, base_delay=base_delay
+        )
+    except NoOpenPositionError as e:
+        logger.info(
+            "Nothing left to close of %s, the account holds no position: %s", closing, e
+        )
+    except ExchangeTransientError as e:
+        logger.error(
+            "Could not close %s after its retries, so it may still be open: %s",
+            closing,
+            e,
+        )
+    except ExchangeRecoverableError as e:
+        logger.error("Could not close %s, it stays open: %s", closing, e)
+    else:
+        return True
+    return False
 
 
 async def _verify_flat(
@@ -375,38 +444,31 @@ async def _close_external_quantity(
     attribution: _Attribution,
     live_config: LiveConfig,
 ) -> None:
-    quantity = to_quantity(abs(attribution.external_steps))
+    external_quantity = to_quantity(attribution.external_steps)
+    quantity = abs(external_quantity)
     side = OrderSide.SELL if attribution.external_steps > 0 else OrderSide.BUY
-    close = functools.partial(
-        exchange.place_market_order,
+    place_order = _closing_order(
+        exchange,
         attribution.symbol,
         side,
         quantity,
         reduce_only=_only_reduces(attribution),
-        client_order_id=next_client_order_id(FLATTEN_TAG),
     )
-    try:
-        await retry_on_transient(
-            close,
-            max_attempts=live_config.retry.max_attempts,
-            base_delay=live_config.retry.base_delay_seconds,
-        )
-    except ExchangeRecoverableError as e:
-        logger.warning(
-            "Could not close the %+g no profile owns on `%s`: %s",
-            to_quantity(attribution.external_steps),
+    closing = f"the {external_quantity:+g} no profile owns on `{attribution.symbol}`"
+    if await _send_order(
+        place_order,
+        closing,
+        max_attempts=live_config.retry.max_attempts,
+        base_delay=live_config.retry.base_delay_seconds,
+    ):
+        logger.info(
+            "`%s`: %s %g removes the %+g no profile owns, leaving the %+g they own",
             attribution.symbol,
-            e,
+            side,
+            quantity,
+            external_quantity,
+            to_quantity(attribution.profiles_steps),
         )
-        return
-    logger.info(
-        "`%s`: %s %g removes the %+g no profile owns, leaving the %+g they own",
-        attribution.symbol,
-        side,
-        quantity,
-        to_quantity(attribution.external_steps),
-        to_quantity(attribution.profiles_steps),
-    )
 
 
 def _crosses_flat(attribution: _Attribution) -> bool:

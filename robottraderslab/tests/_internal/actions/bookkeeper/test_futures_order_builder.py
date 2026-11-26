@@ -958,13 +958,24 @@ class TestTradingRules:
     async def coarse_account(self, make_venue) -> FuturesAccount:
         exchange = make_venue(quantity_step=1.0, minimum_order_value=5.0)
         exchange.get_quote_conversion_rate.return_value = 1.0
-        exchange.placement_reserve_rate = 0.0
         account = FuturesAccount(exchange)
         await account._read_instruments([BTC_USDT])
         return account
 
-    def test_an_entry_under_one_step_carries_its_denial(self, coarse_account):
-        order = coarse_account.long_entry(BTC_USDT, 0.4).build()
+    @pytest.mark.parametrize(
+        "make_builder",
+        [
+            pytest.param(lambda account: account.long_entry(BTC_USDT, 0.4), id="entry"),
+            pytest.param(
+                lambda account: account.long_exit(BTC_USDT, 0.4, reduce_only=False),
+                id="plain exit",
+            ),
+        ],
+    )
+    def test_an_order_under_one_step_carries_its_denial(
+        self, coarse_account, make_builder
+    ):
+        order = make_builder(coarse_account).build()
 
         assert order.denial == (
             "Order quantity 0.4 of BTC/USDT:USDT is under one quantity step of 1"
@@ -1006,9 +1017,14 @@ class TestTradingRules:
 
         assert order.denial is None
 
-    def test_a_reduce_only_exit_under_the_minimum_order_value(self, coarse_account):
+    @pytest.mark.parametrize("reduce_only", [True, False])
+    def test_an_exit_under_the_minimum_order_value_is_held_to_the_step_alone(
+        self, coarse_account, reduce_only
+    ):
         order = (
-            coarse_account.long_exit(BTC_USDT, 4.0, reduce_only=True).limit(1.0).build()
+            coarse_account.long_exit(BTC_USDT, 4.0, reduce_only=reduce_only)
+            .limit(1.0)
+            .build()
         )
 
         assert order.denial is None

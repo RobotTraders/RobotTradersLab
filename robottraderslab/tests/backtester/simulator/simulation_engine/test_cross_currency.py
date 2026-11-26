@@ -11,6 +11,10 @@ from robottraderslab.backtester.simulator import (
     SimulatedFuturesExchange,
     fee_model_for,
 )
+from robottraderslab.exceptions import (
+    ExchangeRecoverableError,
+    InsufficientMarginError,
+)
 from robottraderslab.exchanges import OrderSide
 from robottraderslab_core.exchanges import PlacementReserve
 from robottraderslab_core.ohlcv import OHLCVRow, OHLCVsBySymbol
@@ -103,6 +107,16 @@ class TestCrossCurrencyAccounting:
         usd = engine.get_balances()["USD"]
         assert usd.locked == pytest.approx(0.0)
         assert usd.total == pytest.approx(INITIAL_USD + 50.0)
+
+    async def test_an_order_with_no_conversion_rate_is_refused_but_not_for_margin(
+        self, exchange
+    ):
+        with pytest.raises(ExchangeRecoverableError) as refusal:
+            await exchange.place_limit_order(
+                AUD_CAD_PERP, OrderSide.BUY, 1000.0, price=ENTRY_PRICE
+            )
+
+        assert not isinstance(refusal.value, InsufficientMarginError)
 
     async def test_quote_conversion_rate_exposed_to_sizing(self, engine, exchange):
         tick = make_tick({AUD_CAD_PERP: ENTRY_PRICE, USD_CAD: 1 / USD_PER_CAD})

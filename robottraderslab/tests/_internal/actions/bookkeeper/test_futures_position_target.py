@@ -55,6 +55,7 @@ class TestPositionTarget:
         assert order.build().side == OrderSide.BUY
         assert order.build().quantity == 20.0
         assert order.build().reduce_only is False
+        assert order.build().is_exit is False
 
     def test_shrinks_a_long_with_a_reduce_only_sell(self, account, make_position):
         holding = _holding(make_position(PositionSide.LONG, 30.0))
@@ -66,6 +67,7 @@ class TestPositionTarget:
         assert order.build().side == OrderSide.SELL
         assert order.build().quantity == 20.0
         assert order.build().reduce_only is True
+        assert order.build().is_exit is True
 
     def test_quantity_of_zero_flattens_a_short_with_a_reduce_only_buy(
         self, account, make_position
@@ -90,6 +92,7 @@ class TestPositionTarget:
         assert order.build().side == OrderSide.SELL
         assert order.build().quantity == 20.0
         assert order.build().reduce_only is False
+        assert order.build().is_exit is False
 
     def test_smaller_short_target_from_a_long_crosses_in_one_order(
         self, account, make_position
@@ -201,6 +204,7 @@ class TestPositionTarget:
         assert order.build().side == OrderSide.BUY
         assert order.build().quantity == 20.0
         assert order.build().reduce_only is True
+        assert order.build().is_exit is True
 
     @pytest.mark.parametrize(
         "rule", [AvailableBalanceRatio, EquityRatio, TotalBalanceRatio]
@@ -259,7 +263,6 @@ class TestTradingRules:
     async def coarse_account(self, make_venue) -> FuturesAccount:
         exchange = make_venue(quantity_step=1.0, minimum_order_value=5.0)
         exchange.get_quote_conversion_rate.return_value = 1.0
-        exchange.placement_reserve_rate = 0.0
         account = FuturesAccount(exchange)
         await account._read_instruments([BTC_USDT])
         return account

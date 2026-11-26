@@ -7,6 +7,9 @@ from datetime import datetime
 from functools import cached_property
 from typing import Any, ClassVar
 
+import numpy as np
+import numpy.typing as npt
+
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.exceptions import BotCriticalError, ProfileConfigError
 from robottraderslab.indicators import crossover, crossunder, sma
@@ -23,9 +26,11 @@ from robottraderslab.strategies import (
     Profile,
     ProfileStrategy,
     StrategyRequirements,
+    TrackedPosition,
 )
 from robottraderslab.strategies.futures import (
     FuturesAccount,
+    FuturesOrderBuilder,
     MarginMode,
     MarginSettings,
     PositionSnapshot,
@@ -117,24 +122,15 @@ class FuturesMAStrategy(ProfileStrategy[ProfileConfig]):
         if math.isnan(close_value):
             return
 
-        if profile.is_long_short:
-            self._execute_long_short(
-                ohlcvs,
-                account_snapshot,
-                close_value,
-                profile,
-                bookkeeper,
-                self._pending_orders,
-            )
-        else:
-            self._execute_crossover(
-                ohlcvs,
-                account_snapshot,
-                close_value,
-                profile,
-                bookkeeper,
-                self._pending_orders,
-            )
+        self._execute(
+            ohlcvs,
+            account_snapshot,
+            close_value,
+            profile,
+            _TREND_MODE if profile.is_long_short else _CROSSOVER_MODE,
+            bookkeeper,
+            self._pending_orders,
+        )
 
     async def setup(self, requirements: StrategyRequirements) -> None:
         """Declare the data, account state and tracking the profiles need.
@@ -163,129 +159,84 @@ class FuturesMAStrategy(ProfileStrategy[ProfileConfig]):
             tags={profile.profile_id: profile.order_tag for profile in self.profiles},
         )
 
-    def _execute_crossover(
+    def _book_entry(
         self,
         ohlcvs: OHLCVs,
+        profile: ProfileConfig,
         account_snapshot: AccountSnapshot,
         current_price: float,
-        profile: ProfileConfig,
+        signal_mode: "_SignalMode",
         bookkeeper: BookKeeper,
         pending_orders: dict[Symbol, PositionSide],
     ) -> None:
-        p = profile.signal_prefix
-        buy_signal = ohlcvs.signal(profile.symbol, profile.timeframe, f"{p}buy")
-        sell_signal = ohlcvs.signal(profile.symbol, profile.timeframe, f"{p}sell")
-        tracked_position = self._position_tracker.get(profile.profile_id)
-
-        if tracked_position is not None:
-            if sell_signal and tracked_position.side == PositionSide.LONG:
-                action = (
-                    self.account.long_exit(profile.symbol, tracked_position.quantity)
-                    .tag(profile.order_tag)
-                    .reason("ma crossover sell")
-                    .build()
-                )
-                bookkeeper.add(action)
-            elif buy_signal and tracked_position.side == PositionSide.SHORT:
-                action = (
-                    self.account.short_exit(profile.symbol, tracked_position.quantity)
-                    .tag(profile.order_tag)
-                    .reason("ma crossover buy")
-                    .build()
-                )
-                bookkeeper.add(action)
+        buy = _signal(ohlcvs, profile, signal_mode.entry_columns[PositionSide.LONG])
+        sell = _signal(ohlcvs, profile, signal_mode.entry_columns[PositionSide.SHORT])
+        existing_position = account_snapshot.position(profile.symbol)
+        pending_side = pending_orders.get(profile.symbol)
+        if not profile.short_only and _should_enter_long(
+            buy, existing_position, pending_side
+        ):
+            position_side = PositionSide.LONG
+            entry = self.account.long_entry(profile.symbol)
+        elif not profile.long_only and _should_enter_short(
+            sell, existing_position, pending_side
+        ):
+            position_side = PositionSide.SHORT
+            entry = self.account.short_entry(profile.symbol)
         else:
-            existing_position = account_snapshot.position(profile.symbol)
-            pending_side = pending_orders.get(profile.symbol)
-
-            if not profile.short_only and _should_enter_long(
-                buy_signal, existing_position, pending_side
-            ):
-                pending_orders[profile.symbol] = PositionSide.LONG
-                entry = self.account.long_entry(profile.symbol)
-                action = (
-                    entry.size(profile.sizing, current_price, account_snapshot)
-                    .tag(profile.order_tag)
-                    .reason("ma crossover buy")
-                    .build()
-                )
-                bookkeeper.add(action)
-            elif not profile.long_only and _should_enter_short(
-                sell_signal, existing_position, pending_side
-            ):
-                pending_orders[profile.symbol] = PositionSide.SHORT
-                entry = self.account.short_entry(profile.symbol)
-                action = (
-                    entry.size(profile.sizing, current_price, account_snapshot)
-                    .tag(profile.order_tag)
-                    .reason("ma crossover sell")
-                    .build()
-                )
-                bookkeeper.add(action)
-
-    def _execute_long_short(
-        self,
-        ohlcvs: OHLCVs,
-        account_snapshot: AccountSnapshot,
-        current_price: float,
-        profile: ProfileConfig,
-        bookkeeper: BookKeeper,
-        pending_orders: dict[Symbol, PositionSide],
-    ) -> None:
-        p = profile.signal_prefix
-        long_entry = ohlcvs.signal(profile.symbol, profile.timeframe, f"{p}long_entry")
-        long_exit = ohlcvs.signal(profile.symbol, profile.timeframe, f"{p}long_exit")
-        short_entry = ohlcvs.signal(
-            profile.symbol, profile.timeframe, f"{p}short_entry"
+            return
+        pending_orders[profile.symbol] = position_side
+        _book(
+            bookkeeper,
+            entry.size(profile.sizing, current_price, account_snapshot),
+            profile,
+            signal_mode.entry_reasons[position_side],
         )
-        short_exit = ohlcvs.signal(profile.symbol, profile.timeframe, f"{p}short_exit")
+
+    def _book_exit(
+        self,
+        ohlcvs: OHLCVs,
+        profile: ProfileConfig,
+        tracked_position: TrackedPosition,
+        signal_mode: "_SignalMode",
+        bookkeeper: BookKeeper,
+    ) -> None:
+        position_side = tracked_position.side
+        signal_column = (
+            "long_exit" if position_side == PositionSide.LONG else "short_exit"
+        )
+        if not _signal(ohlcvs, profile, signal_column):
+            return
+        exit_order = (
+            self.account.long_exit(profile.symbol, tracked_position.quantity)
+            if position_side == PositionSide.LONG
+            else self.account.short_exit(profile.symbol, tracked_position.quantity)
+        )
+        _book(bookkeeper, exit_order, profile, signal_mode.exit_reasons[position_side])
+
+    def _execute(
+        self,
+        ohlcvs: OHLCVs,
+        account_snapshot: AccountSnapshot,
+        current_price: float,
+        profile: ProfileConfig,
+        signal_mode: "_SignalMode",
+        bookkeeper: BookKeeper,
+        pending_orders: dict[Symbol, PositionSide],
+    ) -> None:
         tracked_position = self._position_tracker.get(profile.profile_id)
-
         if tracked_position is not None:
-            if long_exit and tracked_position.side == PositionSide.LONG:
-                action = (
-                    self.account.long_exit(profile.symbol, tracked_position.quantity)
-                    .tag(profile.order_tag)
-                    .reason("trend long exit")
-                    .build()
-                )
-                bookkeeper.add(action)
-            elif short_exit and tracked_position.side == PositionSide.SHORT:
-                action = (
-                    self.account.short_exit(profile.symbol, tracked_position.quantity)
-                    .tag(profile.order_tag)
-                    .reason("trend short exit")
-                    .build()
-                )
-                bookkeeper.add(action)
-        else:
-            existing_position = account_snapshot.position(profile.symbol)
-            pending_side = pending_orders.get(profile.symbol)
-
-            if not profile.short_only and _should_enter_long(
-                long_entry, existing_position, pending_side
-            ):
-                pending_orders[profile.symbol] = PositionSide.LONG
-                entry = self.account.long_entry(profile.symbol)
-                action = (
-                    entry.size(profile.sizing, current_price, account_snapshot)
-                    .tag(profile.order_tag)
-                    .reason("trend long entry")
-                    .build()
-                )
-                bookkeeper.add(action)
-            elif not profile.long_only and _should_enter_short(
-                short_entry, existing_position, pending_side
-            ):
-                pending_orders[profile.symbol] = PositionSide.SHORT
-                entry = self.account.short_entry(profile.symbol)
-                action = (
-                    entry.size(profile.sizing, current_price, account_snapshot)
-                    .tag(profile.order_tag)
-                    .reason("trend short entry")
-                    .build()
-                )
-                bookkeeper.add(action)
+            self._book_exit(ohlcvs, profile, tracked_position, signal_mode, bookkeeper)
+            return
+        self._book_entry(
+            ohlcvs,
+            profile,
+            account_snapshot,
+            current_price,
+            signal_mode,
+            bookkeeper,
+            pending_orders,
+        )
 
 
 def get_lightweight_chart_indicators(
@@ -360,6 +311,7 @@ def _add_crossover_signals(ohlcvs: OHLCVs, profile: ProfileConfig) -> None:
         f"{p}sell",
         crossunder(fast_sma, slow_sma),
     )
+    _add_exit_states(ohlcvs, profile, fast_sma, slow_sma)
 
 
 def _add_long_short_signals(ohlcvs: OHLCVs, profile: ProfileConfig) -> None:
@@ -384,15 +336,33 @@ def _add_long_short_signals(ohlcvs: OHLCVs, profile: ProfileConfig) -> None:
         f"{p}long_entry",
         fast_cross_above_slow & (close > trend_sma),
     )
-    ohlcvs.add_column(symbol, profile.timeframe, f"{p}long_exit", fast_cross_below_slow)
     ohlcvs.add_column(
         symbol,
         profile.timeframe,
         f"{p}short_entry",
         fast_cross_below_slow & (close < trend_sma),
     )
+    _add_exit_states(ohlcvs, profile, fast_sma, slow_sma)
+
+
+def _add_exit_states(
+    ohlcvs: OHLCVs,
+    profile: ProfileConfig,
+    fast_sma: npt.NDArray[np.float64],
+    slow_sma: npt.NDArray[np.float64],
+) -> None:
+    p = profile.signal_prefix
     ohlcvs.add_column(
-        symbol, profile.timeframe, f"{p}short_exit", fast_cross_above_slow
+        profile.symbol, profile.timeframe, f"{p}long_exit", fast_sma < slow_sma
+    )
+    ohlcvs.add_column(
+        profile.symbol, profile.timeframe, f"{p}short_exit", fast_sma > slow_sma
+    )
+
+
+def _signal(ohlcvs: OHLCVs, profile: ProfileConfig, signal_column: str) -> bool:
+    return ohlcvs.signal(
+        profile.symbol, profile.timeframe, f"{profile.signal_prefix}{signal_column}"
     )
 
 
@@ -422,3 +392,45 @@ def _should_enter_short(
     if pending_side == PositionSide.LONG:
         return False
     return True
+
+
+def _book(
+    bookkeeper: BookKeeper,
+    order_builder: FuturesOrderBuilder,
+    profile: ProfileConfig,
+    reason: str,
+) -> None:
+    bookkeeper.add(order_builder.tag(profile.order_tag).reason(reason).build())
+
+
+@dataclass(frozen=True)
+class _SignalMode:
+    """The columns a profile enters on and the reasons its orders carry."""
+
+    entry_columns: dict[PositionSide, str]
+    entry_reasons: dict[PositionSide, str]
+    exit_reasons: dict[PositionSide, str]
+
+
+_CROSSOVER_MODE = _SignalMode(
+    entry_columns={PositionSide.LONG: "buy", PositionSide.SHORT: "sell"},
+    entry_reasons={
+        PositionSide.LONG: "ma crossover buy",
+        PositionSide.SHORT: "ma crossover sell",
+    },
+    exit_reasons={
+        PositionSide.LONG: "ma crossover sell",
+        PositionSide.SHORT: "ma crossover buy",
+    },
+)
+_TREND_MODE = _SignalMode(
+    entry_columns={PositionSide.LONG: "long_entry", PositionSide.SHORT: "short_entry"},
+    entry_reasons={
+        PositionSide.LONG: "trend long entry",
+        PositionSide.SHORT: "trend short entry",
+    },
+    exit_reasons={
+        PositionSide.LONG: "trend long exit",
+        PositionSide.SHORT: "trend short exit",
+    },
+)

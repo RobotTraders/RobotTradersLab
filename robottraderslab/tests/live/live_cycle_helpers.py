@@ -32,17 +32,11 @@ ETH = Symbol.create("ETH/USDT:USDT")
 
 
 def long_position(symbol: Symbol, quantity: float) -> PositionSnapshot:
-    return PositionSnapshot(
-        symbol=symbol,
-        side=PositionSide.LONG,
-        quantity=quantity,
-        average_entry_price=100.0,
-        entry_time=datetime(2024, 1, 1, tzinfo=UTC),
-        leverage=1.0,
-        liquidation_price=1.0,
-        stop_loss_price=None,
-        take_profit_price=None,
-    )
+    return _position_on(symbol, PositionSide.LONG, quantity)
+
+
+def short_position(symbol: Symbol, quantity: float) -> PositionSnapshot:
+    return _position_on(symbol, PositionSide.SHORT, quantity)
 
 
 def make_bot_folder(directory: Path, name: str) -> Path:
@@ -172,3 +166,19 @@ def messages_at(caplog: pytest.LogCaptureFixture, level: int) -> list[str]:
 
 def logged_at_or_above(caplog: pytest.LogCaptureFixture, level: int) -> list[str]:
     return [record.getMessage() for record in caplog.records if record.levelno >= level]
+
+
+def _position_on(
+    symbol: Symbol, position_side: PositionSide, quantity: float
+) -> PositionSnapshot:
+    return PositionSnapshot(
+        symbol=symbol,
+        side=position_side,
+        quantity=quantity,
+        average_entry_price=100.0,
+        entry_time=datetime(2024, 1, 1, tzinfo=UTC),
+        leverage=1.0,
+        liquidation_price=1.0,
+        stop_loss_price=None,
+        take_profit_price=None,
+    )

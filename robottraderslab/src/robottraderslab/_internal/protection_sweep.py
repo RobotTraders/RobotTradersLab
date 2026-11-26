@@ -51,8 +51,8 @@ def _sweep_account(
         for order in account_snapshot.open_orders(symbol):
             if order.kind not in PROTECTION_KINDS:
                 continue
-            logger.warning(
+            logger.info(
                 f"{symbol}: cancelling a resting {order.kind} order, "
-                f"the position it would have closed is gone"
+                f"the position it guarded is closed"
             )
             bookkeeper.add(requirement.account.cancel_order(symbol, order.order_id))

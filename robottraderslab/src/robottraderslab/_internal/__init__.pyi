@@ -1,3 +1,12 @@
+from .booked_orders import (
+    booked_items,
+    carried_orders,
+    closed_steps,
+    is_immediate,
+    is_sent_at_once,
+    rebuilt_actions,
+    without_protections,
+)
 from .chart import Candles, ChartLine, DrawdownUnit
 from .dry_run_failure import DryRunFailure, failure_of
 from .dynamic_class_loading import (
@@ -7,6 +16,7 @@ from .dynamic_class_loading import (
     registered_entry_point_name,
 )
 from .exit_codes import EX_CONFIG, EX_DATAERR, EX_TEMPFAIL
+from .exit_split import split_exits
 from .formatting import FRACTION_TO_PERCENT, format_money, format_percent, format_ratio
 from .instance_lock import drop_dead_locks, hold_instance_lock, hold_scheduler_lock
 from .logging import (
@@ -59,6 +69,13 @@ from .removed_profiles import clean_removed_profiles
 from .tool_files import mark_root, scheduler_file, tool_file, workspace_root
 from .tracked_positions import widen_tracked_positions
 from .trailing_stop import is_trailing_share, trailing_level
+from .unlisted_holdings import (
+    listing_lacks,
+    listing_lacks_among,
+    non_empty_by_account,
+    report_unlisted_holdings,
+    split_by_read,
+)
 
 __all__ = [
     "assemble_all_ohlcvs_from_requirements",
@@ -66,13 +83,16 @@ __all__ = [
     "assume_margin_targets",
     "auto_configure_notebook_logging",
     "BacktestReport",
+    "booked_items",
     "calculate_pnl_long",
     "calculate_pnl_short",
     "calculate_trade_pnl_pct",
     "CalculationMethod",
     "Candles",
+    "carried_orders",
     "ChartLine",
     "ClassLoadingError",
+    "closed_steps",
     "collect_profile_failures",
     "collecting_refusals",
     "confirm_booked_protections",
@@ -97,6 +117,8 @@ __all__ = [
     "hold_instance_lock",
     "hold_scheduler_lock",
     "hold_margin_targets",
+    "is_immediate",
+    "is_sent_at_once",
     "is_trailing_share",
     "load_class",
     "log_dropped_pair",
@@ -112,7 +134,13 @@ __all__ = [
     "OrderSettings",
     "PerformanceReport",
     "ReasonTable",
+    "rebuilt_actions",
     "registered_entry_point_name",
+    "listing_lacks",
+    "listing_lacks_among",
+    "non_empty_by_account",
+    "report_unlisted_holdings",
+    "split_by_read",
     "ReportGroup",
     "ReportRow",
     "ReportSection",
@@ -121,10 +149,12 @@ __all__ = [
     "scheduler_file",
     "settings_the_factory_does_not_take",
     "setup_notebook_logging",
+    "split_exits",
     "sweep_orphan_protections",
     "SymbolAnalysis",
     "tool_file",
     "trailing_level",
     "widen_tracked_positions",
+    "without_protections",
     "workspace_root",
 ]

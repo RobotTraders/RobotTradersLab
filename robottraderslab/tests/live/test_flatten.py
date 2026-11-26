@@ -8,7 +8,7 @@ from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 from live_bot_helpers import AN_OLD_MOMENT_NS, seed_old_copy, seeded
-from live_cycle_helpers import make_bot_folder
+from live_cycle_helpers import long_position, make_bot_folder, short_position
 
 from robottraderslab import Symbol
 from robottraderslab._internal import EX_TEMPFAIL, hold_instance_lock
@@ -23,6 +23,8 @@ from robottraderslab.exceptions import (
     BotCriticalError,
     ExchangeCriticalError,
     ExchangeRecoverableError,
+    ExchangeTransientError,
+    NoOpenPositionError,
     ProfileConfigError,
 )
 from robottraderslab.exchanges import (
@@ -31,7 +33,6 @@ from robottraderslab.exchanges import (
     OrderSide,
     PlacedOrder,
     PositionSide,
-    PositionSnapshot,
     client_order_id_carrying,
 )
 from robottraderslab.live.flatten import main
@@ -102,22 +103,6 @@ def _order(symbol: Symbol) -> Mock:
     return order
 
 
-def _position(
-    symbol: Symbol, side: PositionSide = PositionSide.LONG, quantity: float = 1.0
-) -> PositionSnapshot:
-    return PositionSnapshot(
-        symbol=symbol,
-        side=side,
-        quantity=quantity,
-        average_entry_price=100.0,
-        entry_time=datetime(2026, 1, 1, tzinfo=UTC),
-        leverage=1.0,
-        liquidation_price=10.0,
-        stop_loss_price=None,
-        take_profit_price=None,
-    )
-
-
 _plugged: dict[str, Any] = {}
 
 
@@ -180,7 +165,7 @@ def _run(config_file: Path, **overrides: Any) -> int:
 
 
 def test_cancels_happen_before_the_close_on_the_same_symbol(exchange, config_file):
-    exchange.get_open_positions.return_value = {_BTC: _position(_BTC)}
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 1.0)}
 
     _run(config_file, symbol="BTC/USDT:USDT")
 
@@ -193,9 +178,7 @@ def test_cancels_happen_before_the_close_on_the_same_symbol(exchange, config_fil
 def test_the_close_order_is_reduce_only_opposite_side_and_full_quantity(
     exchange, config_file
 ):
-    exchange.get_open_positions.return_value = {
-        _BTC: _position(_BTC, side=PositionSide.LONG, quantity=2.5)
-    }
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 2.5)}
 
     _run(config_file, symbol="BTC/USDT:USDT")
 
@@ -205,9 +188,7 @@ def test_the_close_order_is_reduce_only_opposite_side_and_full_quantity(
 
 
 def test_a_short_position_closes_with_a_buy(exchange, config_file):
-    exchange.get_open_positions.return_value = {
-        _BTC: _position(_BTC, side=PositionSide.SHORT, quantity=1.5)
-    }
+    exchange.get_open_positions.return_value = {_BTC: short_position(_BTC, 1.5)}
 
     _run(config_file, symbol="BTC/USDT:USDT")
 
@@ -217,7 +198,7 @@ def test_a_short_position_closes_with_a_buy(exchange, config_file):
 
 
 def test_the_close_carries_the_bots_id_under_the_flatten_tag(exchange, config_file):
-    exchange.get_open_positions.return_value = {_BTC: _position(_BTC)}
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 1.0)}
 
     _run(config_file, symbol="BTC/USDT:USDT")
 
@@ -254,7 +235,7 @@ def test_omitting_symbol_targets_the_union_of_orders_and_positions(
     exchange, config_file
 ):
     exchange.get_open_orders.side_effect = [[_order(_BTC)], []]
-    exchange.get_open_positions.side_effect = [{_ETH: _position(_ETH)}, {}]
+    exchange.get_open_positions.side_effect = [{_ETH: long_position(_ETH, 1.0)}, {}]
 
     exit_code = _run(config_file)
 
@@ -284,6 +265,47 @@ def test_a_recoverable_error_on_one_symbol_does_not_stop_the_others(
     assert exit_code == 1
     assert "Could not fully flatten" in caplog.text
     assert str(_BTC) in caplog.text
+
+
+def test_a_cancel_that_outlasts_its_retries_is_an_error(
+    exchange, config_file, caplog, logged_once
+):
+    exchange.get_open_orders.side_effect = [[_order(_BTC)], [_order(_BTC)]]
+    exchange.cancel_orders_for_symbol.side_effect = ExchangeTransientError("timeout")
+
+    with caplog.at_level(logging.WARNING):
+        exit_code = _run(config_file, symbol="BTC/USDT:USDT")
+
+    assert exit_code == 1
+    assert logged_once("Could not fully flatten").levelno == logging.ERROR
+
+
+def test_a_refused_close_is_an_error_saying_the_position_stays_open(
+    exchange, config_file, caplog, logged_once
+):
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 1.0)}
+    exchange.place_market_order.side_effect = ExchangeRecoverableError(
+        "25202 Insufficient balance"
+    )
+
+    with caplog.at_level(logging.INFO):
+        _run(config_file, symbol="BTC/USDT:USDT")
+
+    refusal_record = logged_once("Could not close")
+    assert refusal_record.levelno == logging.ERROR
+    assert "it stays open: 25202 Insufficient balance" in refusal_record.getMessage()
+
+
+def test_a_close_on_a_position_already_gone_is_an_info(
+    exchange, config_file, caplog, logged_once
+):
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 1.0)}
+    exchange.place_market_order.side_effect = NoOpenPositionError("No open position")
+
+    with caplog.at_level(logging.INFO):
+        _run(config_file, symbol="BTC/USDT:USDT")
+
+    assert logged_once("Nothing left to close").levelno == logging.INFO
 
 
 def test_a_critical_error_propagates(exchange, config_file):
@@ -377,12 +399,13 @@ class _FillingSimulator(SimulatedFuturesExchange):
 
 class _RefusingSimulator(_FillingSimulator):
     refused: Symbol | None = None
+    refusal_error: type[ExchangeRecoverableError] = ExchangeRecoverableError
 
     async def place_market_order(
         self, symbol: Symbol, side: OrderSide, quantity: float, **kwargs: Any
     ) -> PlacedOrder:
         if symbol == self.refused:
-            raise ExchangeRecoverableError("not enough margin")
+            raise self.refusal_error("not enough margin")
         return await super().place_market_order(symbol, side, quantity, **kwargs)
 
 
@@ -469,6 +492,10 @@ secret_name = "my_account"
 
 [live.ohlcv_provider]
 ohlcv_provider = "bitget"
+
+[live.retry]
+max_attempts = 1
+base_delay_seconds = 0
 """
 
 
@@ -635,13 +662,11 @@ async def test_a_hand_holding_the_venue_on_the_other_side_is_refused(
 
 
 async def test_a_refused_close_on_one_symbol_does_not_stop_the_others(
-    refusing_simulator, make_ma_bot, caplog
+    refusing_simulator, make_ma_bot, caplog, logged_once
 ):
     bot = make_ma_bot([(_BTC, "p1"), (_SOL, "p1")])
-    await _a_profile_fills(refusing_simulator, _BTC, OrderSide.BUY, 0.02, "p1")
-    await _a_hand_fills(refusing_simulator, _BTC, OrderSide.BUY, 0.06)
-    await _a_profile_fills(refusing_simulator, _SOL, OrderSide.BUY, 1.0, "p1")
-    await _a_hand_fills(refusing_simulator, _SOL, OrderSide.BUY, 2.0)
+    await _a_hand_joins_a_profile(refusing_simulator, _BTC, 0.02, 0.06)
+    await _a_hand_joins_a_profile(refusing_simulator, _SOL, 1.0, 2.0)
     refusing_simulator.refused = _BTC
 
     with caplog.at_level(logging.WARNING):
@@ -649,7 +674,38 @@ async def test_a_refused_close_on_one_symbol_does_not_stop_the_others(
 
     assert exit_code == 1
     assert refusing_simulator.simulation_engine.open_positions[_SOL].quantity == 1.0
-    assert "Could not close" in caplog.text
+    assert logged_once("Could not close").levelno == logging.ERROR
+
+
+@pytest.mark.parametrize(
+    ("refusal_error", "log_level", "words"),
+    [
+        (NoOpenPositionError, logging.INFO, "Nothing left to close"),
+        (
+            ExchangeTransientError,
+            logging.ERROR,
+            "after its retries, so it may still be open",
+        ),
+    ],
+)
+async def test_an_external_close_that_goes_nowhere_is_reported_at_the_level_it_owes(
+    refusing_simulator,
+    make_ma_bot,
+    caplog,
+    logged_once,
+    refusal_error,
+    log_level,
+    words,
+):
+    bot = make_ma_bot([(_BTC, "p1")])
+    await _a_hand_joins_a_profile(refusing_simulator, _BTC, 0.02, 0.06)
+    refusing_simulator.refused = _BTC
+    refusing_simulator.refusal_error = refusal_error
+
+    with caplog.at_level(logging.INFO):
+        _run_external(bot)
+
+    assert logged_once(words).levelno == log_level
 
 
 def test_another_symbols_open_order_does_not_fail_the_verdict(
@@ -689,7 +745,7 @@ _NO_LIVE_SECTION = '[strategy]\nstrategy_class = "impulse"\n'
 
 @pytest.mark.parametrize("symbol", [None, "BTC/USDT:USDT"], ids=["all", "symbol"])
 def test_flattening_leaves_the_working_copy_untouched(exchange, config_file, symbol):
-    exchange.get_open_positions.return_value = {_BTC: _position(_BTC)}
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 1.0)}
     copy = seed_old_copy(config_file.parent)
 
     _run(config_file, symbol=symbol)
@@ -718,7 +774,7 @@ async def test_the_external_flatten_leaves_the_working_copy_untouched(
 def test_an_edited_bot_toml_does_not_change_the_account_flattened(
     exchange, config_file, edited_bot_toml
 ):
-    exchange.get_open_positions.return_value = {_BTC: _position(_BTC, quantity=2.5)}
+    exchange.get_open_positions.return_value = {_BTC: long_position(_BTC, 2.5)}
     seed_old_copy(config_file.parent)
     config_file.write_text(edited_bot_toml)
 
@@ -758,3 +814,13 @@ def test_a_copy_without_a_live_section_is_refused_naming_the_copy(
 
     with pytest.raises(BotCriticalError, match=r"bot\.working\.toml.*\[live\]"):
         _run(config_file, symbol="BTC/USDT:USDT")
+
+
+async def _a_hand_joins_a_profile(
+    simulator: _FillingSimulator,
+    symbol: Symbol,
+    profile_quantity: float,
+    hand_quantity: float,
+) -> None:
+    await _a_profile_fills(simulator, symbol, OrderSide.BUY, profile_quantity, "p1")
+    await _a_hand_fills(simulator, symbol, OrderSide.BUY, hand_quantity)

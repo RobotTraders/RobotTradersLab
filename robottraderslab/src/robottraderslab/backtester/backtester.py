@@ -10,11 +10,13 @@ from robottraderslab._internal import (
     assemble_all_ohlcvs_from_requirements,
     hold_margin_targets,
     log_strategy_slots,
+    split_exits,
     sweep_orphan_protections,
     widen_tracked_positions,
 )
 from robottraderslab.bootstrap import BotConfig
 from robottraderslab.strategies import (
+    AccountSnapshots,
     BookKeeper,
     OHLCVs,
     StrategyProtocol,
@@ -117,6 +119,50 @@ class Backtester:
         self._log_backtest_summary()
         return self._build_outputs()
 
+    async def _book_actions(
+        self,
+        strategy_requirements: StrategyRequirements,
+        ohlcvs: OHLCVs,
+        account_snapshots: AccountSnapshots,
+        timeframe_snapshot: TimeframeSnapshot,
+        bookkeeper: BookKeeper,
+    ) -> None:
+        self._strategy.book_trading_actions(
+            ohlcvs,
+            account_snapshots,
+            timeframe_snapshot.timestamp,
+            bookkeeper,
+            timeframe_snapshot.triggered_timeframes,
+        )
+        sweep_orphan_protections(
+            strategy_requirements.account, account_snapshots, bookkeeper
+        )
+        await split_exits(strategy_requirements, account_snapshots, bookkeeper)
+
+    async def _prepare_account_snapshots(
+        self,
+        strategy_requirements: StrategyRequirements,
+        fills_since: datetime,
+        reported_since: datetime,
+        timeframe_snapshot: TimeframeSnapshot,
+    ) -> AccountSnapshots:
+        account_snapshots = await fetch_account_snapshots(
+            strategy_requirements.account,
+            executions_since=fills_since,
+        )
+        await hold_margin_targets(strategy_requirements.account, account_snapshots)
+        if strategy_requirements.tracker.refresh_all(
+            account_snapshots, reported_since, timeframe_snapshot.timestamp
+        ):
+            await widen_tracked_positions(
+                strategy_requirements,
+                account_snapshots,
+                executions_since=fills_since,
+                reported_since=reported_since,
+                reported_until=timeframe_snapshot.timestamp,
+            )
+        return account_snapshots
+
     async def _process_timestamp(
         self,
         requirements: StrategyRequirements,
@@ -131,33 +177,15 @@ class Backtester:
         )
 
         bookkeeper = BookKeeper()
-        account_snapshots = await fetch_account_snapshots(
-            requirements.account,
-            executions_since=fills_since,
+        account_snapshots = await self._prepare_account_snapshots(
+            requirements, fills_since, reported_since, timeframe_snapshot
         )
-        await hold_margin_targets(requirements.account, account_snapshots)
-        if requirements.tracker.refresh_all(
-            account_snapshots, reported_since, timeframe_snapshot.timestamp
-        ):
-            await widen_tracked_positions(
-                requirements,
-                account_snapshots,
-                executions_since=fills_since,
-                reported_since=reported_since,
-                reported_until=timeframe_snapshot.timestamp,
-            )
-
-        self._strategy.book_trading_actions(
-            ohlcvs,
-            account_snapshots,
-            timeframe_snapshot.timestamp,
-            bookkeeper,
-            timeframe_snapshot.triggered_timeframes,
+        await self._book_actions(
+            requirements, ohlcvs, account_snapshots, timeframe_snapshot, bookkeeper
         )
-        sweep_orphan_protections(requirements.account, account_snapshots, bookkeeper)
 
         post_execution_callbacks = await execute_trading_actions(
-            bookkeeper.list_actions()
+            bookkeeper.list_actions(), report_margin_refusals_together=True
         )
         if post_execution_callbacks:
             await _invoke_callbacks(post_execution_callbacks)
