@@ -1,56 +1,24 @@
-import asyncio
 import io
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 
 import pytest
-from impulse_helpers import write_signal_columns
+from impulse_helpers import new_exchange, run_scripted_backtest
 
 from robottraderslab import Symbol
-from robottraderslab.backtester.backtester import Backtester
 from robottraderslab.backtester.simulator import (
     CacheFillRecorder,
     FuturesSimulationEngine,
     SimulatedFuturesExchange,
 )
-from robottraderslab.ohlcv_provider import CSVOHLCVProvider
-from robottraderslab.strategies import OHLCVs, TradingMode, TradingSystem
-from robottraderslab.strategies.futures import FuturesAccount
-from robottraderslab_impulse import ImpulseStrategy
-from robottraderslab_impulse.profile_config import ProfileConfig
 
 BTC = Symbol.create("BTC/USDT:USDT")
 TIMEFRAME = "1d"
-START_DATE = "2024-01-01"
 END_DATE = "2024-01-03"
-
-
-class _ScriptedImpulse(ImpulseStrategy):
-    """Impulse strategy with long entries injected on fixed bars, bypassing TRIX."""
-
-    def __init__(self, *, entry_bars: set[int], **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._entry_bars = entry_bars
-
-    def generate_profile_signals(self, profile: ProfileConfig, ohlcvs: OHLCVs) -> None:
-        write_signal_columns(
-            ohlcvs,
-            profile.symbol,
-            profile.timeframe,
-            profile.profile_id,
-            dict.fromkeys(self._entry_bars, "long_entry"),
-        )
 
 
 @pytest.fixture
 def simulated_exchange() -> SimulatedFuturesExchange:
-    exchange = SimulatedFuturesExchange.create_from_settings(
-        initial_balance={"USDT": 10_000.0},
-        maker_fee_rate=0.0,
-        taker_fee_rate=0.0,
-        fee_mode="cost",
-    )
+    exchange = new_exchange(SimulatedFuturesExchange)
     exchange.simulation_engine.enable_execution_recording()
     return exchange
 
@@ -68,11 +36,6 @@ def simulation_engine(
 
 
 @pytest.fixture
-def account(simulated_exchange: SimulatedFuturesExchange) -> FuturesAccount:
-    return FuturesAccount(simulated_exchange)
-
-
-@pytest.fixture
 def crash_after_entry_prices() -> io.StringIO:
     return io.StringIO("""\
 date,open,high,low,close,volume
@@ -84,7 +47,11 @@ date,open,high,low,close,volume
 
 class TestStopLossBacktest:
     def test_stop_loss_fires_and_closes_net_position(
-        self, account, simulation_engine, fill_recorder, crash_after_entry_prices
+        self,
+        simulated_exchange,
+        simulation_engine,
+        fill_recorder,
+        crash_after_entry_prices,
     ):
         """A long entry's stop-loss fires when price crashes through the trigger."""
         profile = {
@@ -97,28 +64,13 @@ class TestStopLossBacktest:
             "leverage": 1.0,
             "stop_loss_pct": 0.1,
         }
-        strategy = _ScriptedImpulse(
-            account=account,
-            trading_system=TradingSystem(trading_mode=TradingMode.BACKTEST),
-            config_dir=Path("bot-config-dir"),
-            profiles=[profile],
-            entry_bars={1},
-        )
-        provider = CSVOHLCVProvider(
-            file=crash_after_entry_prices,
-            symbol=str(BTC),
-            timeframe=TIMEFRAME,
-        )
-        backtester = Backtester(
-            strategy,
-            simulation_engine,
-            provider,
-            fill_recorder,
-            START_DATE,
+        run_scripted_backtest(
+            simulated_exchange,
+            {"": {1: "long_entry"}},
+            [profile],
+            crash_after_entry_prices,
             END_DATE,
         )
-
-        asyncio.run(backtester.run())
 
         epoch = datetime(2024, 1, 1, tzinfo=timezone.utc)
         executions = simulation_engine.get_executions_since(epoch)

@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -6,12 +5,12 @@ from unittest.mock import Mock
 
 import pandas as pd
 import pytest
+from impulse_helpers import run_bot
 from robottraderslab_core.engine import name_process
 
 from robottraderslab import Symbol, TimeFrame
 from robottraderslab.exchanges import (
     Execution,
-    OHLCVProviderProtocol,
     OrderProtocol,
     OrderSide,
     OrderType,
@@ -21,7 +20,6 @@ from robottraderslab.exchanges import (
     VenueFill,
     next_client_order_id,
 )
-from robottraderslab.live.livebot import LiveBot
 from robottraderslab.strategies import OHLCVs, TradingMode, TradingSystem
 from robottraderslab.strategies.futures import FuturesAccount
 from robottraderslab_impulse import ImpulseStrategy
@@ -150,13 +148,11 @@ def strategy(exchange: Mock) -> _RecordingImpulse:
 
 
 @pytest.fixture
-def ran_cycle(
+async def ran_cycle(
     strategy: _RecordingImpulse, stop_loss: Mock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    provider = Mock(spec=OHLCVProviderProtocol)
-    provider.fetch_ohlcv.return_value = _candles()
     with caplog.at_level(logging.ERROR):
-        asyncio.run(LiveBot(strategy, provider).run())
+        await run_bot(strategy, _candles())
 
 
 def _placed_symbols(exchange: Mock) -> set[Symbol]:

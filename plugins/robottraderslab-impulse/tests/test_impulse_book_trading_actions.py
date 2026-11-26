@@ -712,8 +712,8 @@ class TestTrackerDeclaration:
         }
 
 
-class TestStopLossCancelOnFlat:
-    def test_closing_last_profile_cancels_resting_stop(self, make_strategy):
+class TestStopLossWhileTheExitIsUnfilled:
+    def test_closing_last_profile_leaves_the_resting_stop_alone(self, make_strategy):
         strategy = _loaded_strategy(make_strategy, [_sl_profile(stop_loss_pct=0.1)])
         _mark_long_open(strategy)
         state = _account_state(
@@ -730,9 +730,7 @@ class TestStopLossCancelOnFlat:
             {TIMEFRAME},
         )
 
-        cancels = _cancel_orders(bookkeeper)
-        assert len(cancels) == 1
-        assert cancels[0].order_id == "sl-1"
+        assert len(_cancel_orders(bookkeeper)) == 0
         assert len(_stop_loss_updates(bookkeeper)) == 0
 
     def test_closing_one_of_two_stacked_keeps_stop(self, make_strategy):
