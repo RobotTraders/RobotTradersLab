@@ -36,7 +36,7 @@ def wanted_entry_side(
 
 
 def wants_exit(position: TrackedPosition, profile_snapshot: ProfileSnapshot) -> bool:
-    """Report whether the held position's own side is being told to leave."""
+    """Report whether the held position's own side is closed on this candle."""
     if position.side == PositionSide.LONG:
         return profile_snapshot.long_exit
     return profile_snapshot.short_exit

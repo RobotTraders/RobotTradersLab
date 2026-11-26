@@ -1,28 +1,20 @@
-import asyncio
 import io
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import pytest
-from impulse_helpers import write_signal_columns
+from impulse_helpers import new_exchange, run_scripted_backtest
 
 from robottraderslab import Symbol
-from robottraderslab.backtester.backtester import Backtester
 from robottraderslab.backtester.simulator import (
     CacheFillRecorder,
     FuturesSimulationEngine,
     SimulatedFuturesExchange,
 )
-from robottraderslab.ohlcv_provider import CSVOHLCVProvider
-from robottraderslab.strategies import OHLCVs, PositionSide, TradingMode, TradingSystem
-from robottraderslab.strategies.futures import FuturesAccount
-from robottraderslab_impulse import ImpulseStrategy
-from robottraderslab_impulse.profile_config import ProfileConfig
+from robottraderslab.strategies import PositionSide
 
 BTC = Symbol.create("BTC/USDT:USDT")
 TIMEFRAME = "1d"
-START_DATE = "2024-01-01"
 END_DATE = "2024-01-05"
 ALPHA = "alpha"
 BETA = "beta"
@@ -33,35 +25,9 @@ type ScriptedSignals = dict[str, dict[int, str]]
 type RunBacktest = Callable[[list[dict[str, Any]], ScriptedSignals], None]
 
 
-class _ScriptedImpulse(ImpulseStrategy):
-    """Impulse strategy with signals injected on fixed candles, bypassing TRIX.
-
-    Signals are keyed by `tag` so profiles stacked on one symbol can be
-    given entry and exit candles of their own, and so disagree with each other.
-    """
-
-    def __init__(self, *, signals_by_tag: ScriptedSignals, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self._signals_by_tag = signals_by_tag
-
-    def generate_profile_signals(self, profile: ProfileConfig, ohlcvs: OHLCVs) -> None:
-        write_signal_columns(
-            ohlcvs,
-            profile.symbol,
-            profile.timeframe,
-            profile.profile_id,
-            self._signals_by_tag[profile.tag],
-        )
-
-
 @pytest.fixture
 def simulated_exchange() -> SimulatedFuturesExchange:
-    return SimulatedFuturesExchange.create_from_settings(
-        initial_balance={"USDT": 10_000.0},
-        maker_fee_rate=0.0,
-        taker_fee_rate=0.0,
-        fee_mode="cost",
-    )
+    return new_exchange(SimulatedFuturesExchange)
 
 
 @pytest.fixture
@@ -74,11 +40,6 @@ def simulation_engine(
     simulated_exchange: SimulatedFuturesExchange,
 ) -> FuturesSimulationEngine:
     return simulated_exchange.simulation_engine
-
-
-@pytest.fixture
-def account(simulated_exchange: SimulatedFuturesExchange) -> FuturesAccount:
-    return FuturesAccount(simulated_exchange)
 
 
 @pytest.fixture
@@ -96,35 +57,14 @@ date,open,high,low,close,volume
 
 @pytest.fixture
 def run_backtest(
-    account: FuturesAccount,
-    simulation_engine: FuturesSimulationEngine,
-    fill_recorder: CacheFillRecorder,
-    flat_prices: io.StringIO,
+    simulated_exchange: SimulatedFuturesExchange, flat_prices: io.StringIO
 ) -> RunBacktest:
     """Return a callable running one backtest over the scripted signals."""
 
     def _run(profiles: list[dict[str, Any]], signals_by_tag: ScriptedSignals) -> None:
-        strategy = _ScriptedImpulse(
-            account=account,
-            trading_system=TradingSystem(trading_mode=TradingMode.BACKTEST),
-            config_dir=Path("bot-config-dir"),
-            profiles=profiles,
-            signals_by_tag=signals_by_tag,
+        run_scripted_backtest(
+            simulated_exchange, signals_by_tag, profiles, flat_prices, END_DATE
         )
-        provider = CSVOHLCVProvider(
-            file=flat_prices,
-            symbol=str(BTC),
-            timeframe=TIMEFRAME,
-        )
-        backtester = Backtester(
-            strategy,
-            simulation_engine,
-            provider,
-            fill_recorder,
-            START_DATE,
-            END_DATE,
-        )
-        asyncio.run(backtester.run())
 
     return _run
 

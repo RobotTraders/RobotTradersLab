@@ -32,13 +32,14 @@ def book_position_protections(
 ) -> None:
     """Move each held position's stop-loss to its configured distance.
 
-    A symbol whose every open profile is closing this candle keeps no position
-    to protect, so its stop-loss is cancelled.
+    The distance is a fraction of the position's average entry price.
+
+    A symbol whose every open profile is closing this candle is left as it
+    stands: its stop-loss keeps guarding the position until the exit has
+    filled, and the engine removes it once the symbol reads flat.
     """
     for symbol, protection in _protections(profiles, position_tracker).items():
         if protection.profile_ids <= closing_profile_ids:
-            for order in account_snapshot.stop_loss_orders(symbol):
-                bookkeeper.add(account.cancel_order(symbol, order.order_id))
             continue
         position = account_snapshot.position(symbol)
         if position is None:
