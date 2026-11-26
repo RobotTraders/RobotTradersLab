@@ -452,6 +452,8 @@ class OrderRequest:
             for the whole sequence.
         params: Venue fields by connector name; the connector the order is
             placed on merges its own through `with_venue_params`.
+        is_exit: Whether the order closes exposure the strategy holds, which
+            decides the level a refusal of it is reported at.
     """
 
     symbol: Symbol
@@ -466,6 +468,7 @@ class OrderRequest:
     trigger_type: TriggerType = TriggerType.DEFAULT
     client_order_id: str | None = None
     params: VenueParams = NO_VENUE_PARAMS
+    is_exit: bool = False
 
 
 @dataclass(kw_only=True, frozen=True, slots=True)

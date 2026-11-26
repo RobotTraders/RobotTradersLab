@@ -135,3 +135,74 @@ class TestReplacingTheActions:
         bookkeeper._replace_actions([first])
 
         assert bookkeeper.declared_waits() == {}
+
+
+class TestFollowersOfAnAction:
+    def test_a_follower_of_an_action_booked_to_wait_on_nothing_waits_on_that_action(
+        self, bookkeeper
+    ):
+        leader = MockExchangeAction()
+        follower = MockExchangeAction()
+        bookkeeper.add(leader, after=[])
+
+        bookkeeper._replace_with_followers([leader, follower], {follower.id: leader.id})
+
+        assert bookkeeper.declared_waits() == {
+            leader.id: (),
+            follower.id: (leader.id,),
+        }
+
+    def test_a_follower_takes_the_waits_its_leader_was_booked_with(self, bookkeeper):
+        before, leader, follower = (MockExchangeAction() for _ in range(3))
+        bookkeeper.add(before)
+        bookkeeper.add(leader, after=before)
+
+        bookkeeper._replace_with_followers(
+            [before, leader, follower], {follower.id: leader.id}
+        )
+
+        assert bookkeeper.declared_waits()[follower.id] == (before.id, leader.id)
+
+    def test_a_follower_waits_for_the_followers_of_what_its_leader_waits_on(
+        self, bookkeeper
+    ):
+        first, first_follower, second, second_follower = (
+            MockExchangeAction() for _ in range(4)
+        )
+        bookkeeper.add(first)
+        bookkeeper.add(second, after=first)
+
+        bookkeeper._replace_with_followers(
+            [first, first_follower, second, second_follower],
+            {first_follower.id: first.id, second_follower.id: second.id},
+        )
+
+        assert bookkeeper.declared_waits()[second_follower.id] == (
+            first.id,
+            first_follower.id,
+            second.id,
+        )
+
+    def test_a_follower_of_an_action_booked_with_no_waits_declares_none(
+        self, bookkeeper
+    ):
+        leader, follower = MockExchangeAction(), MockExchangeAction()
+        bookkeeper.add(leader)
+
+        bookkeeper._replace_with_followers([leader, follower], {follower.id: leader.id})
+
+        assert bookkeeper.declared_waits() == {}
+
+    def test_several_followers_of_one_leader_are_all_waited_for(self, bookkeeper):
+        leader, first, second, waiting = (MockExchangeAction() for _ in range(4))
+        bookkeeper.add(leader)
+        bookkeeper.add(waiting, after=leader)
+
+        bookkeeper._replace_with_followers(
+            [leader, first, second, waiting],
+            {first.id: leader.id, second.id: leader.id},
+        )
+
+        assert bookkeeper.declared_waits() == {
+            waiting.id: (leader.id, first.id, second.id)
+        }

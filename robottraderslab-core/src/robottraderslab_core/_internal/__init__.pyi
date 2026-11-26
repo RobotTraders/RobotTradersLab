@@ -106,6 +106,7 @@ from .order import (
     TimeInForce,
     TriggerType,
     VenueParams,
+    describe_order,
     with_resting_reduce_only,
 )
 from .order_modification import modify_request
@@ -121,6 +122,7 @@ from .price import validate_price
 from .quantity import StepCount, to_quantity, to_step_count
 from .quote import Quote
 from .rate_limiting import release_lock, try_lock
+from .refusals import report_refusal
 from .retry import BASE_DELAY_SECONDS, MAX_ATTEMPTS, retry_on_transient
 from .sizing import (
     AvailableBalanceRatio,
@@ -178,6 +180,7 @@ __all__ = [
     "Currency",
     "DataError",
     "DEFAULT_FEE_MODE",
+    "describe_order",
     "DownloadError",
     "drain_tasks",
     "engine_tag_refusal",
@@ -243,6 +246,7 @@ __all__ = [
     "Quote",
     "RateLimitExceededError",
     "read_instruments",
+    "report_refusal",
     "RESTING_ENTRY_KINDS",
     "retry_on_transient",
     "run_async",

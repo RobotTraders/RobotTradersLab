@@ -12,6 +12,7 @@ from .currency import Currency
 from .exceptions import BotCriticalError
 from .margin import MarginMode, MarginSettings
 from .order import Execution, FillDescriber
+from .position import PositionSnapshot
 from .retry import BASE_DELAY_SECONDS, MAX_ATTEMPTS
 from .sizing import SizingRule, margin_currency
 from .symbol import Symbol
@@ -149,9 +150,55 @@ class AccountProtocol(NamedAccount, Protocol):
         """
         ...
 
+    def _quantity_denial(
+        self, symbol: Symbol, quantity: float, price: float | None
+    ) -> str | None:
+        """Return why the venue's rules refuse a plain order of this quantity.
+
+        Args:
+            symbol: Symbol the order trades.
+            quantity: The order's size, in the base currency.
+            price: Price the order's value is measured at; None measures only
+                the quantity step.
+
+        Returns:
+            None when the order is accepted; the refusal when the quantity is
+            under one step, whatever the price, the venue lists no contract
+            for the symbol or, given a price, the order is worth less than
+            the minimum order value.
+
+        Raises:
+            BotCriticalError: If the symbol was not declared to the account.
+        """
+        ...
+
     async def _read_instruments(self, symbols: Iterable[Symbol]) -> None:
         """Every order the account builds is held to the rules read here. A
         symbol the venue lists no contract for is held as unlisted.
+        """
+        ...
+
+    async def _read_positions(
+        self,
+        symbols: Iterable[Symbol],
+        *,
+        max_attempts: int = MAX_ATTEMPTS,
+        base_delay: float = BASE_DELAY_SECONDS,
+    ) -> dict[Symbol, PositionSnapshot]:
+        """Fetch the positions the venue holds on the symbols, in one read.
+
+        Args:
+            symbols: Symbols the read is scoped to.
+            max_attempts: Total retry attempts for transient errors.
+            base_delay: Base retry delay in seconds (doubled on each retry).
+
+        Returns:
+            The open positions by symbol; a symbol with none is absent.
+
+        Raises:
+            ExchangeRecoverableError: If the read still fails once its attempts
+                are spent.
+            ExchangeCriticalError: If the venue is unusable.
         """
         ...
 
@@ -182,9 +229,11 @@ class AccountProtocol(NamedAccount, Protocol):
         ...
 
     async def _unlisted_among(self, symbols: Iterable[Symbol]) -> frozenset[Symbol]:
-        """A delisting settles every position on its contract, so a symbol
-        returned here has no position left to account for and no fill still
-        to arrive.
+        """The symbols among those given that the venue's listing lacks.
+
+        A delisting settles every position on its contract and no fill of it
+        arrives afterwards, yet the listing says nothing of what the account
+        still holds on the symbol: its position read does.
 
         Args:
             symbols: Symbols to test against the venue's listing.
@@ -406,6 +455,26 @@ class AccountRequirements:
             for halt in requirement.account._halts(requirement.symbols)
         ]
 
+    def _reading_holdings_of(
+        self, symbols_by_account: Mapping[AccountProtocol, Collection[Symbol]]
+    ) -> "AccountRequirements":
+        """A copy to read the holdings of the symbols with, and nothing else.
+
+        Each account among the keys is asked for its positions and its open
+        orders, trigger entries included, on its own symbols alone. The
+        declaration it copies is left as the strategy made it.
+
+        Args:
+            symbols_by_account: The symbols whose holdings are read, by account.
+        """
+        return _declaring(
+            [
+                _reading_holdings(requirement, symbols_by_account[requirement.account])
+                for requirement in self._requirements
+                if requirement.account in symbols_by_account
+            ]
+        )
+
     def _widened_for_exit_only(
         self,
         exit_only_symbols: frozenset[Symbol],
@@ -424,17 +493,17 @@ class AccountRequirements:
         """
         if not exit_only_symbols and not halted:
             return self
-        widened = AccountRequirements()
-        widened._requirements = [
-            (
-                _reading_for_exit_only(requirement)
-                if requirement.account in halted
-                or not exit_only_symbols.isdisjoint(requirement.symbols)
-                else requirement
-            )
-            for requirement in self._requirements
-        ]
-        return widened
+        return _declaring(
+            [
+                (
+                    _reading_for_exit_only(requirement)
+                    if requirement.account in halted
+                    or not exit_only_symbols.isdisjoint(requirement.symbols)
+                    else requirement
+                )
+                for requirement in self._requirements
+            ]
+        )
 
     def _require_executions(self, account_name: str) -> None:
         """A tracker may be declared before or after its account."""
@@ -531,6 +600,26 @@ def _reading_positions(
 
 def _reading_executions(requirement: AccountRequirement) -> AccountRequirement:
     return replace(requirement, executions=True)
+
+
+def _declaring(requirement_list: list[AccountRequirement]) -> AccountRequirements:
+    declared = AccountRequirements()
+    declared._requirements = requirement_list
+    return declared
+
+
+def _reading_holdings(
+    requirement: AccountRequirement, symbols: Collection[Symbol]
+) -> AccountRequirement:
+    return replace(
+        _reading_for_exit_only(requirement),
+        symbols=tuple(sorted(symbols)),
+        balances=False,
+        margin_settings=False,
+        margin_targets=_NO_MARGIN_TARGETS,
+        executions=False,
+        equity=(),
+    )
 
 
 def _reading_for_exit_only(requirement: AccountRequirement) -> AccountRequirement:

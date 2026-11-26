@@ -284,6 +284,9 @@ class AccountSnapshot:
         """
         self._declared(self._margin_settings, "margin_settings=True")[symbol] = settings
 
+    def _positions_if_read(self) -> dict[Symbol, PositionSnapshot] | None:
+        return self._positions
+
     def _raw_fills_of_kind(self, kind: OrderType, symbol: Symbol) -> list[Execution]:
         return [
             execution
@@ -346,7 +349,7 @@ class AccountSnapshots:
         Raises:
             BotCriticalError: If the account declared no state to snapshot.
         """
-        snapshot = self._by_account_name.get(account.name)
+        snapshot = self._snapshot_of(account)
         if snapshot is None:
             raise BotCriticalError(
                 f"No account state was declared for account '{account.name}'; "
@@ -356,7 +359,23 @@ class AccountSnapshots:
 
     def _effects_by_execution_id(self, account: NamedAccount) -> dict[str, FillEffect]:
         """An account may report fills without declaring state to snapshot."""
-        snapshot = self._by_account_name.get(account.name)
+        snapshot = self._snapshot_of(account)
         if snapshot is None:
             return {}
         return snapshot._effects_by_execution_id()
+
+    def _positions_of(
+        self, account: NamedAccount
+    ) -> dict[Symbol, PositionSnapshot] | None:
+        """Return the positions read for the account, None when none were.
+
+        None answers an account that declared no state to snapshot and one that
+        declared no positions, where `of(account).position(symbol)` raises.
+        """
+        snapshot = self._snapshot_of(account)
+        if snapshot is None:
+            return None
+        return snapshot._positions_if_read()
+
+    def _snapshot_of(self, account: NamedAccount) -> AccountSnapshot | None:
+        return self._by_account_name.get(account.name)

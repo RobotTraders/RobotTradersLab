@@ -138,7 +138,7 @@ class ExchangePositionTracker:
         return bool(self._unanchored)
 
     def settle_unlisted(self, symbol: Symbol) -> None:
-        """Settle a symbol the venue delisted.
+        """Settle a symbol the venue's listing lacks and the account holds no position on.
 
         A delisting settles every position on the contract and no fill of it
         arrives afterwards, so the profiles on the symbol hold nothing
@@ -146,7 +146,8 @@ class ExchangePositionTracker:
         symbol settled, so it stays unanchored.
 
         Args:
-            symbol: A symbol the tracker was declared on.
+            symbol: A symbol the tracker was declared on, which the account's
+                position read shows no position on.
 
         Raises:
             KeyError: If the tracker was not declared on the symbol.
@@ -186,8 +187,8 @@ class ExchangePositionTracker:
                 `requirements.account.add`).
             executions: The executions of the longer read, whatever symbol,
                 from which each widened symbol takes its own.
-            symbols: The unanchored symbols whose position a delisting has not
-                settled, each one the tracker was declared on.
+            symbols: The unanchored symbols the venue still lists, each one the
+                tracker was declared on.
             read_since: Where that read starts, which is what a position
                 still unattributed after it was opened before.
             reported_since: See `refresh`.

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
+from contextlib import nullcontext
 
 from ..exceptions import ExchangeRecoverableError, ExchangeTransientError
 from ..notifications import OnOrderFilled, OnOrderPlaced
@@ -11,6 +12,7 @@ from ..order import (
     PlacedOrder,
     VenueFill,
 )
+from ..refusals import collecting_margin_refusals, report_refusal, subject_of
 from ..retry import (
     BASE_DELAY_SECONDS,
     MAX_ATTEMPTS,
@@ -30,6 +32,7 @@ async def execute_trading_actions(
     max_attempts: int = MAX_ATTEMPTS,
     base_delay: float = BASE_DELAY_SECONDS,
     declared_waits: Mapping[ActionID, tuple[ActionID, ...]] | None = None,
+    report_margin_refusals_together: bool = False,
 ) -> list[Callable[[], Awaitable[None]]]:
     """Each action starts once the actions it must follow have finished, so
     actions that do not follow each other run at the same time. An action
@@ -42,6 +45,9 @@ async def execute_trading_actions(
         base_delay: Base delay in seconds (doubled on each retry).
         declared_waits: What each action waits for, as booked with `after`.
             Actions missing from it wait for everything booked before them.
+        report_margin_refusals_together: Whether the entries the venue refuses
+            for lack of margin are reported together in one WARNING at the end
+            of the call; when False each is its own WARNING.
 
     Returns:
         Async callbacks to fire after all actions are executed.
@@ -53,18 +59,27 @@ async def execute_trading_actions(
     """
     execution_callbacks = list(on_order_filled)
     placement_callbacks = list(on_order_placed)
-    if not declared_waits:
-        return await _execute_in_order(
-            actions, execution_callbacks, placement_callbacks, max_attempts, base_delay
+    with (
+        collecting_margin_refusals()
+        if report_margin_refusals_together
+        else nullcontext()
+    ):
+        if not declared_waits:
+            return await _execute_in_order(
+                actions,
+                execution_callbacks,
+                placement_callbacks,
+                max_attempts,
+                base_delay,
+            )
+        return await _execute_when_ready(
+            actions,
+            declared_waits,
+            execution_callbacks,
+            placement_callbacks,
+            max_attempts,
+            base_delay,
         )
-    return await _execute_when_ready(
-        actions,
-        declared_waits,
-        execution_callbacks,
-        placement_callbacks,
-        max_attempts,
-        base_delay,
-    )
 
 
 async def execute_setting(
@@ -178,18 +193,28 @@ async def _attempt(
         )
     except ExchangeTransientError as e:
         logger.error(
-            f"{type(action).__name__} ({action.symbol}) skipped after "
+            f"{type(action).__name__} ({_market_or_exit_profile(action)}) skipped after "
             f"{max_attempts} attempts: {e}"
         )
     except ExchangeRecoverableError as e:
-        logger.warning(
-            f"Exchange rejected {type(action).__name__} ({action.symbol}): {e}"
+        report_refusal(
+            action.symbol,
+            action.tag,
+            e,
+            is_exit=action.is_exit,
+            what=type(action).__name__,
         )
     except Exception as e:
         logger.error(
-            f"Internal error in {type(action).__name__} ({action.symbol}): {e}"
+            f"Internal error in {type(action).__name__} ({_market_or_exit_profile(action)}): {e}"
         )
     return None
+
+
+def _market_or_exit_profile(action: BaseExchangeAction) -> str:
+    if action.is_exit:
+        return subject_of(action.symbol, action.tag)
+    return str(action.symbol)
 
 
 def _as_order_fill(fill: VenueFill, placement: OrderPlacement) -> OrderFill:

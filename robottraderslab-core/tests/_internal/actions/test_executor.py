@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from robottraderslab_core.exceptions import (
     ExchangeCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
+    InsufficientMarginError,
 )
 from robottraderslab_core.exchanges import (
     FuturesExchangeProtocol,
@@ -171,6 +173,140 @@ async def test_rejection_log_names_action_and_symbol(caplog):
     assert rejection.getMessage() == (
         "Exchange rejected FuturesMarketOrderAction (BTC/USDT): Insufficient balance"
     )
+
+
+def exchange_answering(*answers: object) -> Mock:
+    mock_exchange = Mock(spec=FuturesExchangeProtocol)
+    mock_exchange.place_market_order = AsyncMock(
+        spec=FuturesExchangeProtocol.place_market_order, side_effect=list(answers)
+    )
+    return mock_exchange
+
+
+def an_exit(mock_exchange: Mock) -> FuturesMarketOrderAction:
+    return FuturesMarketOrderAction(
+        exchange=mock_exchange,
+        symbol="ETH/USDT:USDT",
+        side=OrderSide.SELL,
+        quantity=0.04,
+        tag="4h",
+        is_exit=True,
+    )
+
+
+def an_entry(
+    mock_exchange: Mock, symbol: str, tag: str | None = None
+) -> FuturesMarketOrderAction:
+    return FuturesMarketOrderAction(
+        exchange=mock_exchange,
+        symbol=symbol,
+        side=OrderSide.BUY,
+        quantity=1.0,
+        tag=tag,
+    )
+
+
+def two_entries_refused_for_margin() -> list[FuturesMarketOrderAction]:
+    mock_exchange = exchange_answering(
+        InsufficientMarginError("25202"), InsufficientMarginError("25202")
+    )
+    return [an_entry(mock_exchange, "ETH/USDT:USDT") for _ in range(2)]
+
+
+async def run_an_exit(mock_exchange: Mock, **options: Any) -> None:
+    await execute_trading_actions([an_exit(mock_exchange)], **options)
+
+
+async def test_a_refused_exit_is_an_error_naming_symbol_profile_and_answer(caplog):
+    mock_exchange = exchange_answering(
+        ExchangeRecoverableError("25202 Insufficient balance")
+    )
+
+    with caplog.at_level(logging.INFO):
+        await run_an_exit(mock_exchange)
+
+    (record,) = caplog.records
+    assert record.levelno == logging.ERROR
+    assert "profile ETH/USDT:USDT@4h" in record.getMessage()
+    assert "25202 Insufficient balance" in record.getMessage()
+
+
+async def test_an_exit_that_outlasts_its_attempts_names_its_profile(caplog):
+    mock_exchange = exchange_answering(ExchangeTransientError("timeout"))
+
+    with caplog.at_level(logging.ERROR):
+        await run_an_exit(mock_exchange, max_attempts=1, base_delay=0)
+
+    assert "(ETH/USDT:USDT, profile ETH/USDT:USDT@4h) skipped" in caplog.text
+
+
+async def test_an_exit_with_an_internal_error_names_its_profile(caplog):
+    mock_exchange = exchange_answering(ValueError("boom"))
+
+    with caplog.at_level(logging.ERROR):
+        await run_an_exit(mock_exchange)
+
+    assert (
+        "Internal error in FuturesMarketOrderAction "
+        "(ETH/USDT:USDT, profile ETH/USDT:USDT@4h): boom"
+    ) in caplog.text
+
+
+async def test_entries_refused_for_margin_are_one_warning_and_the_others_go_through(
+    caplog,
+):
+    mock_exchange = exchange_answering(
+        InsufficientMarginError("25202 Insufficient balance"),
+        PlacedOrder(order_id="accepted"),
+        InsufficientMarginError("25202 Insufficient balance"),
+    )
+    entries = [
+        an_entry(mock_exchange, symbol, "4h-fast")
+        for symbol in ("ETH/USDT:USDT", "BTC/USDT:USDT", "HYPE/USDT:USDT")
+    ]
+
+    with caplog.at_level(logging.INFO):
+        post_execution_callbacks = await execute_trading_actions(
+            entries, report_margin_refusals_together=True
+        )
+
+    assert len(post_execution_callbacks) == 1
+    (record,) = caplog.records
+    assert record.levelno == logging.WARNING
+    assert "2 not placed (ETH/USDT:USDT@4h-fast, HYPE/USDT:USDT@4h-fast)" in (
+        record.getMessage()
+    )
+
+
+async def test_entries_refused_for_margin_are_one_line_each_unless_asked_to_join(
+    caplog,
+):
+    entries = two_entries_refused_for_margin()
+
+    with caplog.at_level(logging.INFO):
+        await execute_trading_actions(entries)
+
+    assert [record.levelno for record in caplog.records] == [
+        logging.WARNING,
+        logging.WARNING,
+    ]
+    assert "fully committed" not in caplog.text
+
+
+async def test_entries_refused_for_margin_are_one_warning_when_actions_wait_on_others(
+    caplog,
+):
+    first, second = two_entries_refused_for_margin()
+
+    with caplog.at_level(logging.INFO):
+        await execute_trading_actions(
+            [first, second],
+            declared_waits={first.id: (), second.id: (first.id,)},
+            report_margin_refusals_together=True,
+        )
+
+    assert len(caplog.records) == 1
+    assert "2 not placed" in caplog.text
 
 
 async def test_continues_execution_on_exchange_warning_error():

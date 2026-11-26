@@ -8,6 +8,9 @@ from robottraderslab_core._internal import (
     OrderRequest,
     PlacedOrder,
     Symbol,
+    describe_order,
+    report_refusal,
+    tag_of,
     with_resting_reduce_only,
 )
 from robottraderslab_core.exceptions import (
@@ -22,6 +25,30 @@ from .futures_exchange_protocol import FuturesExchangeProtocol
 logger = logging.getLogger(__name__)
 
 
+def report_order_refusal(
+    request: OrderRequest, error: ExchangeRecoverableError
+) -> None:
+    """Report a refusal of one order of a batch at the level it owes.
+
+    A refused exit is an ERROR, an answer that no position is held is an INFO,
+    an entry refused for lack of margin joins the cycle's single line when its
+    call reports margin refusals together and is its own WARNING otherwise,
+    and any other refusal is a WARNING.
+
+    Args:
+        request: The order the venue refused; its client order id's tag names
+            the profile and `is_exit` says whether it closes exposure.
+        error: The venue's answer.
+    """
+    report_refusal(
+        request.symbol,
+        tag_of(request.client_order_id),
+        error,
+        is_exit=request.is_exit,
+        what=_described(request),
+    )
+
+
 async def place_overlapped(
     venue: FuturesExchangeProtocol, requests: Sequence[OrderRequest]
 ) -> list[PlacedOrder | None]:
@@ -32,7 +59,7 @@ async def place_overlapped(
         the venue rejected that request.
     """
     outcomes = await _overlapped(_place_one(venue, request) for request in requests)
-    return _collect_placed([request.symbol for request in requests], outcomes)
+    return _collect_placed(requests, outcomes)
 
 
 async def place_in_order(
@@ -45,7 +72,7 @@ async def place_in_order(
         the venue rejected that request.
     """
     outcomes = await _in_order(_place_one(venue, request) for request in requests)
-    return _collect_placed([request.symbol for request in requests], outcomes)
+    return _collect_placed(requests, outcomes)
 
 
 async def modify_overlapped(
@@ -61,7 +88,7 @@ async def modify_overlapped(
     outcomes = await _overlapped(
         _modify_one(venue, request, resting) for request in requests
     )
-    return _collect_placed([request.order.symbol for request in requests], outcomes)
+    return _collect_modified(requests, outcomes)
 
 
 async def modify_in_order(
@@ -77,7 +104,7 @@ async def modify_in_order(
     outcomes = await _in_order(
         _modify_one(venue, request, resting) for request in requests
     )
-    return _collect_placed([request.order.symbol for request in requests], outcomes)
+    return _collect_modified(requests, outcomes)
 
 
 async def cancel_overlapped(
@@ -94,6 +121,18 @@ async def cancel_overlapped(
     )
     for outcome in outcomes:
         _accepted(symbol, outcome, "Cancel")
+
+
+def replacement_orders(requests: Iterable[OrderModifyRequest]) -> list[OrderRequest]:
+    """Return the replacement each modification request asks the venue to place."""
+    return [request.order for request in requests]
+
+
+def _described(request: OrderRequest) -> str:
+    described = describe_order(request)
+    if request.is_exit:
+        return f"{described}, part of an exit"
+    return described
 
 
 async def _overlapped[T](calls: Iterable[Awaitable[T]]) -> list[T | BaseException]:
@@ -121,13 +160,28 @@ async def _resting_orders(
 
 
 def _collect_placed(
-    symbols: Sequence[Symbol],
+    requests: Sequence[OrderRequest],
     outcomes: Sequence[PlacedOrder | None | BaseException],
 ) -> list[PlacedOrder | None]:
-    return [
-        _accepted(symbol, outcome, "Order")
-        for symbol, outcome in zip(symbols, outcomes)
-    ]
+    return [_placed(request, outcome) for request, outcome in zip(requests, outcomes)]
+
+
+def _collect_modified(
+    requests: Sequence[OrderModifyRequest],
+    outcomes: Sequence[PlacedOrder | None | BaseException],
+) -> list[PlacedOrder | None]:
+    return _collect_placed(replacement_orders(requests), outcomes)
+
+
+def _placed(
+    request: OrderRequest, outcome: PlacedOrder | None | BaseException
+) -> PlacedOrder | None:
+    if isinstance(outcome, ExchangeRecoverableError) and not isinstance(
+        outcome, ExchangeTransientError
+    ):
+        report_order_refusal(request, outcome)
+        return None
+    return _accepted(request.symbol, outcome, "Order")
 
 
 def _accepted[T](symbol: Symbol, outcome: T | BaseException, request: str) -> T | None:
