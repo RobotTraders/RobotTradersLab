@@ -50,6 +50,17 @@ class NoOpenPositionError(ExchangeRecoverableError):
     pass
 
 
+class InsufficientMarginError(ExchangeRecoverableError):
+    """The venue refused an order for lack of free margin.
+
+    On an account whose profiles claim more than its balance this is an
+    expected outcome, so the engine reports the entries it refuses once a
+    cycle.
+    """
+
+    pass
+
+
 class ExchangeCriticalError(BaseException):
     """The venue is unusable, so trading stops until someone intervenes.
 

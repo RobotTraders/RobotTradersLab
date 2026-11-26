@@ -67,6 +67,7 @@ _MODULE_BY_NAME = {
     "process_bot_bytes": "robottraderslab_core._internal.actions.members",
     "replace_trailing_stops": "robottraderslab_core.futures.futures_trailing_stop",
     "replace_trailing_stops_with": "robottraderslab_core.futures.futures_trailing_stop",
+    "report_order_refusal": "robottraderslab_core.futures.futures_batching",
     "reported_trigger_type": "robottraderslab_core._internal.order",
     "retry_on_transient": "robottraderslab_core._internal.retry",
     "tag_of": "robottraderslab_core._internal.actions.members",

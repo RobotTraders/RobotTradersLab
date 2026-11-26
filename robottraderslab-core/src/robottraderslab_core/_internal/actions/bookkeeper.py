@@ -1,4 +1,5 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from itertools import chain
 
 from .exceptions import ActionAlreadyExistsError, ActionNotFoundError
 from .members import ActionBuilder, ActionID, BaseExchangeAction, finished
@@ -76,6 +77,27 @@ class BookKeeper:
             if action_id in held
         }
 
+    def _replace_with_followers(
+        self,
+        actions: Iterable[BaseExchangeAction],
+        followers: Mapping[ActionID, ActionID],
+    ) -> None:
+        """Replace the actions, then order each follower after its leader.
+
+        The actions are replaced as `_replace_actions` does. A follower runs
+        after the action it follows and after what that action was booked to
+        wait on, its own followers included, when it was booked to wait on
+        anything, and every action booked to wait on the one followed waits
+        for its followers as well.
+
+        Args:
+            actions: Every action to run, in the sequence to run them.
+            followers: Each action of `actions` that stands for part of the work
+                of another, by the id of that other action.
+        """
+        self._replace_actions(actions)
+        self._waits_for = _with_followers(self._waits_for, followers)
+
 
 def _ids_of(
     after: BaseExchangeAction | Iterable[BaseExchangeAction],
@@ -83,3 +105,26 @@ def _ids_of(
     if isinstance(after, BaseExchangeAction):
         return (after.id,)
     return tuple(action.id for action in after)
+
+
+def _with_followers(
+    waits: dict[ActionID, tuple[ActionID, ...]],
+    followers: Mapping[ActionID, ActionID],
+) -> dict[ActionID, tuple[ActionID, ...]]:
+    followed: dict[ActionID, list[ActionID]] = {}
+    for follower, leader in followers.items():
+        followed.setdefault(leader, []).append(follower)
+    with_followers = {
+        action_id: (*awaited, *_followers_of(awaited, followed))
+        for action_id, awaited in waits.items()
+    }
+    for follower, leader in followers.items():
+        if leader in waits:
+            with_followers[follower] = (*with_followers[leader], leader)
+    return with_followers
+
+
+def _followers_of(
+    awaited: Iterable[ActionID], followed: Mapping[ActionID, list[ActionID]]
+) -> tuple[ActionID, ...]:
+    return tuple(chain.from_iterable(followed.get(wait, ()) for wait in awaited))

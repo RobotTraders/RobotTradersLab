@@ -30,11 +30,14 @@ class BaseExchangeAction:
             the resulting order as its own and reads it back with `tag_of`;
             None for an unlabelled order, whose client order id carries no
             tag.
+        is_exit: Whether the action closes exposure the strategy holds, so a
+            refusal of it leaves that exposure open.
     """
 
     id: ActionID = field(init=False, default_factory=_next_action_id)
     symbol: Symbol
     tag: str | None = None
+    is_exit: bool = False
 
     @property
     def client_order_id(self) -> str:

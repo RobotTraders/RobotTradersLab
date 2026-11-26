@@ -37,11 +37,15 @@ class ClosePositionAction(BaseExchangeAction):
     to trade.
 
     Attributes:
+        is_exit: Whether the close counts as an exit of the strategy's position,
+            so that a refusal is reported as a refused exit; a close the engine
+            makes for no profile sets it False.
         limit_price: Price the order rests at; unset, it goes at market.
     """
 
     exchange: FuturesExchangeProtocol
     symbol: Symbol
+    is_exit: bool = True
     closing_ratio: float = 1.0
     limit_price: float | None = None
     time_in_force: TimeInForce = TimeInForce.GTC

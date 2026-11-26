@@ -1,5 +1,6 @@
 import asyncio
-from unittest.mock import AsyncMock
+import logging
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -8,16 +9,22 @@ from robottraderslab_core.exceptions import (
     ExchangeCriticalError,
     ExchangeRecoverableError,
     ExchangeTransientError,
+    InsufficientMarginError,
 )
 from robottraderslab_core.exchanges import (
     FuturesExchangeBase,
     FuturesExchangeProtocol,
+    OrderModifyRequest,
+    OrderProtocol,
     OrderRequest,
     OrderSide,
     PlacedOrder,
 )
 from robottraderslab_core.futures import place_in_order
-from robottraderslab_core.futures.futures_batching import place_overlapped
+from robottraderslab_core.futures.futures_batching import (
+    modify_overlapped,
+    place_overlapped,
+)
 
 BTC_USDT = Symbol.create("BTC/USDT:USDT")
 
@@ -118,3 +125,85 @@ class TestBatchWaiting:
             await place_overlapped(venue, self._requests())
 
         assert answered == [2.0]
+
+
+class TestARefusedOrderOfABatch:
+    async def test_an_exit_is_an_error_naming_the_profile(self, caplog):
+        venue = self._venue_refusing(
+            ExchangeRecoverableError("25202 Insufficient balance")
+        )
+
+        with caplog.at_level(logging.INFO):
+            placed = await self._place(venue, is_exit=True)
+
+        assert placed == [None]
+        assert [(record.levelno, record.getMessage()) for record in caplog.records] == [
+            (
+                logging.ERROR,
+                "Exit refused, the strategy's position is not closed: BTC/USDT:USDT, "
+                "profile BTC/USDT:USDT@4h-fast, short market entry, part of an exit: "
+                "25202 Insufficient balance",
+            )
+        ]
+
+    async def test_an_exit_refused_when_a_resting_order_is_replaced_is_an_error(
+        self, caplog
+    ):
+        resting = Mock(spec=OrderProtocol)
+        resting.order_id = "o1"
+        resting.reduce_only = None
+        venue = self._venue_refusing(ExchangeRecoverableError("refused"))
+        venue.get_open_orders = AsyncMock(  # type: ignore[method-assign]
+            spec=FuturesExchangeProtocol.get_open_orders, return_value=[resting]
+        )
+        venue.cancel_order_by_id = AsyncMock(  # type: ignore[method-assign]
+            spec=FuturesExchangeProtocol.cancel_order_by_id
+        )
+        replacement = OrderModifyRequest(
+            order_id="o1", order=self._order_request(is_exit=True)
+        )
+
+        with caplog.at_level(logging.INFO):
+            placed = await modify_overlapped(venue, [replacement])
+
+        assert placed == [None]
+        assert [record.levelno for record in caplog.records] == [logging.ERROR]
+
+    async def test_an_entry_refused_for_margin_is_a_warning(self, caplog):
+        venue = self._venue_refusing(
+            InsufficientMarginError("25202 Insufficient balance")
+        )
+
+        with caplog.at_level(logging.INFO):
+            await self._place(venue, is_exit=False)
+
+        assert [record.levelno for record in caplog.records] == [logging.WARNING]
+
+    async def test_a_transient_answer_is_raised_and_never_reported(self, caplog):
+        venue = self._venue_refusing(ExchangeTransientError("timeout"))
+
+        with caplog.at_level(logging.INFO), pytest.raises(ExchangeTransientError):
+            await self._place(venue, is_exit=True)
+
+        assert caplog.records == []
+
+    def _order_request(self, *, is_exit: bool) -> OrderRequest:
+        return OrderRequest(
+            symbol=BTC_USDT,
+            side=OrderSide.SELL,
+            quantity=1.0,
+            client_order_id="bot0launch-3-4h-fast",
+            is_exit=is_exit,
+        )
+
+    async def _place(
+        self, venue: FuturesExchangeBase, *, is_exit: bool
+    ) -> list[PlacedOrder | None]:
+        return await place_overlapped(venue, [self._order_request(is_exit=is_exit)])
+
+    def _venue_refusing(self, error: ExchangeRecoverableError) -> FuturesExchangeBase:
+        venue = FuturesExchangeBase.__new__(FuturesExchangeBase)
+        venue.place_market_order = AsyncMock(  # type: ignore[method-assign]
+            spec=FuturesExchangeProtocol.place_market_order, side_effect=error
+        )
+        return venue

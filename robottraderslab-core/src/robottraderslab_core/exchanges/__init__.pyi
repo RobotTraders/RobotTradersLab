@@ -82,6 +82,7 @@ from robottraderslab_core.futures import (
     FuturesExchangeBase,
     FuturesExchangeProtocol,
 )
+from robottraderslab_core.futures.futures_batching import report_order_refusal
 from robottraderslab_core.futures.futures_trailing_stop import (
     replace_trailing_stops,
     replace_trailing_stops_with,
@@ -155,6 +156,7 @@ __all__ = [
     "process_bot_bytes",
     "replace_trailing_stops",
     "replace_trailing_stops_with",
+    "report_order_refusal",
     "reported_trigger_type",
     "retry_on_transient",
     "tag_of",
